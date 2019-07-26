@@ -64,34 +64,34 @@ public:
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
-        conn->setContext(Connection(&_db));
+        conn->setContext(Context(&_db));
     }
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
-        auto& client = std::any_cast<Connection&>(conn->getContext());
+        auto& client = std::any_cast<Context&>(conn->getContext());
         // std::cout << buf.c_str();
         while (true) {
             switch (client.flag()) {
-            case Connection::PARSING:
+            case Context::PARSING:
                 parseRequest(client, buf);
-                if (client.flag() == Connection::PARSING)
+                if (client.flag() == Context::PARSING)
                     return;
                 break;
-            case Connection::PROTOCOLERR: 
+            case Context::PROTOCOLERR: 
                 conn->close(); 
                 return;
-            case Connection::SUCCEED: 
+            case Context::SUCCEED: 
                 executeCommand(client); 
                 break;
-            case Connection::REPLY: 
+            case Context::REPLY: 
                 replyResponse(conn); 
                 return;
             }
         }
     }
     void serverCron();
-    void parseRequest(Connection& conn, Angel::Buffer& buf);
-    void executeCommand(Connection& conn);
+    void parseRequest(Context& con, Angel::Buffer& buf);
+    void executeCommand(Context& con);
     void replyResponse(const Angel::TcpConnectionPtr& conn);
     void execError(const Angel::TcpConnectionPtr& conn);
     void start() { _server.start(); }

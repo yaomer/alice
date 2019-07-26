@@ -48,6 +48,17 @@ void Client::send()
     _message.clear();
 }
 
+namespace Alice {
+
+    thread_local char convert_buf[32];
+
+    const char *convert(int64_t value)
+    {
+        snprintf(convert_buf, sizeof(convert_buf), "%lld", value);
+        return convert_buf;
+    }
+}
+
 void Client::parseResponse(Angel::Buffer& buf)
 {
     const char *s = buf.peek();
@@ -77,7 +88,10 @@ void Client::parseResponse(Angel::Buffer& buf)
         if (next - s != len) return;
         answer.assign(s, len);
         buf.retrieve(next + 2 - ps);
-        std::cout << answer << "\n";
+        if (answer.compare("(nil)"))
+            std::cout << "\"" << answer << "\"\n";
+        else
+            std::cout << answer << "\n";
         break;
     }
     case '*': {
@@ -89,6 +103,7 @@ void Client::parseResponse(Angel::Buffer& buf)
         size_t len = atoi(s);
         if (len == 0) return;
         s = next + 2;
+        int i = 1;
         while (len > 0) {
             if (s[0] != '$') break;
             next = std::find(s, es, '\r');
@@ -100,13 +115,16 @@ void Client::parseResponse(Angel::Buffer& buf)
             next = std::find(s, es, '\r');
             if (next == es) return;
             if (next - s != l) return;
+            answer.append(convert(i));
+            answer.append(") \"");
             answer.append(std::string(s, l));
-            answer.append(" ");
+            answer.append("\"\n");
             s = next + 2;
             len--;
+            i++;
         }
         if (len == 0) {
-            std::cout << answer << "\n";
+            std::cout << answer;
             buf.retrieve(next + 2 - ps);
         }
         break;
