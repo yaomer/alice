@@ -7,7 +7,7 @@
 using namespace Alice;
 
 // *1\r\n$8\r\njkjljljl\r\n
-void Server::parseRequest(Connection& conn, Angel::Buffer& buf)
+void Server::parseRequest(Context& con, Angel::Buffer& buf)
 {
     const char *s = buf.peek();
     const char *es = s + buf.readable();
@@ -38,31 +38,33 @@ void Server::parseRequest(Connection& conn, Angel::Buffer& buf)
         if (next[0] != '\r' || next[1] != '\n' || next - s != len) {
             goto err;
         }
-        conn.addArg(s, next);
+        con.addArg(s, next);
         s = next + 2;
         argc--;
     }
     buf.retrieve(s - ps);
-    conn.setFlag(Connection::SUCCEED);
+    con.setFlag(Context::SUCCEED);
     return;
 err:
-    conn.setFlag(Connection::PROTOCOLERR);
+    con.setFlag(Context::PROTOCOLERR);
 }
 
-void Server::executeCommand(Connection& conn)
+void Server::executeCommand(Context& con)
 {
-    auto& cmdlist = conn.commandList();
+    int arity;
+    auto& cmdlist = con.commandList();
     // for (auto& xx : cmdlist)
         // std::cout << xx << " ";
     // std::cout << "\n";
     std::transform(cmdlist[0].begin(), cmdlist[0].end(), cmdlist[0].begin(), ::toupper);
     auto it = _db.db().commandMap().find(cmdlist[0]);
     if (it == _db.db().commandMap().end()) {
-        conn.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
+        con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
         goto err;
     }
-    if (cmdlist.size() < -it->second.arity()) {
-        conn.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
+    arity = it->second.arity();
+    if ((arity > 0 && cmdlist.size() < arity) || (arity < 0 && cmdlist.size() != -arity)) {
+        con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
     if (cmdlist.size() > 1) {
@@ -70,19 +72,19 @@ void Server::executeCommand(Connection& conn)
         if (it != _db.db().hashMap().end())
             it->second.setLru(_lru_cache);
     }
-    it->second._commandCb(conn);
+    it->second._commandCb(con);
 err:
-    conn.setFlag(Connection::REPLY);
+    con.setFlag(Context::REPLY);
     cmdlist.clear();
 }
 
 void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
 {
-    auto& client = std::any_cast<Connection&>(conn->getContext());
+    auto& client = std::any_cast<Context&>(conn->getContext());
     conn->send(client.message());
     // std::cout << client.message();
     client.message().clear();
-    client.setFlag(Connection::PARSING);
+    client.setFlag(Context::PARSING);
 }
 
 namespace Alice {

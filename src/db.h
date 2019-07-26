@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <string>
 #include <functional>
+#include <list>
 #include <any>
 
 namespace Alice {
@@ -13,7 +14,7 @@ class Command;
 
 extern thread_local int64_t _lru_cache;
 
-class Connection {
+class Context {
 public:
     enum ParseStatus { 
         PARSING,
@@ -21,7 +22,7 @@ public:
         SUCCEED,
         REPLY,
     };
-    explicit Connection(DBServer *db) 
+    explicit Context(DBServer *db) 
         : _db(db),
         _command(nullptr),
         _flag(PARSING) 
@@ -48,7 +49,7 @@ private:
 
 class Command {
 public:
-    using CommandCallback = std::function<void(Connection&)>;
+    using CommandCallback = std::function<void(Context&)>;
 
     Command(const std::string& name, int8_t arity, bool isWrite, const CommandCallback _cb)
         : _commandCb(_cb),
@@ -94,7 +95,8 @@ public:
     using Iterator = std::unordered_map<Key, Value>::iterator;
     using CommandMap = std::unordered_map<Key, Command>;
     using HashMap = std::unordered_map<Key, Value>;
-    // enum { String, List, H }
+    using String = std::string;
+    using List = std::list<std::string>;
     DB();
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
@@ -103,21 +105,37 @@ public:
         _hashMap.erase(key);
     }
     CommandMap& commandMap() { return _commandMap; }
-    void set(Connection& conn);
-    void setnx(Connection& conn);
-    void get(Connection& conn);
-    void getset(Connection& conn);
-    void strlen(Connection& conn);
-    void append(Connection& conn);
-    void mset(Connection& conn);
-    void mget(Connection& conn);
-    void incr(Connection& conn);
-    void incrby(Connection& conn);
-    void decr(Connection& conn);
-    void decrby(Connection& conn);
-    void ttl(Connection& conn);
+
+    void ttl(Context& con);
+    // String Keys Operators
+    void strSet(Context& con);
+    void strSetIfNotExist(Context& con);
+    void strGet(Context& con);
+    void strGetSet(Context& con);
+    void strLen(Context& con);
+    void strAppend(Context& con);
+    void strMset(Context& con);
+    void strMget(Context& con);
+    void strIncr(Context& con);
+    void strIncrBy(Context& con);
+    void strDecr(Context& con);
+    void strDecrBy(Context& con);
+    // List Keys Operators
+    void listLeftPush(Context& con);
+    void listHeadPush(Context& con);
+    void listRightPush(Context& con);
+    void listTailPush(Context& con);
+    void listLeftPop(Context& con);
+    void listRightPop(Context& con);
+    void listRightPopLeftPush(Context& con);
+    void listRem(Context& con);
+    void listLen(Context& con);
+    void listIndex(Context& con);
+    void listSet(Context& con);
+    void listRange(Context& con);
+    void listTrim(Context& con);
 private:
-    void _idcr(Connection& conn, int64_t incr);
+    void _strIdCr(Context& con, int64_t incr);
 
     HashMap _hashMap;
     CommandMap _commandMap;
