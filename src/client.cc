@@ -88,10 +88,7 @@ void Client::parseResponse(Angel::Buffer& buf)
         if (next - s != len) return;
         answer.assign(s, len);
         buf.retrieve(next + 2 - ps);
-        if (answer.compare("(nil)"))
-            std::cout << "\"" << answer << "\"\n";
-        else
-            std::cout << answer << "\n";
+        std::cout << "\"" << answer << "\"\n";
         break;
     }
     case '*': {
@@ -101,7 +98,12 @@ void Client::parseResponse(Angel::Buffer& buf)
         if (next[1] != '\n') return;
         s += 1;
         size_t len = atoi(s);
-        if (len == 0) return;
+        if (len == 0) {
+            answer.assign("(nil)");
+            std::cout << answer << "\n";
+            buf.retrieve(next + 2 - ps);
+            return;
+        }
         s = next + 2;
         int i = 1;
         while (len > 0) {

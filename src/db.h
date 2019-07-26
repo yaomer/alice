@@ -5,6 +5,7 @@
 #include <string>
 #include <functional>
 #include <list>
+#include <unordered_set>
 #include <any>
 
 namespace Alice {
@@ -97,6 +98,7 @@ public:
     using HashMap = std::unordered_map<Key, Value>;
     using String = std::string;
     using List = std::list<std::string>;
+    using Set = std::unordered_set<std::string>;
     DB();
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
@@ -106,8 +108,13 @@ public:
     }
     CommandMap& commandMap() { return _commandMap; }
 
-    void ttl(Context& con);
-    // String Keys Operators
+    void isKeyExists(Context& con);
+    void getKeyType(Context& con);
+    void getTtlSecs(Context& con);
+    void getTtlMils(Context& con);
+    void setKeyExpireSecs(Context& con);
+    void setKeyExpireMils(Context& con);
+    // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);
     void strGet(Context& con);
@@ -120,7 +127,7 @@ public:
     void strIncrBy(Context& con);
     void strDecr(Context& con);
     void strDecrBy(Context& con);
-    // List Keys Operators
+    // List Keys Operation
     void listLeftPush(Context& con);
     void listHeadPush(Context& con);
     void listRightPush(Context& con);
@@ -134,7 +141,25 @@ public:
     void listSet(Context& con);
     void listRange(Context& con);
     void listTrim(Context& con);
+    // Set Keys Operation
+    void setAdd(Context& con);
+    void setIsMember(Context& con);
+    void setPop(Context& con);
+    void setRandMember(Context& con);
+    void setRem(Context& con);
+    void setMove(Context& con);
+    void setCard(Context& con);
+    void setMembers(Context& con);
+    void setInter(Context& con);
+    void setInterStore(Context& con);
+    void setUnion(Context& con);
+    void setUnionStore(Context& con);
+    void setDiff(Context& con);
+    void setDiffStore(Context& con);
+
 private:
+    void _getTtl(Context& con, bool seconds);
+    void _setKeyExpire(Context& con, bool seconds);
     void _strIdCr(Context& con, int64_t incr);
 
     HashMap _hashMap;

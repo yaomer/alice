@@ -22,10 +22,6 @@ public:
     {
         _expireMap.insert(std::make_pair(key, expire + Angel::TimeStamp::now()));
     }
-    bool isExpiredMap(const Key& key)
-    {
-        return _expireMap.find(key) != _expireMap.end();
-    }
     void delExpireKey(const Key& key)
     {
         auto it = _expireMap.find(key);
@@ -34,10 +30,10 @@ public:
     }
     bool isExpiredKey(const Key& key)
     {
-        if (!isExpiredMap(key))
+        auto it = _expireMap.find(key);
+        if (it == _expireMap.end())
             return false;
         int64_t now = Angel::TimeStamp::now();
-        auto it = _expireMap.find(key);
         if (it->second <= now) {
             delExpireKey(key);
             _db.delKey(key);
