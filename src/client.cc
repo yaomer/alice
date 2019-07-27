@@ -162,6 +162,7 @@ int main()
         line[len] = '\n';
         client.parseLine(line, line + len + 1);
         client.send();
+        line[len] = '\0';
         usleep(200000);
         linenoiseHistoryAdd(line);
         linenoiseFree(line);
