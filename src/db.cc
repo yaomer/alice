@@ -1,8 +1,11 @@
 #include <stdlib.h>
+#include <time.h>
 #include <map>
 #include <vector>
 #include <list>
 #include <functional>
+#include <random>
+#include <tuple>
 #include "db.h"
 #include "server.h"
 
@@ -57,6 +60,7 @@ DB::DB()
         { "PTTL",       { "PTTL", -2, false, std::bind(&DB::getTtlMils, this, _1) } },
         { "EXPIRE",     { "EXPIRE", -3, false, std::bind(&DB::setKeyExpireSecs, this, _1) } },
         { "PEXPIRE",    { "PEXPIRE", -3, false, std::bind(&DB::setKeyExpireMils, this, _1) } },
+        { "DEL",        { "DEL", 2, true, std::bind(&DB::deleteKey, this, _1) } },
     };
 }
 
@@ -71,7 +75,7 @@ namespace Alice {
     }
 
     static const char *db_return_ok = "+OK\r\n";
-    static const char *db_return_err = "-ERR\r\n";
+    static const char *db_return_syntax_err = "-ERR syntax error\r\n";
     static const char *db_return_nil = "+(nil)\r\n";
     static const char *db_return_integer_0 = ": 0\r\n";
     static const char *db_return_integer_1 = ": 1\r\n";
@@ -103,6 +107,29 @@ namespace Alice {
 #define getXXType(it, _type) \
     (std::any_cast<_type>((it)->second.value()))
 
+#define appendAmount(con, size) \
+    do { \
+        (con).append("*"); \
+        (con).append(convert(size)); \
+        (con).append("\r\n"); \
+    } while (0)
+
+#define appendString(con, it) \
+    do { \
+        (con).append("$"); \
+        (con).append(convert((it).size())); \
+        (con).append("\r\n"); \
+        (con).append(it); \
+        (con).append("\r\n"); \
+    } while (0)
+
+#define appendNumber(con, size) \
+    do { \
+        (con).append(": "); \
+        (con).append(convert(size)); \
+        (con).append("\r\n"); \
+    } while (0)
+
 //////////////////////////////////////////////////////////////////
 
 void DB::isKeyExists(Context& con)
@@ -133,16 +160,6 @@ void DB::getKeyType(Context& con)
         con.append(db_return_set_type);
 }
 
-void DB::getTtlSecs(Context& con)
-{
-    _getTtl(con, true);
-}
-
-void DB::getTtlMils(Context& con)
-{
-    _getTtl(con, false);
-}
-
 void DB::_getTtl(Context& con, bool seconds)
 {
     auto& cmdlist = con.commandList();
@@ -159,20 +176,17 @@ void DB::_getTtl(Context& con, bool seconds)
     int64_t milliseconds = expire->second - Angel::TimeStamp::now();
     if (seconds)
         milliseconds /= 1000;
-    const char *s = convert(milliseconds);
-    con.append(": ");
-    con.append(s);
-    con.append("\r\n");
+    appendNumber(con, milliseconds);
 }
 
-void DB::setKeyExpireSecs(Context& con)
+void DB::getTtlSecs(Context& con)
 {
-    _setKeyExpire(con, true);
+    _getTtl(con, true);
 }
 
-void DB::setKeyExpireMils(Context& con)
+void DB::getTtlMils(Context& con)
 {
-    _setKeyExpire(con, false);
+    _getTtl(con, false);
 }
 
 void DB::_setKeyExpire(Context& con, bool seconds)
@@ -188,6 +202,32 @@ void DB::_setKeyExpire(Context& con, bool seconds)
     } else {
         con.append(db_return_integer_0);
     }
+}
+
+void DB::setKeyExpireSecs(Context& con)
+{
+    _setKeyExpire(con, true);
+}
+
+void DB::setKeyExpireMils(Context& con)
+{
+    _setKeyExpire(con, false);
+}
+
+void DB::deleteKey(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    size_t size = cmdlist.size();
+    int retval = 0;
+    for (int i = 1; i < size; i++) {
+        auto it = _hashMap.find(cmdlist[i]);
+        if (it != _hashMap.end()) {
+            con.db()->delExpireKey(cmdlist[1]);
+            _hashMap.erase(it);
+            retval++;
+        }
+    }
+    appendNumber(con, retval);
 }
 
 //////////////////////////////////////////////////////////////////
@@ -207,7 +247,7 @@ void DB::strSet(Context& con)
         if (cmdlist[3].compare("EX") == 0)
             expire *= 1000;
         else if (cmdlist[3].compare("PX")) {
-            con.append(db_return_err);
+            con.append(db_return_syntax_err);
             return;
         }
     }
@@ -244,11 +284,7 @@ void DB::strGet(Context& con)
     }
     checkType(con, it, String);
     auto& value = getStringValue(it);
-    con.append("$");
-    con.append(convert(value.size()));
-    con.append("\r\n");
-    con.append(value);
-    con.append("\r\n");
+    appendString(con, value);
 }
 
 void DB::strGetSet(Context& con)
@@ -264,9 +300,7 @@ void DB::strGetSet(Context& con)
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
     _hashMap[cmdlist[1]] = cmdlist[2];
-    con.append("+");
-    con.append(oldvalue);
-    con.append("\r\n");
+    appendString(con, oldvalue);
 }
 
 void DB::strLen(Context& con)
@@ -279,11 +313,8 @@ void DB::strLen(Context& con)
         return;
     }
     checkType(con, it, String);
-    auto& value = getStringValue(it);
-    const char *len = convert(value.size());
-    con.append(": ");
-    con.append(len);
-    con.append("\r\n");
+    String& value = getStringValue(it);
+    appendNumber(con, value.size());
 }
 
 void DB::strAppend(Context& con)
@@ -293,17 +324,13 @@ void DB::strAppend(Context& con)
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
-        con.append(": ");
-        con.append(convert(cmdlist[2].size()));
-        con.append("\r\n");
+        appendNumber(con, cmdlist[2].size());
     }
     checkType(con, it, String);
     String& oldvalue = getStringValue(it);
     oldvalue += cmdlist[2];
     _hashMap[cmdlist[1]] = oldvalue;
-    con.append(": ");
-    con.append(convert(oldvalue.size()));
-    con.append("\r\n");
+    appendNumber(con, oldvalue.size());
 }
 
 void DB::strMset(Context& con)
@@ -325,20 +352,14 @@ void DB::strMget(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    con.append("*");
-    con.append(convert(size - 1));
-    con.append("\r\n");
+    appendAmount(con, size - 1);
     for (int i = 1; i < size; i++) {
         con.db()->isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             checkType(con, it, String);
             String& value = getStringValue(it);
-            con.append("$");
-            con.append(convert(value.size()));
-            con.append("\r\n");
-            con.append(value);
-            con.append("\r\n");
+            appendString(con, value);
         } else
             con.append(db_return_nil);
     }
@@ -355,11 +376,8 @@ void DB::_strIdCr(Context& con, int64_t incr)
         if (isnumber(value[0])) {
             int64_t number = atol(value.c_str());
             number += incr;
-            const char *numstr = convert(number);
-            _hashMap[cmdlist[1]] = String(numstr);
-            con.append(": ");
-            con.append(numstr);
-            con.append("\r\n");
+            _hashMap[cmdlist[1]] = String(convert(number));
+            appendNumber(con, number);
         } else {
             con.append(db_return_interger_err);
             return;
@@ -367,11 +385,8 @@ void DB::_strIdCr(Context& con, int64_t incr)
     } else {
         int64_t number = 0;
         number += incr;
-        const char *numstr = convert(number);
-        _hashMap[cmdlist[1]] = String(numstr);
-        con.append(": ");
-        con.append(numstr);
-        con.append("\r\n");
+        _hashMap[cmdlist[1]] = String(convert(number));
+        appendNumber(con, number);
     }
 }
 
@@ -405,70 +420,46 @@ void DB::strDecrBy(Context& con)
 
 #define getListValue(it) getXXType(it, List&)
 
-void DB::listLeftPush(Context& con)
+void DB::_listPush(Context& con, bool leftPush)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
     con.db()->isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
-    con.append(": ");
     if (it != _hashMap.end()) {
         checkType(con, it, List);
         List& list = getListValue(it);
-        for (int i = 2; i < size; i++)
-            list.push_front(cmdlist[i]);
-        con.append(convert(list.size()));
+        for (int i = 2; i < size; i++) {
+            if (leftPush)
+                list.push_front(cmdlist[i]);
+            else
+                list.push_back(cmdlist[1]);
+        }
+        appendNumber(con, list.size());
     } else {
         List list;
-        for (int i = 2; i < size; i++)
-            list.push_front(cmdlist[i]);
+        for (int i = 2; i < size; i++) {
+            if (leftPush)
+                list.push_front(cmdlist[i]);
+            else
+                list.push_back(cmdlist[1]);
+        }
         _hashMap[cmdlist[1]] = list;
-        con.append(convert(list.size()));
+        appendNumber(con, list.size());
     }
-    con.append("\r\n");
 }
 
-void DB::listHeadPush(Context& con)
+void DB::listLeftPush(Context& con)
 {
-    auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    auto it = _hashMap.find(cmdlist[1]);
-    if (it == _hashMap.end()) {
-        con.append(db_return_integer_0);
-        return;
-    }
-    checkType(con, it, List);
-    List& list = getListValue(it);
-    list.push_front(cmdlist[2]);
-    con.append(": ");
-    con.append(convert(list.size()));
-    con.append("\r\n");
+    _listPush(con, true);
 }
 
 void DB::listRightPush(Context& con)
 {
-    auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    size_t size = cmdlist.size();
-    auto it = _hashMap.find(cmdlist[1]);
-    con.append(": ");
-    if (it != _hashMap.end()) {
-        checkType(con, it, List);
-        List& list = getListValue(it);
-        for (int i = 2; i < size; i++)
-            list.push_back(cmdlist[i]);
-        con.append(convert(list.size()));
-    } else {
-        List list;
-        for (int i = 2; i < size; i++)
-            list.push_back(cmdlist[i]);
-        _hashMap[cmdlist[1]] = list;
-        con.append(convert(list.size()));
-    }
-    con.append("\r\n");
+    _listPush(con, false);
 }
 
-void DB::listTailPush(Context& con)
+void DB::_listEndsPush(Context& con, bool frontPush)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -479,58 +470,55 @@ void DB::listTailPush(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    list.push_back(cmdlist[2]);
-    con.append(": ");
-    con.append(convert(list.size()));
-    con.append("\r\n");
+    if (frontPush)
+        list.push_front(cmdlist[2]);
+    else
+        list.push_back(cmdlist[2]);
+    appendNumber(con, list.size());
+}
+
+void DB::listHeadPush(Context& con)
+{
+    _listEndsPush(con, true);
+}
+
+void DB::listTailPush(Context& con)
+{
+    _listEndsPush(con, false);
+}
+
+void DB::_listPop(Context& con, bool leftPop)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_nil);
+        return;
+    }
+    checkType(con, it, List);
+    List& list = getListValue(it);
+    if (list.empty()) {
+        con.append(db_return_nil);
+        return;
+    }
+    if (leftPop) {
+        appendString(con, list.front());
+        list.pop_front();
+    } else {
+        appendString(con, list.back());
+        list.pop_back();
+    }
 }
 
 void DB::listLeftPop(Context& con)
 {
-    auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    auto it = _hashMap.find(cmdlist[1]);
-    if (it == _hashMap.end()) {
-        con.append(db_return_nil);
-        return;
-    }
-    checkType(con, it, List);
-    List& list = getListValue(it);
-    if (list.empty()) {
-        con.append(db_return_nil);
-        return;
-    }
-    String front = std::move(list.front());
-    list.pop_front();
-    con.append("$");
-    con.append(convert(front.size()));
-    con.append("\r\n");
-    con.append(front);
-    con.append("\r\n");
+    _listPop(con, true);
 }
 
 void DB::listRightPop(Context& con)
 {
-    auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    auto it = _hashMap.find(cmdlist[1]);
-    if (it == _hashMap.end()) {
-        con.append(db_return_nil);
-        return;
-    }
-    checkType(con, it, List);
-    List& list = getListValue(it);
-    if (list.empty()) {
-        con.append(db_return_nil);
-        return;
-    }
-    String tail = std::move(list.back());
-    list.pop_back();
-    con.append("$");
-    con.append(convert(tail.size()));
-    con.append("\r\n");
-    con.append(tail);
-    con.append("\r\n");
+    _listPop(con, false);
 }
 
 void DB::listRightPopLeftPush(Context& con)
@@ -548,11 +536,7 @@ void DB::listRightPopLeftPush(Context& con)
         con.append(db_return_nil);
         return;
     }
-    con.append("$");
-    con.append(convert(srclist.back().size()));
-    con.append("\r\n");
-    con.append(srclist.back());
-    con.append("\r\n");
+    appendString(con, srclist.back());
     auto des = _hashMap.find(cmdlist[2]);
     if (des != _hashMap.end()) {
         checkType(con, des, List);
@@ -608,9 +592,7 @@ void DB::listRem(Context& con)
             }
         }
     }
-    con.append(": ");
-    con.append(convert(retval));
-    con.append("\r\n");
+    appendNumber(con, retval);
 }
 
 void DB::listLen(Context& con)
@@ -624,9 +606,7 @@ void DB::listLen(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    con.append(": ");
-    con.append(convert(list.size()));
-    con.append("\r\n");
+    appendNumber(con, list.size());
 }
 
 void DB::listIndex(Context& con)
@@ -650,11 +630,7 @@ void DB::listIndex(Context& con)
     }
     for (auto& it : list)
         if (index-- == 0) {
-            con.append("$");
-            con.append(convert(it.size()));
-            con.append("\r\n");
-            con.append(it);
-            con.append("\r\n");
+            appendString(con, it);
             break;
         }
 }
@@ -710,9 +686,7 @@ void DB::listRange(Context& con)
         con.append(db_return_nil);
         return;
     }
-    con.append("*");
-    con.append(convert(stop - start + 1));
-    con.append("\r\n");
+    appendAmount(con, stop - start + 1);
     int i = 0;
     for (auto& it : list) {
         if (i < start) {
@@ -721,11 +695,7 @@ void DB::listRange(Context& con)
         }
         if (i > stop)
             break;
-        con.append("$");
-        con.append(convert(it.size()));
-        con.append("\r\n");
-        con.append(it);
-        con.append("\r\n");
+        appendString(con, it);
         i++;
     }
 }
@@ -790,17 +760,13 @@ void DB::setAdd(Context& con)
                 retval++;
             }
         }
-        con.append(": ");
-        con.append(convert(retval));
-        con.append("\r\n");
+        appendNumber(con, retval);
     } else {
         Set set;
         for (int i = 2; i < members; i++)
             set.insert(cmdlist[i]);
         _hashMap[cmdlist[1]] = std::move(set);
-        con.append(": ");
-        con.append(convert(members - 2));
-        con.append("\r\n");
+        appendNumber(con, members - 2);
     }
 }
 
@@ -820,6 +786,18 @@ void DB::setIsMember(Context& con)
         con.append(db_return_integer_0);
 }
 
+static std::tuple<size_t, size_t> getRandBucketNumber(DB::Set& set)
+{
+    size_t bucketNumber;
+    std::uniform_int_distribution<size_t> u(0, set.bucket_count() - 1);
+    std::default_random_engine e(clock());
+    do {
+        bucketNumber = u(e);
+    } while (set.bucket_size(bucketNumber) == 0);
+    std::uniform_int_distribution<size_t> _u(0, set.bucket_size(bucketNumber) - 1);
+    return std::make_tuple(bucketNumber, _u(e));
+}
+
 void DB::setPop(Context& con)
 {
     auto& cmdlist = con.commandList();
@@ -835,16 +813,14 @@ void DB::setPop(Context& con)
         con.append(db_return_nil);
         return;
     }
-    srand(clock());
-    size_t index = rand() % set.size();
-    for (auto it = set.cbegin(); it != set.cend(); it++)
-        if (index-- == 0) {
-            con.append("$");
-            con.append(convert(it->size()));
-            con.append("\r\n");
-            con.append(*it);
-            con.append("\r\n");
-            set.erase(it);
+    auto bucket = getRandBucketNumber(set);
+    size_t bucketNumber = std::get<0>(bucket);
+    size_t where = std::get<1>(bucket);
+    for (auto it = set.cbegin(bucketNumber);
+            it != set.cend(bucketNumber); it++)
+        if (where-- == 0) {
+            appendString(con, *it);
+            set.erase(set.find(*it));
             break;
         }
 }
@@ -874,61 +850,50 @@ void DB::setRandMember(Context& con)
     }
     // 类型转换，int -> size_t
     if (count >= static_cast<ssize_t>(set.size())) {
-        con.append("*");
-        con.append(convert(set.size()));
-        con.append("\r\n");
+        appendAmount(con, set.size());
         for (auto& it : set) {
-            con.append("$");
-            con.append(convert(it.size()));
-            con.append("\r\n");
-            con.append(it);
-            con.append("\r\n");
+            appendString(con, it);
         }
         return;
     }
     if (count == 0 || count < 0) {
         if (count == 0)
             count = -1;
-        con.append("*");
-        con.append(convert(-count));
-        con.append("\r\n");
+        appendAmount(con, -count);
         while (count++ < 0) {
-            srand(clock());
-            size_t next = rand() % set.size();
-            for (auto& it : set) {
-                if (next-- == 0) {
-                    con.append("$");
-                    con.append(convert(it.size()));
-                    con.append("\r\n");
-                    con.append(it);
-                    con.append("\r\n");
+            auto bucket = getRandBucketNumber(set);
+            size_t bucketNumber = std::get<0>(bucket);
+            size_t where = std::get<1>(bucket);
+            for (auto it = set.cbegin(bucketNumber);
+                    it != set.cend(bucketNumber); it++) {
+                if (where-- == 0) {
+                    appendString(con, *it);
                     break;
                 }
             }
         }
         return;
     }
-    con.append("*");
-    con.append(convert(count));
-    con.append("\r\n");
-    String flag(count, 0);
-    size_t next;
+    appendAmount(con, count);
+    Set tset;
     while (count-- > 0) {
-        do {
-            srand(clock());
-            next = rand() % set.size();
-        } while (flag[next]);
-        flag[next] = 1;
-        for (auto& it : set) {
-            if (next-- == 0) {
-                con.append("$");
-                con.append(convert(it.size()));
-                con.append("\r\n");
-                con.append(it);
-                con.append("\r\n");
+        auto bucket = getRandBucketNumber(set);
+        size_t bucketNumber = std::get<0>(bucket);
+        size_t where = std::get<1>(bucket);
+        for (auto it = set.cbegin(bucketNumber);
+                it != set.cend(bucketNumber); it++) {
+            if (where-- == 0) {
+                if (tset.find(*it) != tset.end()) {
+                    count++;
+                    break;
+                }
+                tset.insert(*it);
                 break;
             }
         }
+    }
+    for (auto it : tset) {
+        appendString(con, it);
     }
 }
 
@@ -958,15 +923,9 @@ void DB::setMembers(Context& con)
     }
     checkType(con, it, Set);
     Set& set = getSetValue(it);
-    con.append("*");
-    con.append(convert(set.size()));
-    con.append("\r\n");
+    appendAmount(con, set.size());
     for (auto& it : set) {
-        con.append("$");
-        con.append(convert(it.size()));
-        con.append("\r\n");
-        con.append(it);
-        con.append("\r\n");
+        appendString(con, it);
     }
 }
 

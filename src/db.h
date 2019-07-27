@@ -6,6 +6,7 @@
 #include <functional>
 #include <list>
 #include <unordered_set>
+#include <tuple>
 #include <any>
 
 namespace Alice {
@@ -114,6 +115,7 @@ public:
     void getTtlMils(Context& con);
     void setKeyExpireSecs(Context& con);
     void setKeyExpireMils(Context& con);
+    void deleteKey(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);
@@ -161,6 +163,9 @@ private:
     void _getTtl(Context& con, bool seconds);
     void _setKeyExpire(Context& con, bool seconds);
     void _strIdCr(Context& con, int64_t incr);
+    void _listPush(Context& con, bool leftPush);
+    void _listEndsPush(Context& con, bool frontPush);
+    void _listPop(Context& con, bool leftPop);
 
     HashMap _hashMap;
     CommandMap _commandMap;
