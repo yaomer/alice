@@ -1,10 +1,14 @@
 #include <string.h>
 #include <linenoise.h>
+#include <ctype.h>
+#include <algorithm>
+#include <set>
+#include <string>
 
 typedef struct {
-    const char *name;
+    const char name[32];
     int len;
-    const char *info;
+    const char info[256];
 } HintInfo;
 
 #define HTSIZE 1024
@@ -22,10 +26,10 @@ HintInfo hiTable[HTSIZE] = {
     { "incr",       4,  " key" },
     { "decrby",     6,  " key decrement" },
     { "decr",       4,  " key" },
-    { "lpush",      5,  " key value [value ...]" },
     { "lpushx",     6,  " key value" },
-    { "rpush",      5,  " key value [value ...]" },
+    { "lpush",      5,  " key value [value ...]" },
     { "rpushx",     6,  " key value" },
+    { "rpush",      5,  " key value [value ...]" },
     { "lpop",       4,  " key" },
     { "rpoplpush",  9,  " source destination" },
     { "rpop",       4,  " key" },
@@ -44,47 +48,61 @@ HintInfo hiTable[HTSIZE] = {
     { "pttl",       4,  " key" },
     { "expire",     6,  " key seconds" },
     { "pexpire",    7,  " key milliseconds" },
+    { "del",        3,  " key [key ...]" },
+    { "", 0, "" },
 };
+
+std::set<std::string> cmdnames;
+bool isInitCmdnames = false;
 
 void completion(const char *buf, linenoiseCompletions *lc)
 {
-    switch (buf[0]) {
-    case 'a':
-        linenoiseAddCompletion(lc, "append");
-        break;
-    case 'd':
-        linenoiseAddCompletion(lc, "decr");
-        linenoiseAddCompletion(lc, "decrby");
-        break;
-    case 'g':
-        linenoiseAddCompletion(lc, "get");
-        linenoiseAddCompletion(lc, "getset");
-        break;
-    case 'i':
-        linenoiseAddCompletion(lc, "incr");
-        linenoiseAddCompletion(lc, "incrby");
-        break;
-    case 'm':
-        linenoiseAddCompletion(lc, "mset");
-        linenoiseAddCompletion(lc, "mget");
-        break;
-    case 's':
-        linenoiseAddCompletion(lc, "set");
-        linenoiseAddCompletion(lc, "setnx");
-        linenoiseAddCompletion(lc, "strlen");
-        break;
+    if (!isInitCmdnames) {
+        for (int i = 0; hiTable[i].name[0]; i++)
+            cmdnames.insert(hiTable[i].name);
+        isInitCmdnames = true;
+    }
+    size_t len = strlen(buf);
+    for (auto& it : cmdnames) {
+        if (strncasecmp(buf, it.c_str(), len) == 0)
+            linenoiseAddCompletion(lc, it.c_str());
     }
 }
 
 char *hints(const char *buf, int *color, int *bold)
 {
-    for (int i = 0; i < HTSIZE; i++) {
-        if (strncasecmp(buf, hiTable[i].name, hiTable[i].len) == 0) {
+    for (int i = 0; hiTable[i].name[0]; i++) {
+        const char *p = buf;
+        size_t buflen = strlen(buf);
+        const char *ep = buf + buflen;
+        const char *ip = hiTable[i].info;
+        const char *iep = ip + strlen(hiTable[i].info);
+        const char *next = nullptr;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+            buflen--;
+        }
+        if (strncasecmp(p, hiTable[i].name, hiTable[i].len) == 0) {
+            if (hiTable[i].len == buflen)
+                goto ret;
+            if (!isspace(p[hiTable[i].len]))
+                return nullptr;
+            p += hiTable[i].len;
+            while (true) {
+                p = std::find_if(p, ep, [](char c){ return !isspace(c); });
+                if (p == ep) break;
+                if (ip[1] == '[') break;
+                next = std::find_if(ip + 1, iep, isspace);
+                if (next == iep) break;
+                ip = next;
+                p = std::find_if(p, ep, isspace);
+                if (p == ep) break;
+            }
+ret:
             *color = 36;
             *bold = 0;
-            return const_cast<char*>(hiTable[i].info);
+            return const_cast<char*>(ip);
         }
     }
     return nullptr;
 }
-
