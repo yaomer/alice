@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <time.h>
+#include <regex.h>
 #include <map>
 #include <vector>
 #include <list>
@@ -33,7 +34,7 @@ DB::DB()
         { "RPUSHX",     { "RPUSHX", -3, true, std::bind(&DB::listTailPush, this, _1) } },
         { "LPOP",       { "LPOP", -2, true, std::bind(&DB::listLeftPop, this, _1) } },
         { "RPOP",       { "RPOP", -2, true, std::bind(&DB::listRightPop, this, _1) } },
-        { "RPOPLPUSH",  { "RPOPLPUSH", -3, true, std::bind(&DB::listRightPopLeftPush, this, _1) } },
+        { "RPOPLPUSH",  { "RPOPLPUSH", -3, true, std::bind(&DB::listRightPopToLeftPush, this, _1) } },
         { "LREM",       { "LREM", -4, true, std::bind(&DB::listRem, this, _1) } },
         { "LLEN",       { "LLEN", -2, false, std::bind(&DB::listLen, this, _1) } },
         { "LINDEX",     { "LINDEX", -3, false, std::bind(&DB::listIndex, this, _1) } },
@@ -61,6 +62,7 @@ DB::DB()
         { "EXPIRE",     { "EXPIRE", -3, false, std::bind(&DB::setKeyExpireSecs, this, _1) } },
         { "PEXPIRE",    { "PEXPIRE", -3, false, std::bind(&DB::setKeyExpireMils, this, _1) } },
         { "DEL",        { "DEL", 2, true, std::bind(&DB::deleteKey, this, _1) } },
+        { "KEYS",       { "KEYS", -2, false, std::bind(&DB::getAllKeys, this, _1) } },
     };
 }
 
@@ -91,6 +93,7 @@ namespace Alice {
     static const char *db_return_list_type = "+list\r\n";
     static const char *db_return_set_type = "+set\r\n";
     static const char *db_return_none_type = "+none\r\n";
+    static const char *db_return_unknown_option = "-ERR unknown option\r\n";
 }
 
 //////////////////////////////////////////////////////////////////
@@ -219,7 +222,7 @@ void DB::deleteKey(Context& con)
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
     int retval = 0;
-    for (int i = 1; i < size; i++) {
+    for (auto i = 1; i < size; i++) {
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             con.db()->delExpireKey(cmdlist[1]);
@@ -228,6 +231,27 @@ void DB::deleteKey(Context& con)
         }
     }
     appendNumber(con, retval);
+}
+
+void DB::getAllKeys(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    if (cmdlist[1].compare("*")) {
+        con.append(db_return_unknown_option);
+        return;
+    }
+    if (_hashMap.empty()) {
+        con.append(db_return_nil);
+        return;
+    }
+    appendAmount(con, _hashMap.size());
+    size_t size = con.message().size();
+    for (auto& it : _hashMap) {
+        con.db()->isExpiredKey(it.first);
+        appendString(con, it.first);
+    }
+    if (size == con.message().size())
+        con.assign(db_return_nil);
 }
 
 //////////////////////////////////////////////////////////////////
@@ -341,7 +365,7 @@ void DB::strMset(Context& con)
         con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
         return;
     }
-    for (int i = 1; i < size; i += 2) {
+    for (auto i = 1; i < size; i += 2) {
         con.db()->isExpiredKey(cmdlist[i]);
         _hashMap[cmdlist[i]] = cmdlist[i + 1];
     }
@@ -353,7 +377,7 @@ void DB::strMget(Context& con)
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
     appendAmount(con, size - 1);
-    for (int i = 1; i < size; i++) {
+    for (auto i = 1; i < size; i++) {
         con.db()->isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
@@ -429,7 +453,7 @@ void DB::_listPush(Context& con, bool leftPush)
     if (it != _hashMap.end()) {
         checkType(con, it, List);
         List& list = getListValue(it);
-        for (int i = 2; i < size; i++) {
+        for (auto i = 2; i < size; i++) {
             if (leftPush)
                 list.push_front(cmdlist[i]);
             else
@@ -438,7 +462,7 @@ void DB::_listPush(Context& con, bool leftPush)
         appendNumber(con, list.size());
     } else {
         List list;
-        for (int i = 2; i < size; i++) {
+        for (auto i = 2; i < size; i++) {
             if (leftPush)
                 list.push_front(cmdlist[i]);
             else
@@ -521,10 +545,11 @@ void DB::listRightPop(Context& con)
     _listPop(con, false);
 }
 
-void DB::listRightPopLeftPush(Context& con)
+void DB::listRightPopToLeftPush(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
+    con.db()->isExpiredKey(cmdlist[2]);
     auto src = _hashMap.find(cmdlist[1]);
     if (src == _hashMap.end()) {
         con.append(db_return_nil);
@@ -624,7 +649,7 @@ void DB::listIndex(Context& con)
     size_t size = list.size();
     if (index < 0)
         index += size;
-    if (index >= size) {
+    if (index >= static_cast<ssize_t>(size)) {
         con.append(db_return_nil);
         return;
     }
@@ -650,7 +675,7 @@ void DB::listSet(Context& con)
     size_t size = list.size();
     if (index < 0)
         index += size;
-    if (index >= size) {
+    if (index >= static_cast<ssize_t>(size)) {
         con.append(db_return_out_of_range);
         return;
     }
@@ -680,9 +705,9 @@ void DB::listRange(Context& con)
         start += end + 1;
     if (stop < 0)
         stop += end + 1;
-    if (stop > end)
+    if (stop > static_cast<ssize_t>(end))
         stop = end;
-    if (start > end){
+    if (start > static_cast<ssize_t>(end)){
         con.append(db_return_nil);
         return;
     }
@@ -718,7 +743,9 @@ void DB::listTrim(Context& con)
         start += size;
     if (stop < 0)
         stop += size;
-    if (start > size - 1 || start > stop || stop > size - 1) {
+    if (start > static_cast<ssize_t>(size) - 1
+     || start > stop
+     || stop > static_cast<ssize_t>(size) - 1) {
         list.clear();
         con.append(db_return_ok);
         return;
@@ -754,7 +781,7 @@ void DB::setAdd(Context& con)
         checkType(con, it, Set);
         Set& set = getSetValue(it);
         int retval = 0;
-        for (int i = 2; i < members; i++) {
+        for (auto i = 2; i < members; i++) {
             if (set.find(cmdlist[i]) == set.end()) {
                 set.insert(cmdlist[i]);
                 retval++;
@@ -763,7 +790,7 @@ void DB::setAdd(Context& con)
         appendNumber(con, retval);
     } else {
         Set set;
-        for (int i = 2; i < members; i++)
+        for (auto i = 2; i < members; i++)
             set.insert(cmdlist[i]);
         _hashMap[cmdlist[1]] = std::move(set);
         appendNumber(con, members - 2);
@@ -899,17 +926,72 @@ void DB::setRandMember(Context& con)
 
 void DB::setRem(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    size_t size = cmdlist.size();
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    checkType(con, it, Set);
+    Set& set = getSetValue(it);
+    int retval = 0;
+    for (auto i = 2; i < size; i++) {
+        auto it = set.find(cmdlist[i]);
+        if (it != set.end()) {
+            set.erase(it);
+            retval++;
+        }
+    }
+    appendNumber(con, retval);
 }
 
 void DB::setMove(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    con.db()->isExpiredKey(cmdlist[2]);
+    auto src = _hashMap.find(cmdlist[1]);
+    if (src == _hashMap.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    checkType(con, src, Set);
+    Set& srcSet = getSetValue(src);
+    auto srcIt = srcSet.find(cmdlist[3]);
+    if (srcIt == srcSet.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    srcSet.erase(srcIt);
+    auto des = _hashMap.find(cmdlist[2]);
+    if (des != _hashMap.end()) {
+        checkType(con, des, Set);
+        Set& desSet = getSetValue(des);
+        auto desIt = desSet.find(cmdlist[3]);
+        if (desIt == desSet.end())
+            desSet.insert(cmdlist[3]);
+    } else {
+        Set set;
+        set.insert(cmdlist[3]);
+        _hashMap[cmdlist[2]] = std::move(set);
+    }
+    con.append(db_return_integer_1);
 }
 
 void DB::setCard(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    checkType(con, it, Set);
+    Set& set = getSetValue(it);
+    appendNumber(con, set.size());
 }
 
 void DB::setMembers(Context& con)
@@ -931,22 +1013,153 @@ void DB::setMembers(Context& con)
 
 void DB::setInter(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    size_t size = cmdlist.size();
+    size_t minSet = 0, minSetIndex = 0;
+    for (auto i = 1; i < size; i++) {
+        con.db()->isExpiredKey(cmdlist[i]);
+        auto it = _hashMap.find(cmdlist[i]);
+        if (it == _hashMap.end()) {
+            con.append(db_return_nil);
+            return;
+        }
+        checkType(con, it, Set);
+        Set& set = getSetValue(it);
+        if (set.empty()) {
+            con.append(db_return_nil);
+            return;
+        }
+        if (minSet == 0)
+            minSet = set.size();
+        else if (minSet > set.size()) {
+            minSet = set.size();
+            minSetIndex = i;
+        }
+    }
+    Set retSet;
+    Set& set = getSetValue(_hashMap.find(cmdlist[minSetIndex]));
+    for (auto& it : set) {
+        size_t i;
+        for (i = 1; i < size; i++) {
+            if (i == minSetIndex)
+                continue;
+            Set& set = getSetValue(_hashMap.find(cmdlist[i]));
+            if (set.find(it) == set.end())
+                break;
+        }
+        if (i == size)
+            retSet.insert(it);
+    }
+    appendAmount(con, retSet.size());
+    for (auto& it : retSet)
+        appendString(con, it);
 }
 
 void DB::setInterStore(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    size_t size = cmdlist.size();
+    size_t minSet = 0, minSetIndex = 0;
+    for (auto i = 2; i < size; i++) {
+        con.db()->isExpiredKey(cmdlist[i]);
+        auto it = _hashMap.find(cmdlist[i]);
+        if (it == _hashMap.end()) {
+            con.append(db_return_integer_0);
+            return;
+        }
+        checkType(con, it, Set);
+        Set& set = getSetValue(it);
+        if (set.empty()) {
+            con.append(db_return_integer_0);
+            return;
+        }
+        if (minSet == 0)
+            minSet = set.size();
+        else if (minSet > set.size()) {
+            minSet = set.size();
+            minSetIndex = i;
+        }
+    }
+    Set retSet;
+    Set& set = getSetValue(_hashMap.find(cmdlist[minSetIndex]));
+    for (auto& it : set) {
+        size_t i;
+        for (i = 2; i < size; i++) {
+            if (i == minSetIndex)
+                continue;
+            Set& set = getSetValue(_hashMap.find(cmdlist[i]));
+            if (set.find(it) == set.end())
+                break;
+        }
+        if (i == size)
+            retSet.insert(it);
+    }
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it != _hashMap.end()) {
+        checkType(con, it, Set);
+        Set& set = getSetValue(it);
+        set.swap(retSet);
+        appendNumber(con, set.size());
+    } else {
+        appendNumber(con, retSet.size());
+        _hashMap[cmdlist[1]] = std::move(retSet);
+    }
 }
 
 void DB::setUnion(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    size_t size = cmdlist.size();
+    Set retSet;
+    for (auto i = 1; i < size; i++) {
+        con.db()->isExpiredKey(cmdlist[i]);
+        auto it = _hashMap.find(cmdlist[i]);
+        if (it != _hashMap.end()) {
+            checkType(con, it, Set);
+            Set& set = getSetValue(it);
+            for (auto& it : set) {
+                if (retSet.find(it) == retSet.end())
+                    retSet.insert(it);
+            }
+        }
+    }
+    if (retSet.empty())
+        con.append(db_return_nil);
+    else {
+        appendAmount(con, retSet.size());
+        for (auto& it : retSet)
+            appendString(con, it);
+    }
 }
 
 void DB::setUnionStore(Context& con)
 {
-
+    auto& cmdlist = con.commandList();
+    size_t size = cmdlist.size();
+    Set retSet;
+    for (auto i = 2; i < size; i++) {
+        con.db()->isExpiredKey(cmdlist[i]);
+        auto it = _hashMap.find(cmdlist[i]);
+        if (it != _hashMap.end()) {
+            checkType(con, it, Set);
+            Set& set = getSetValue(it);
+            for (auto& it : set) {
+                if (retSet.find(it) == retSet.end())
+                    retSet.insert(it);
+            }
+        }
+    }
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it != _hashMap.end()) {
+        checkType(con, it, Set);
+        Set& set = getSetValue(it);
+        set.swap(retSet);
+        appendNumber(con, set.size());
+    } else {
+        appendNumber(con, retSet.size());
+        _hashMap[cmdlist[1]] = std::move(retSet);
+    }
 }
 
 void DB::setDiff(Context& con)

@@ -60,6 +60,7 @@ HintInfo hiTable[HTSIZE] = {
     { "EXPIRE",     6,  " key seconds" },
     { "PEXPIRE",    7,  " key milliseconds" },
     { "DEL",        3,  " key [key ...]" },
+    { "KEYS",       4,  " pattern" },
     { "", 0, "" },
 };
 
