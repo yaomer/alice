@@ -5,7 +5,9 @@
 #include <Angel/TcpServer.h>
 #include <unordered_map>
 #include <string>
+#include <memory>
 #include "db.h"
+#include "rdb.h"
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -16,7 +18,9 @@ class DBServer {
 public:
     using Key = std::string;
     using ExpireMap = std::unordered_map<Key, int64_t>;
+    DBServer() { _rdb.reset(new Rdb(this)); }
     DB& db() { return _db; }
+    Rdb *rdb() { return _rdb.get(); }
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     {
@@ -44,6 +48,7 @@ public:
 private:
     DB _db;
     ExpireMap _expireMap;
+    std::unique_ptr<Rdb> _rdb;
 };
 
 class Server {
@@ -57,15 +62,18 @@ public:
         _server.setMessageCb(
                 std::bind(&Server::onMessage, this, _1, _2));
         _loop->runEvery(100, [this]{ this->serverCron(); });
+        _loop->runEvery(1000, [this]{ 
+                this->_dbServer.rdb()->rdbSave(); 
+                });
+        _dbServer.rdb()->rdbRecover();
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
-        conn->setContext(Context(&_db));
+        conn->setContext(Context(&_dbServer));
     }
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
         auto& client = std::any_cast<Context&>(conn->getContext());
-        // std::cout << buf.c_str();
         while (true) {
             switch (client.flag()) {
             case Context::PARSING:
@@ -94,9 +102,11 @@ public:
 private:
     Angel::EventLoop *_loop;
     Angel::TcpServer _server;
-    DBServer _db;
+    DBServer _dbServer;
 };
 
+extern thread_local size_t rdb_save_modifies;
+extern thread_local size_t rdb_modifies;
 extern thread_local int64_t _lru_cache;
 }
 

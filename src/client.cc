@@ -25,29 +25,6 @@ void Client::parseLine(const char *line, const char *linep)
     } while (1);
 }
 
-void Client::send()
-{
-    char buf[32];
-    size_t n = _argv.size();
-    if (n == 0) return;
-    snprintf(buf, sizeof(buf), "%zu", n);
-    _message += "*";
-    _message += buf;
-    _message += "\r\n";
-    for (auto& it : _argv) {
-        snprintf(buf, sizeof(buf), "%zu", it.size());
-        _message += "$";
-        _message += buf;
-        _message += "\r\n";
-        _message += it;
-        _message += "\r\n";
-    }
-    _argv.clear();
-    _client.conn()->send(_message);
-    // std::cout << _message;
-    _message.clear();
-}
-
 namespace Alice {
 
     thread_local char convert_buf[32];
@@ -57,6 +34,25 @@ namespace Alice {
         snprintf(convert_buf, sizeof(convert_buf), "%lld", value);
         return convert_buf;
     }
+}
+
+void Client::send()
+{
+    size_t n = _argv.size();
+    if (n == 0) return;
+    _message += "*";
+    _message += convert(n);
+    _message += "\r\n";
+    for (auto& it : _argv) {
+        _message += "$";
+        _message += convert(it.size());
+        _message += "\r\n";
+        _message += it;
+        _message += "\r\n";
+    }
+    _argv.clear();
+    _client.conn()->send(_message);
+    _message.clear();
 }
 
 void Client::parseResponse(Angel::Buffer& buf)
@@ -107,9 +103,20 @@ void Client::parseResponse(Angel::Buffer& buf)
         s = next + 2;
         int i = 1;
         while (len > 0) {
-            if (s[0] != '$') break;
+            if (s[0] != '$' && s[0] != '+') break;
             next = std::find(s, es, '\r');
             if (next == es) return;
+            if (s[0] == '+') {
+                s += 1;
+                answer.append(convert(i));
+                answer.append(") ");
+                answer.append(std::string(s, next - s));
+                answer.append("\n");
+                s = next + 2;
+                len--;
+                i++;
+                continue;
+            }
             s += 1;
             size_t l = atoi(s);
             if (l == 0) return;

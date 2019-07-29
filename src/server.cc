@@ -49,16 +49,19 @@ err:
     con.setFlag(Context::PROTOCOLERR);
 }
 
+namespace Alice {
+
+    thread_local size_t rdb_save_modifies = 1;
+    thread_local size_t rdb_modifies = 0;
+}
+
 void Server::executeCommand(Context& con)
 {
     int arity;
     auto& cmdlist = con.commandList();
-    // for (auto& xx : cmdlist)
-        // std::cout << xx << " ";
-    // std::cout << "\n";
     std::transform(cmdlist[0].begin(), cmdlist[0].end(), cmdlist[0].begin(), ::toupper);
-    auto it = _db.db().commandMap().find(cmdlist[0]);
-    if (it == _db.db().commandMap().end()) {
+    auto it = _dbServer.db().commandMap().find(cmdlist[0]);
+    if (it == _dbServer.db().commandMap().end()) {
         con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
         goto err;
     }
@@ -67,11 +70,7 @@ void Server::executeCommand(Context& con)
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
-    if (cmdlist.size() > 1) {
-        auto it = _db.db().hashMap().find(cmdlist[1]);
-        if (it != _db.db().hashMap().end())
-            it->second.setLru(_lru_cache);
-    }
+    if (it->second.isWrite()) rdb_modifies++;
     it->second._commandCb(con);
 err:
     con.setFlag(Context::REPLY);
@@ -82,7 +81,6 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
 {
     auto& client = std::any_cast<Context&>(conn->getContext());
     conn->send(client.message());
-    // std::cout << client.message();
     client.message().clear();
     client.setFlag(Context::PARSING);
 }
@@ -97,10 +95,10 @@ void Server::serverCron()
 {
     int64_t now = Angel::TimeStamp::now();
     _lru_cache = now;
-    for (auto& it : _db.expireMap()) {
+    for (auto& it : _dbServer.expireMap()) {
         if (it.second <= now) {
-            _db.db().delKey(it.first);
-            _db.delExpireKey(it.first);
+            _dbServer.db().delKey(it.first);
+            _dbServer.delExpireKey(it.first);
         }
     }
 }
