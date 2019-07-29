@@ -5,6 +5,7 @@
 #include <string>
 #include <functional>
 #include <list>
+#include <vector>
 #include <unordered_set>
 #include <tuple>
 #include <any>
@@ -26,25 +27,24 @@ public:
     };
     explicit Context(DBServer *db) 
         : _db(db),
-        _command(nullptr),
         _flag(PARSING) 
     {  
     }
     using CommandList = std::vector<std::string>;
     DBServer *db() { return _db; }
-    Command *command() { return _command; }
     void addArg(const char *s, const char *es)
     { _commandList.push_back(std::string(s, es)); }
     CommandList& commandList() { return _commandList; }
     void append(const std::string& s)
     { _buffer.append(s); }
+    void assign(const std::string& s)
+    { _buffer.assign(s); }
     std::string& message() { return _buffer; }
     int8_t flag() const { return _flag; }
     void setFlag(int flag) { _flag = flag; }
 private:
     DBServer *_db;
     CommandList _commandList;
-    Command *_command;
     std::string _buffer;
     int8_t _flag;
 };
@@ -100,6 +100,7 @@ public:
     using String = std::string;
     using List = std::list<std::string>;
     using Set = std::unordered_set<std::string>;
+    using Hash = std::unordered_map<std::string, std::string>;
     DB();
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
@@ -116,6 +117,7 @@ public:
     void setKeyExpireSecs(Context& con);
     void setKeyExpireMils(Context& con);
     void deleteKey(Context& con);
+    void getAllKeys(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);
@@ -136,7 +138,7 @@ public:
     void listTailPush(Context& con);
     void listLeftPop(Context& con);
     void listRightPop(Context& con);
-    void listRightPopLeftPush(Context& con);
+    void listRightPopToLeftPush(Context& con);
     void listRem(Context& con);
     void listLen(Context& con);
     void listIndex(Context& con);
@@ -158,18 +160,36 @@ public:
     void setUnionStore(Context& con);
     void setDiff(Context& con);
     void setDiffStore(Context& con);
-
+    // Hash Keys Operation
+    void hashSet(Context& con);
+    void hashSetIfNotExists(Context& con);
+    void hashGet(Context& con);
+    void hashFieldExists(Context& con);
+    void hashDelete(Context& con);
+    void hashFieldLen(Context& con);
+    void hashValueLen(Context& con);
+    void hashIncrBy(Context& con);
+    void hashMset(Context& con);
+    void hashMget(Context& con);
+    void hashGetKeys(Context& con);
+    void hashGetValues(Context& con);
+    void hashGetAll(Context& con);
 private:
+    bool _strIsNumber(const String& s);
     void _getTtl(Context& con, bool seconds);
     void _setKeyExpire(Context& con, bool seconds);
     void _strIdCr(Context& con, int64_t incr);
     void _listPush(Context& con, bool leftPush);
     void _listEndsPush(Context& con, bool frontPush);
     void _listPop(Context& con, bool leftPop);
+    void _hashGetXX(Context& con, int getXX);
 
     HashMap _hashMap;
     CommandMap _commandMap;
 };
+
+const char *convert(int64_t value);
+
 };
 
 #endif

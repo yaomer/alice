@@ -20,6 +20,7 @@ namespace Alice {
     static unsigned char string_type = 0;
     static unsigned char list_type = 1;
     static unsigned char set_type = 2;
+    static unsigned char hash_type = 3;
     static unsigned char rdb_6bit_len = 0;
     static unsigned char rdb_14bit_len = 1;
     static unsigned char rdb_32bit_len = 0x80;
@@ -48,9 +49,10 @@ void Rdb::rdbSave()
             rdbSaveString(it);
         } else if (isXXType(it, DB::List)) {
             rdbSaveList(it);
-        } else {
+        } else if (isXXType(it, DB::Set)) {
             rdbSaveSet(it);
-        }
+        } else
+            rdbSaveHash(it);
     }
     rdbSaveLen(eof);
     if (_buffer.size() > 0) flush();
@@ -92,6 +94,21 @@ void Rdb::rdbSaveSet(Pair pair)
     for (auto& it : set) {
         rdbSaveLen(it.size());
         append(it);
+    }
+}
+
+void Rdb::rdbSaveHash(Pair pair)
+{
+    rdbSaveLen(hash_type);
+    rdbSaveLen(pair.first.size());
+    append(pair.first);
+    DB::Hash& hash = getXXType(pair, DB::Hash&);
+    rdbSaveLen(hash.size());
+    for (auto& it : hash) {
+        rdbSaveLen(it.first.size());
+        append(it.first);
+        rdbSaveLen(it.second.size());
+        append(it.second);
     }
 }
 
@@ -141,6 +158,28 @@ void Rdb::rdbRecover()
                 list.push_back(std::string(val, vallen));
             }
             map[std::string(key, keylen)] = std::move(list);
+        } else if (buf[i] == hash_type) {
+            i++;
+            i += rdbLoadLen(&buf[i], &keylen);
+            char key[keylen];
+            memcpy(&key[0], &buf[i], keylen);
+            i += keylen;
+            uint64_t hashlen;
+            i += rdbLoadLen(&buf[i], &hashlen);
+            DB::Hash hash;
+            uint64_t fieldlen;
+            while (hashlen-- > 0) {
+                i += rdbLoadLen(&buf[i], &fieldlen);
+                char field[fieldlen];
+                memcpy(&field[0], &buf[i], fieldlen);
+                i += fieldlen;
+                i += rdbLoadLen(&buf[i], &vallen);
+                char val[vallen];
+                memcpy(&val[0], &buf[i], vallen);
+                i += vallen;
+                hash[std::string(field, fieldlen)] = std::string(val, vallen);
+            }
+            map[std::string(key, keylen)] = std::move(hash);
         } else {
             i++;
             i += rdbLoadLen(&buf[i], &keylen);

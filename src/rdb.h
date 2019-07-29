@@ -23,6 +23,7 @@ public:
     void rdbSaveString(Pair pair);
     void rdbSaveList(Pair pair);
     void rdbSaveSet(Pair pair);
+    void rdbSaveHash(Pair pair);
     int rdbSaveLen(uint64_t len);
     int rdbLoadLen(char *ptr, uint64_t *lenptr);
     void rdbRecover();

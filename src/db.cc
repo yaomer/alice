@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <time.h>
-#include <regex.h>
+#include <ctype.h>
 #include <map>
 #include <vector>
 #include <list>
@@ -55,6 +55,19 @@ DB::DB()
         { "SUNIONSTORE",{ "SUNIONSTORE", 3, true, std::bind(&DB::setUnionStore, this, _1) } },
         { "SDIFF",      { "SDIFF", 2, false, std::bind(&DB::setDiff, this, _1) } },
         { "SDIFFSTORE", { "SDIFFSTORE", 3, true, std::bind(&DB::setDiffStore, this, _1) } },
+        { "HSET",       { "HSET", -4, true, std::bind(&DB::hashSet, this, _1) } },
+        { "HSETNX",     { "HSETNX", -4, true, std::bind(&DB::hashSetIfNotExists, this, _1) } },
+        { "HGET",       { "HGET", -3, false, std::bind(&DB::hashGet, this, _1) } },
+        { "HEXISTS",    { "HEXISTS", -3, false, std::bind(&DB::hashFieldExists, this, _1) } },
+        { "HDEL",       { "HDEL", 3, true, std::bind(&DB::hashDelete, this, _1) } },
+        { "HLEN",       { "HLEN", -2, false, std::bind(&DB::hashFieldLen, this, _1) } },
+        { "HSTRLEN",    { "HSTRLEN", -3, false, std::bind(&DB::hashValueLen, this, _1) } },
+        { "HINCRBY",    { "HINCRBY", -4, true, std::bind(&DB::hashIncrBy, this, _1) } },
+        { "HMSET",      { "HMSET", 4, true, std::bind(&DB::hashMset, this, _1) } },
+        { "HMGET",      { "HMGET", 3, false, std::bind(&DB::hashMget, this, _1) } },
+        { "HKEYS",      { "HKEYS", -2, false, std::bind(&DB::hashGetKeys, this, _1) } },
+        { "HVALS",      { "HVALS", -2, false, std::bind(&DB::hashGetValues, this, _1) } },
+        { "HGETALL",    { "HGETALL", -2, false, std::bind(&DB::hashGetAll, this, _1) } },
         { "EXISTS",     { "EXISTS", -2, false, std::bind(&DB::isKeyExists, this, _1) } },
         { "TYPE",       { "TYPE", -2, false, std::bind(&DB::getKeyType, this, _1) } },
         { "TTL",        { "TTL", -2, false, std::bind(&DB::getTtlSecs, this, _1) } },
@@ -86,7 +99,7 @@ namespace Alice {
     static const char *db_return_type_err = "-WRONGTYPE Operation"
         " against a key holding the wrong kind of value\r\n";
     static const char *db_return_interger_err = "-ERR value is"
-        " not an integer or out of range";
+        " not an integer or out of range\r\n";
     static const char *db_return_no_such_key = "-ERR no such key\r\n";
     static const char *db_return_out_of_range = "-ERR index out of range\r\n";
     static const char *db_return_string_type = "+string\r\n";
@@ -381,12 +394,27 @@ void DB::strMget(Context& con)
         con.db()->isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
-            checkType(con, it, String);
+            if (!isXXType(it, String)) {
+                con.append(db_return_nil);
+                continue;
+            }
             String& value = getStringValue(it);
             appendString(con, value);
         } else
             con.append(db_return_nil);
     }
+}
+
+bool DB::_strIsNumber(const String& s)
+{
+    bool isNumber = true;
+    for (auto c : s) {
+        if (!isnumber(c)) {
+            isNumber = false;
+            break;
+        }
+    }
+    return isNumber;
 }
 
 void DB::_strIdCr(Context& con, int64_t incr)
@@ -397,8 +425,8 @@ void DB::_strIdCr(Context& con, int64_t incr)
     if (it != _hashMap.end()) {
         checkType(con, it, String);
         String& value = getStringValue(it);
-        if (isnumber(value[0])) {
-            int64_t number = atol(value.c_str());
+        if (_strIsNumber(value)) {
+            int64_t number = atoll(value.c_str());
             number += incr;
             _hashMap[cmdlist[1]] = String(convert(number));
             appendNumber(con, number);
@@ -407,10 +435,8 @@ void DB::_strIdCr(Context& con, int64_t incr)
             return;
         }
     } else {
-        int64_t number = 0;
-        number += incr;
-        _hashMap[cmdlist[1]] = String(convert(number));
-        appendNumber(con, number);
+        _hashMap[cmdlist[1]] = String(convert(incr));
+        appendNumber(con, incr);
     }
 }
 
@@ -466,7 +492,7 @@ void DB::_listPush(Context& con, bool leftPush)
             if (leftPush)
                 list.push_front(cmdlist[i]);
             else
-                list.push_back(cmdlist[1]);
+                list.push_back(cmdlist[i]);
         }
         _hashMap[cmdlist[1]] = list;
         appendNumber(con, list.size());
@@ -1171,3 +1197,285 @@ void DB::setDiffStore(Context& con)
 {
 
 }
+
+//////////////////////////////////////////////////////////////////
+// Hash Keys Operation
+//////////////////////////////////////////////////////////////////
+
+#define getHashValue(it) getXXType(it, Hash&)
+
+void DB::hashSet(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        Hash hash;
+        hash[cmdlist[2]] = cmdlist[3];
+        con.append(db_return_integer_1);
+        _hashMap[cmdlist[1]] = std::move(hash);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    if (hash.find(cmdlist[2]) != hash.end()) {
+        con.append(db_return_integer_0);
+    } else {
+        con.append(db_return_integer_1);
+    }
+    hash[cmdlist[2]] = cmdlist[3];
+}
+
+void DB::hashSetIfNotExists(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        Hash hash;
+        hash[cmdlist[2]] = cmdlist[3];
+        con.append(db_return_integer_1);
+        _hashMap[cmdlist[1]] = std::move(hash);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    if (hash.find(cmdlist[2]) != hash.end()) {
+        con.append(db_return_integer_0);
+    } else {
+        hash[cmdlist[2]] = cmdlist[3];
+        con.append(db_return_integer_1);
+    }
+}
+
+void DB::hashGet(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_nil);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    auto value = hash.find(cmdlist[2]);
+    if (value != hash.end()) {
+        appendString(con, value->second);
+    } else
+        con.append(db_return_nil);
+}
+
+void DB::hashFieldExists(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    if (hash.find(cmdlist[2]) != hash.end()) {
+        con.append(db_return_integer_1);
+    } else {
+        con.append(db_return_integer_0);
+    }
+}
+
+void DB::hashDelete(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    size_t size = cmdlist.size();
+    checkType(con, it, Hash);
+    int retval = 0;
+    Hash& hash = getHashValue(it);
+    for (auto i = 2; i < size; i++) {
+        auto it = hash.find(cmdlist[i]);
+        if (it != hash.end()) {
+            hash.erase(it);
+            retval++;
+        }
+    }
+    appendNumber(con, retval);
+}
+
+void DB::hashFieldLen(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it != _hashMap.end()) {
+        checkType(con, it, Hash);
+        Hash& hash = getHashValue(it);
+        appendNumber(con, hash.size());
+    } else {
+        con.append(db_return_integer_0);
+    }
+}
+
+void DB::hashValueLen(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    auto value = hash.find(cmdlist[2]);
+    if (value != hash.end()) {
+        appendNumber(con, value->second.size());
+    } else {
+        con.append(db_return_integer_0);
+    }
+}
+
+void DB::hashIncrBy(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    if (!_strIsNumber(cmdlist[3])) {
+        con.append(db_return_interger_err);
+        return;
+    }
+    int64_t incr = atoll(cmdlist[3].c_str());
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        Hash hash;
+        hash[cmdlist[2]] = cmdlist[3];
+        _hashMap[cmdlist[1]] = std::move(hash);
+        con.append(db_return_integer_0);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    auto value = hash.find(cmdlist[2]);
+    if (value != hash.end()) {
+        if (!_strIsNumber(value->second)) {
+            con.append(db_return_interger_err);
+            return;
+        }
+        int64_t i64 = atoll(value->second.c_str());
+        i64 += incr;
+        value->second.assign(convert(i64));
+        appendNumber(con, i64);
+    } else {
+        hash[cmdlist[2]] = String(convert(incr));
+        appendNumber(con, incr);
+    }
+}
+
+void DB::hashMset(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    size_t size = cmdlist.size();
+    if (size % 2 != 0) {
+        con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
+        return;
+    }
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        Hash hash;
+        for (auto i = 2; i < size; i += 2) {
+            hash[cmdlist[i]] = cmdlist[i + 1];
+        }
+        _hashMap[cmdlist[1]] = std::move(hash);
+        con.append(db_return_ok);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    for (auto i = 2; i < size; i += 2) {
+        hash[cmdlist[i]] = cmdlist[i + 1];
+    }
+    con.append(db_return_ok);
+}
+
+void DB::hashMget(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    size_t size = cmdlist.size();
+    auto it = _hashMap.find(cmdlist[1]);
+    appendAmount(con, size - 2);
+    if (it == _hashMap.end()) {
+        for (auto i = 2; i < size; i++)
+            con.append(db_return_nil);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    for (auto i = 2; i < size; i++) {
+        auto it = hash.find(cmdlist[i]);
+        if (it != hash.end()) {
+            appendString(con, it->second);
+        } else {
+            con.append(db_return_nil);
+        }
+    }
+}
+
+#define GETKEYS     0
+#define GETVALUES   1
+#define GETALL      2
+
+void DB::_hashGetXX(Context& con, int getXX)
+{
+    auto& cmdlist = con.commandList();
+    con.db()->isExpiredKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_nil);
+        return;
+    }
+    checkType(con, it, Hash);
+    Hash& hash = getHashValue(it);
+    if (hash.empty()) {
+        con.append(db_return_nil);
+        return;
+    }
+    if (getXX == GETALL)
+        appendAmount(con, hash.size() * 2);
+    else
+        appendAmount(con, hash.size());
+    for (auto& it : hash) {
+        if (getXX == GETKEYS) {
+            appendString(con, it.first);
+        } else if (getXX == GETVALUES) {
+            appendString(con, it.second);
+        } else if (getXX == GETALL) {
+            appendString(con, it.first);
+            appendString(con, it.second);
+        }
+    }
+}
+
+void DB::hashGetKeys(Context& con)
+{
+    _hashGetXX(con, GETKEYS);
+}
+
+void DB::hashGetValues(Context& con)
+{
+    _hashGetXX(con, GETVALUES);
+}
+
+void DB::hashGetAll(Context& con)
+{
+    _hashGetXX(con, GETALL);
+}
+
+#undef GETKEYS
+#undef GETVALUES
+#undef GETALL
