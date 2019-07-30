@@ -1,3 +1,4 @@
+#include <Angel/Logger.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -21,9 +22,11 @@ namespace Alice {
     static unsigned char list_type = 1;
     static unsigned char set_type = 2;
     static unsigned char hash_type = 3;
+    static unsigned char expire_key = 4;
     static unsigned char rdb_6bit_len = 0;
     static unsigned char rdb_14bit_len = 1;
     static unsigned char rdb_32bit_len = 0x80;
+    static unsigned char rdb_64bit_len = 0x81;
 }
 
 #define isXXType(it, _type) \
@@ -37,8 +40,21 @@ void Rdb::save()
     mktemp(_tmpFilename);
     _fd = open(_tmpFilename, O_RDWR | O_CREAT | O_APPEND, 0660);
     append(magic, 5);
+    int64_t now = Angel::TimeStamp::now();
     auto& map = _dbServer->db().hashMap();
     for (auto& it : map) {
+        auto expire = _dbServer->expireMap().find(it.first);
+        if (expire != _dbServer->expireMap().end()) {
+            if (expire->second <= now) {
+                _dbServer->delExpireKey(it.first);
+                _dbServer->db().delKey(it.first);
+                continue;
+            } else {
+                saveLen(expire_key);
+                int64_t timeval = expire->second;
+                append(&timeval, 8);
+            }
+        }
         if (isXXType(it, DB::String)) {
             saveString(it);
         } else if (isXXType(it, DB::List)) {
@@ -55,6 +71,7 @@ void Rdb::save()
     rename(_tmpFilename, "dump.rdb");
 }
 
+// 多线程fork()
 void Rdb::backgroundSave()
 {
     _bgSavePid = fork();
@@ -85,6 +102,11 @@ int Rdb::saveLen(uint64_t len)
         uint32_t len32 = htonl(len);
         append(&len32, 4);
         writeBytes = 1 + 4;
+    } else {
+        buf[0] = rdb_64bit_len;
+        append(buf, 1);
+        append(&len, 8);
+        writeBytes = 1 + 8;
     }
     return writeBytes;
 }
@@ -107,6 +129,9 @@ int Rdb::loadLen(char *ptr, uint64_t *lenptr)
         uint32_t len32 = *reinterpret_cast<uint32_t*>(&ptr[1]);
         *lenptr = ntohl(len32);
         readBytes = 5;
+    } else {
+        *lenptr = *reinterpret_cast<uint64_t*>(&ptr[1]);
+        readBytes = 8;
     }
     return readBytes;
 }
@@ -175,25 +200,29 @@ void Rdb::load()
         return;
     buf += 5;
     uint64_t typelen;
+    int64_t timeval = 0;
     while (true) {
         loadLen(buf, &typelen);
         if (typelen == eof)
             break;
-        if (buf[0] == string_type) {
-            buf = loadString(buf + 1);
+        if (buf[0] == expire_key) {
+            timeval = *reinterpret_cast<int64_t*>(buf+1);
+            buf += 9;
+        } else if (buf[0] == string_type) {
+            buf = loadString(buf + 1, &timeval);
         } else if (buf[0] == list_type) {
-            buf = loadList(buf + 1);
+            buf = loadList(buf + 1, &timeval);
         } else if (buf[0] == set_type) {
-            buf = loadSet(buf + 1);
+            buf = loadSet(buf + 1, &timeval);
         } else {
-            buf = loadHash(buf + 1);
+            buf = loadHash(buf + 1, &timeval);
         }
     }
     munmap(start, size);
     close(fd);
 }
 
-char *Rdb::loadString(char *ptr)
+char *Rdb::loadString(char *ptr, int64_t *timevalptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -205,11 +234,16 @@ char *Rdb::loadString(char *ptr)
     memcpy(val, ptr, vallen);
     ptr += vallen;
     auto& map = _dbServer->db().hashMap();
-    map[std::string(key, keylen)] = std::string(val, vallen);
+    std::string strKey(key, keylen);
+    map[strKey] = std::string(val, vallen);
+    if (*timevalptr > 0) {
+        _dbServer->expireMap()[strKey] = *timevalptr;
+        *timevalptr = 0;
+    }
     return ptr;
 }
 
-char *Rdb::loadList(char *ptr)
+char *Rdb::loadList(char *ptr, int64_t *timevalptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -227,11 +261,16 @@ char *Rdb::loadList(char *ptr)
         list.push_back(std::string(val, vallen));
     }
     auto& map = _dbServer->db().hashMap();
-    map[std::string(key, keylen)] = std::move(list);
+    std::string listKey(key, keylen);
+    map[listKey] = std::move(list);
+    if (*timevalptr > 0) {
+        _dbServer->expireMap()[listKey] = *timevalptr;
+        *timevalptr = 0;
+    }
     return ptr;
 }
 
-char *Rdb::loadSet(char *ptr)
+char *Rdb::loadSet(char *ptr, int64_t *timevalptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -249,11 +288,16 @@ char *Rdb::loadSet(char *ptr)
         set.insert(std::string(val, vallen));
     }
     auto& map = _dbServer->db().hashMap();
-    map[std::string(key, keylen)] = std::move(set);
+    std::string setKey(key, keylen);
+    map[setKey] = std::move(set);
+    if (*timevalptr > 0) {
+        _dbServer->expireMap()[setKey] = *timevalptr;
+        *timevalptr = 0;
+    }
     return ptr;
 }
 
-char *Rdb::loadHash(char *ptr)
+char *Rdb::loadHash(char *ptr, int64_t *timevalptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -276,7 +320,12 @@ char *Rdb::loadHash(char *ptr)
         hash[std::string(field, fieldlen)] = std::string(val, vallen);
     }
     auto& map = _dbServer->db().hashMap();
-    map[std::string(key, keylen)] = std::move(hash);
+    std::string hashKey(key, keylen);
+    map[hashKey] = std::move(hash);
+    if (*timevalptr > 0) {
+        _dbServer->expireMap()[hashKey] = *timevalptr;
+        *timevalptr = 0;
+    }
     return ptr;
 }
 

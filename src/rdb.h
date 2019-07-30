@@ -30,10 +30,10 @@ public:
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);
     void load();
-    char *loadString(char *ptr);
-    char *loadList(char *ptr);
-    char *loadSet(char *ptr);
-    char *loadHash(char *ptr);
+    char *loadString(char *ptr, int64_t *timevalptr);
+    char *loadList(char *ptr, int64_t *timevalptr);
+    char *loadSet(char *ptr, int64_t *timevalptr);
+    char *loadHash(char *ptr, int64_t *timevalptr);
     void append(const std::string& data);
     void append(const void *data, size_t len);
     void flush();
