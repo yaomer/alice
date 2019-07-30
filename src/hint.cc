@@ -74,6 +74,9 @@ HintInfo hiTable[HTSIZE] = {
     { "PEXPIRE",    7,  " key milliseconds" },
     { "DEL",        3,  " key [key ...]" },
     { "KEYS",       4,  " pattern" },
+    { "SAVE",       4,  "" },
+    { "BGSAVE",     6,  "" },
+    { "LASTSAVE",   8,  "" },
     { "", 0, "" },
 };
 
@@ -110,6 +113,7 @@ char *hints(const char *buf, int *color, int *bold)
         if (strncasecmp(p, hiTable[i].name, hiTable[i].len) == 0) {
             if (hiTable[i].len == buflen)
                 goto ret;
+            if (!ip[0]) return nullptr;
             if (!isspace(p[hiTable[i].len]))
                 return nullptr;
             p += hiTable[i].len;

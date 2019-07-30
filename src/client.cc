@@ -7,22 +7,35 @@
 
 using namespace Alice;
 
-void Client::parseLine(const char *line, const char *linep)
+int Client::parseLine(const char *line, const char *linep)
 {
-    const char *next = nullptr;
+    const char *start;
     do {
         line = std::find_if(line, linep, [](char c){ return !isspace(c); });
         if (line == linep) break;
         if (*line == '\"') {
-            line += 1;
-            next = std::find(line, linep, '\"');
+            start = ++line;
+search:
+            line = std::find(line, linep, '\"');
+            if (line == linep) goto err;
+            if (line[-1] == '\\') {
+                line++;
+                goto search;
+            }
+            if (!isspace(line[1])) goto err;
+            _argv.push_back(std::string(start, line - start));
+            line++;
         } else {
-            next = std::find_if(line, linep, [](char c){ return isspace(c); });
+            start = line;
+            line = std::find_if(line, linep, [](char c){ return isspace(c); });
+            if (line == linep) goto err;
+            _argv.push_back(std::string(start, line - start));
         }
-        if (next == linep) break;
-        _argv.push_back(std::string(line, next - line));
-        line = next + 1;
     } while (1);
+    return 0;
+err:
+    _argv.clear();
+    return -1;
 }
 
 namespace Alice {
@@ -167,7 +180,10 @@ int main()
     while ((line = linenoise("Alice>> "))) {
         size_t len = strlen(line);
         line[len] = '\n';
-        client.parseLine(line, line + len + 1);
+        int ret = client.parseLine(line, line + len + 1);
+        if (ret < 0) {
+            std::cout << "input error\n";
+        }
         client.send();
         line[len] = '\0';
         usleep(200000);

@@ -15,28 +15,35 @@ public:
 
     explicit Rdb(DBServer *dbServer) 
         : _dbServer(dbServer),
+        _bgSavePid(0),
         _fd(-1) 
     { 
         bzero(_tmpFilename, sizeof(_tmpFilename));
     }
-    void rdbSave();
-    void rdbSaveString(Pair pair);
-    void rdbSaveList(Pair pair);
-    void rdbSaveSet(Pair pair);
-    void rdbSaveHash(Pair pair);
-    int rdbSaveLen(uint64_t len);
-    int rdbLoadLen(char *ptr, uint64_t *lenptr);
-    void rdbRecover();
+    void save();
+    void backgroundSave();
+    pid_t bgSavePid() { return _bgSavePid; }
+    void saveString(Pair pair);
+    void saveList(Pair pair);
+    void saveSet(Pair pair);
+    void saveHash(Pair pair);
+    int saveLen(uint64_t len);
+    int loadLen(char *ptr, uint64_t *lenptr);
+    void load();
+    char *loadString(char *ptr);
+    char *loadList(char *ptr);
+    char *loadSet(char *ptr);
+    char *loadHash(char *ptr);
     void append(const std::string& data);
     void append(const void *data, size_t len);
     void flush();
 private:
     DBServer *_dbServer;
+    pid_t _bgSavePid;
     std::string _buffer;
     char _tmpFilename[16];
     int _fd;
 };
-
 }
 
 #endif // _ALICE_SRC_RDB_H

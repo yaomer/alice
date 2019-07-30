@@ -14,18 +14,50 @@ using std::placeholders::_2;
 
 namespace Alice {
 
+class SaveParam {
+public:
+    SaveParam(time_t seconds, int changes)
+        : _seconds(seconds),
+        _changes(changes)
+    {
+    }
+    time_t seconds() const { return _seconds; }
+    int changes() const { return _changes; }
+private:
+    time_t _seconds;
+    int _changes;
+};
+
 class DBServer {
 public:
     using Key = std::string;
     using ExpireMap = std::unordered_map<Key, int64_t>;
-    DBServer() { _rdb.reset(new Rdb(this)); }
+    enum FLAG {
+        RDB_BGSAVE = 001,
+    };
+    DBServer() 
+        : _db(this),
+        _flag(0),
+        _lastSaveTime(Angel::TimeStamp::now())
+    { 
+        _rdb.reset(new Rdb(this)); 
+    }
     DB& db() { return _db; }
     Rdb *rdb() { return _rdb.get(); }
+    int flag() { return _flag; }
+    void setFlag(int flag) { _flag |= flag; }
+    void clearFlag(int flag) { _flag &= ~flag; }
+    void addSaveParam(time_t seconds, int changes)
+    { _saveParams.push_back(SaveParam(seconds, changes)); }
+    std::vector<SaveParam>& saveParams() { return _saveParams; }
+    int64_t lastSaveTime() const { return _lastSaveTime; }
+    void setLastSaveTime(int64_t now) { _lastSaveTime = now; }
+    int dirty() const { return _dirty; }
+    void dirtyIncr() { _dirty++; }
+    void dirtyReset() { _dirty = 0; }
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
-    {
-        _expireMap.insert(std::make_pair(key, expire + Angel::TimeStamp::now()));
-    }
+    { _expireMap[key] = expire + Angel::TimeStamp::now(); }
     void delExpireKey(const Key& key)
     {
         auto it = _expireMap.find(key);
@@ -49,6 +81,10 @@ private:
     DB _db;
     ExpireMap _expireMap;
     std::unique_ptr<Rdb> _rdb;
+    std::vector<SaveParam> _saveParams;
+    int _flag;
+    int64_t _lastSaveTime;
+    int _dirty;
 };
 
 class Server {
@@ -61,11 +97,9 @@ public:
                 std::bind(&Server::onConnection, this, _1));
         _server.setMessageCb(
                 std::bind(&Server::onMessage, this, _1, _2));
+        readConf();
         _loop->runEvery(100, [this]{ this->serverCron(); });
-        _loop->runEvery(1000, [this]{ 
-                this->_dbServer.rdb()->rdbSave(); 
-                });
-        _dbServer.rdb()->rdbRecover();
+        _dbServer.rdb()->load();
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
@@ -93,21 +127,24 @@ public:
             }
         }
     }
+    void readConf();
     void serverCron();
     void parseRequest(Context& con, Angel::Buffer& buf);
     void executeCommand(Context& con);
     void replyResponse(const Angel::TcpConnectionPtr& conn);
     void execError(const Angel::TcpConnectionPtr& conn);
     void start() { _server.start(); }
+    DBServer& dbServer() { return _dbServer; }
+    Angel::EventLoop *loop() { return _loop; }
 private:
     Angel::EventLoop *_loop;
     Angel::TcpServer _server;
     DBServer _dbServer;
 };
 
-extern thread_local size_t rdb_save_modifies;
-extern thread_local size_t rdb_modifies;
 extern thread_local int64_t _lru_cache;
+extern Alice::Server *g_server;
+
 }
 
 #endif

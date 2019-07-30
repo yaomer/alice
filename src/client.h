@@ -25,7 +25,7 @@ public:
     {
         parseResponse(buf);
     }
-    void parseLine(const char *line, const char *linep);
+    int parseLine(const char *line, const char *linep);
     void parseResponse(Angel::Buffer& buf);
     void send();
     void start() { _client.start(); }

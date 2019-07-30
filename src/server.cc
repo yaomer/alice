@@ -1,3 +1,5 @@
+#include <unistd.h>
+#include <sys/wait.h>
 #include <Angel/EventLoop.h>
 #include <Angel/TcpServer.h>
 #include <algorithm>
@@ -6,7 +8,6 @@
 
 using namespace Alice;
 
-// *1\r\n$8\r\njkjljljl\r\n
 void Server::parseRequest(Context& con, Angel::Buffer& buf)
 {
     const char *s = buf.peek();
@@ -32,10 +33,9 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         s = std::find_if(s, es, [](char c){ return !isnumber(c); });
         if (s[0] != '\r' || s[1] != '\n') goto err;
         s += 2;
-        next = std::find(s, es, '\n');
+        next = std::find(s, es, '\r');
         if (next == es) return;
-        next = std::find_if(s, es, isspace);
-        if (next[0] != '\r' || next[1] != '\n' || next - s != len) {
+        if (next[1] != '\n' || next - s != len) {
             goto err;
         }
         con.addArg(s, next);
@@ -47,12 +47,6 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
     return;
 err:
     con.setFlag(Context::PROTOCOLERR);
-}
-
-namespace Alice {
-
-    thread_local size_t rdb_save_modifies = 1;
-    thread_local size_t rdb_modifies = 0;
 }
 
 void Server::executeCommand(Context& con)
@@ -70,7 +64,7 @@ void Server::executeCommand(Context& con)
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
-    if (it->second.isWrite()) rdb_modifies++;
+    if (it->second.isWrite()) _dbServer.dirtyIncr();
     it->second._commandCb(con);
 err:
     con.setFlag(Context::REPLY);
@@ -89,12 +83,35 @@ namespace Alice {
 
     // 键的空转时间不需要十分精确
     thread_local int64_t _lru_cache;
+    Alice::Server *g_server;
 }
 
 void Server::serverCron()
 {
     int64_t now = Angel::TimeStamp::now();
     _lru_cache = now;
+
+    if (_dbServer.flag() & DBServer::RDB_BGSAVE) {
+        pid_t childPid = _dbServer.rdb()->bgSavePid();
+        if (getpid() != childPid) {
+            pid_t pid = waitpid(childPid, nullptr, WNOHANG);
+            if (pid > 0) {
+                _dbServer.clearFlag(DBServer::RDB_BGSAVE);
+            }
+        }
+    }
+    int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
+    for (auto& it : _dbServer.saveParams()) {
+        if (saveInterval >= it.seconds() && _dbServer.dirty() >= it.changes()) {
+            if (!(_dbServer.flag() & DBServer::RDB_BGSAVE)) {
+                _dbServer.rdb()->backgroundSave();
+                _dbServer.setLastSaveTime(Angel::TimeStamp::now());
+                _dbServer.dirtyReset();
+                break;
+            }
+        }
+    }
+
     for (auto& it : _dbServer.expireMap()) {
         if (it.second <= now) {
             _dbServer.db().delKey(it.first);
@@ -103,11 +120,35 @@ void Server::serverCron()
     }
 }
 
+void Server::readConf()
+{
+    FILE *fp = fopen("alice.conf", "r");
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), fp)) {
+        const char *s = buf;
+        const char *es = buf + strlen(buf);
+        s = std::find_if(s, es, [](char c){ return !isspace(c); });
+        if (s == es || s[0] == '#') continue;
+        if (strncasecmp(s, "save", 4) == 0) {
+            time_t seconds = atoi(&s[5]);
+            s = std::find(s + 5, es, ':');
+            int changes = atoi(&s[1]);
+            _dbServer.addSaveParam(seconds, changes);
+        }
+    }
+    fclose(fp);
+}
+
 int main()
 {
     Angel::EventLoop loop;
     Angel::InetAddr listenAddr(8000);
     Alice::Server server(&loop, listenAddr);
+    g_server = &server;
+    Angel::addSignal(SIGINT, []{
+            g_server->dbServer().rdb()->save();
+            g_server->loop()->quit();
+            });
     server.start();
     loop.run();
 }

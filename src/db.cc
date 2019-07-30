@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <ctype.h>
+#include <unistd.h>
 #include <map>
 #include <vector>
 #include <list>
@@ -13,7 +14,8 @@
 using namespace Alice;
 using std::placeholders::_1;
 
-DB::DB()
+DB::DB(DBServer *dbServer)
+    : _dbServer(dbServer)
 {
     _commandMap = {
         { "SET",        { "SET", 3, true, std::bind(&DB::strSet, this, _1) } },
@@ -76,6 +78,9 @@ DB::DB()
         { "PEXPIRE",    { "PEXPIRE", -3, false, std::bind(&DB::setKeyExpireMils, this, _1) } },
         { "DEL",        { "DEL", 2, true, std::bind(&DB::deleteKey, this, _1) } },
         { "KEYS",       { "KEYS", -2, false, std::bind(&DB::getAllKeys, this, _1) } },
+        { "SAVE",       { "SAVE", -1, false, std::bind(&DB::save, this, _1) } },
+        { "BGSAVE",     { "BGSAVE", -1, false, std::bind(&DB::backgroundSave, this, _1) } },
+        { "LASTSAVE",   { "LASTSAVE", -1, false, std::bind(&DB::lastSaveTime, this, _1) } },
     };
 }
 
@@ -265,6 +270,32 @@ void DB::getAllKeys(Context& con)
     }
     if (size == con.message().size())
         con.assign(db_return_nil);
+}
+
+void DB::save(Context& con)
+{
+    if (_dbServer->flag() & DBServer::RDB_BGSAVE)
+        return;
+    _dbServer->rdb()->save();
+    con.append(db_return_ok);
+    _dbServer->setLastSaveTime(Angel::TimeStamp::now());
+    _dbServer->dirtyReset();
+}
+
+void DB::backgroundSave(Context& con)
+{
+    if (_dbServer->flag() & DBServer::RDB_BGSAVE)
+        return;
+    _dbServer->setFlag(DBServer::RDB_BGSAVE);
+    _dbServer->rdb()->backgroundSave();
+    con.append("+Background saving started\r\n");
+    _dbServer->setLastSaveTime(Angel::TimeStamp::now());
+    _dbServer->dirtyReset();
+}
+
+void DB::lastSaveTime(Context& con)
+{
+    appendNumber(con, _dbServer->lastSaveTime());
 }
 
 //////////////////////////////////////////////////////////////////

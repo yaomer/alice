@@ -101,7 +101,7 @@ public:
     using List = std::list<std::string>;
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
-    DB();
+    explicit DB(DBServer *);
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
     void delKey(const Key& key)
@@ -118,6 +118,9 @@ public:
     void setKeyExpireMils(Context& con);
     void deleteKey(Context& con);
     void getAllKeys(Context& con);
+    void save(Context& con);
+    void backgroundSave(Context& con);
+    void lastSaveTime(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);
@@ -186,6 +189,7 @@ private:
 
     HashMap _hashMap;
     CommandMap _commandMap;
+    DBServer *_dbServer;
 };
 
 const char *convert(int64_t value);
