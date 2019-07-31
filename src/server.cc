@@ -26,7 +26,7 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
     // 解析各个命令
     while (argc > 0) {
         next = std::find(s, es, '\n');
-        if (next == es) return;
+        if (next == es) goto clr;
         if (s[0] != '$' || next[-1] != '\r') goto err;
         s += 1;
         len = atol(s);
@@ -34,7 +34,7 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         if (s[0] != '\r' || s[1] != '\n') goto err;
         s += 2;
         next = std::find(s, es, '\r');
-        if (next == es) return;
+        if (next == es) goto clr;
         if (next[1] != '\n' || next - s != len) {
             goto err;
         }
@@ -44,6 +44,9 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
     }
     buf.retrieve(s - ps);
     con.setFlag(Context::SUCCEED);
+    return;
+clr:
+    con.commandList().clear();
     return;
 err:
     con.setFlag(Context::PROTOCOLERR);
@@ -64,7 +67,10 @@ void Server::executeCommand(Context& con)
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
-    if (it->second.isWrite()) _dbServer.dirtyIncr();
+    if (it->second.isWrite()) {
+        _dbServer.dirtyIncr();
+        _dbServer.aof()->append(cmdlist);
+    }
     it->second._commandCb(con);
 err:
     con.setFlag(Context::REPLY);
@@ -90,6 +96,8 @@ void Server::serverCron()
 {
     int64_t now = Angel::TimeStamp::now();
     _lru_cache = now;
+
+    _dbServer.aof()->flush();
 
     if (_dbServer.flag() & DBServer::RDB_BGSAVE) {
         pid_t childPid = _dbServer.rdb()->bgSavePid();
@@ -118,25 +126,6 @@ void Server::serverCron()
             _dbServer.delExpireKey(it.first);
         }
     }
-}
-
-void Server::readConf()
-{
-    FILE *fp = fopen("alice.conf", "r");
-    char buf[1024];
-    while (fgets(buf, sizeof(buf), fp)) {
-        const char *s = buf;
-        const char *es = buf + strlen(buf);
-        s = std::find_if(s, es, [](char c){ return !isspace(c); });
-        if (s == es || s[0] == '#') continue;
-        if (strncasecmp(s, "save", 4) == 0) {
-            time_t seconds = atoi(&s[5]);
-            s = std::find(s + 5, es, ':');
-            int changes = atoi(&s[1]);
-            _dbServer.addSaveParam(seconds, changes);
-        }
-    }
-    fclose(fp);
 }
 
 int main()
