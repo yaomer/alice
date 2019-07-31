@@ -74,8 +74,8 @@ DB::DB(DBServer *dbServer)
         { "TYPE",       { "TYPE", -2, false, std::bind(&DB::getKeyType, this, _1) } },
         { "TTL",        { "TTL", -2, false, std::bind(&DB::getTtlSecs, this, _1) } },
         { "PTTL",       { "PTTL", -2, false, std::bind(&DB::getTtlMils, this, _1) } },
-        { "EXPIRE",     { "EXPIRE", -3, false, std::bind(&DB::setKeyExpireSecs, this, _1) } },
-        { "PEXPIRE",    { "PEXPIRE", -3, false, std::bind(&DB::setKeyExpireMils, this, _1) } },
+        { "EXPIRE",     { "EXPIRE", -3, true, std::bind(&DB::setKeyExpireSecs, this, _1) } },
+        { "PEXPIRE",    { "PEXPIRE", -3, true, std::bind(&DB::setKeyExpireMils, this, _1) } },
         { "DEL",        { "DEL", 2, true, std::bind(&DB::deleteKey, this, _1) } },
         { "KEYS",       { "KEYS", -2, false, std::bind(&DB::getAllKeys, this, _1) } },
         { "SAVE",       { "SAVE", -1, false, std::bind(&DB::save, this, _1) } },
@@ -216,6 +216,10 @@ void DB::_setKeyExpire(Context& con, bool seconds)
     auto& cmdlist = con.commandList();
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
+        if (!_strIsNumber(cmdlist[2])) {
+            con.append(db_return_interger_err);
+            return;
+        }
         int64_t expire = atol(cmdlist[2].c_str());
         if (seconds)
             expire *= 1000;

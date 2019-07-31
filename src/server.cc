@@ -128,6 +128,12 @@ void Server::serverCron()
         }
     }
 
+    if (_dbServer.aof()->rewriteIsOk()) {
+        if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
+            _dbServer.aof()->rewriteBackground();
+        }
+    }
+
     for (auto& it : _dbServer.expireMap()) {
         if (it.second <= now) {
             _dbServer.db().delKey(it.first);

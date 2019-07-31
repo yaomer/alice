@@ -15,16 +15,10 @@ public:
     using Pair = std::pair<DB::Key, Value>;
 
     static const size_t buffer_flush_size = 4096;
+    static const size_t rewrite_min_filesize = 16 * 1024 * 1024;
+    static const size_t rewrite_rate = 2;
 
-    explicit Aof(DBServer *dbServer)
-        : _dbServer(dbServer),
-        _mode(EVERYSEC),
-        _childPid(-1),
-        _lastSyncTime(0),
-        _fd(-1)
-    {
-
-    }
+    explicit Aof(DBServer *dbServer);
     int mode() const { return _mode; }
     void setMode(int mode) { _mode = mode; }
     void append(Context::CommandList& cmdlist);
@@ -33,6 +27,7 @@ public:
     void rewriteBackground();
     pid_t childPid() const { return _childPid; }
     void childPidReset() { _childPid = -1; }
+    bool rewriteIsOk();
 private:
     void append(const std::string& s);
     void flush();
@@ -42,12 +37,15 @@ private:
     void rewriteList(Pair pair);
     void rewriteSet(Pair pair);
     void rewriteHash(Pair pair);
+    size_t getFilesize(int fd);
 
     DBServer *_dbServer;
     std::string _buffer;
     int _mode;
     pid_t _childPid;
     int64_t _lastSyncTime;
+    size_t _currentFilesize;
+    size_t _lastRewriteFilesize;
     int _fd;
 };
 }
