@@ -79,7 +79,8 @@ DB::DB(DBServer *dbServer)
         { "DEL",        { "DEL", 2, true, std::bind(&DB::deleteKey, this, _1) } },
         { "KEYS",       { "KEYS", -2, false, std::bind(&DB::getAllKeys, this, _1) } },
         { "SAVE",       { "SAVE", -1, false, std::bind(&DB::save, this, _1) } },
-        { "BGSAVE",     { "BGSAVE", -1, false, std::bind(&DB::backgroundSave, this, _1) } },
+        { "BGSAVE",     { "BGSAVE", -1, false, std::bind(&DB::saveBackground, this, _1) } },
+        { "BGREWRITEAOF",{ "BGREWRITEAOF", -1, false, std::bind(&DB::rewriteAof, this, _1) } },
         { "LASTSAVE",   { "LASTSAVE", -1, false, std::bind(&DB::lastSaveTime, this, _1) } },
     };
 }
@@ -274,7 +275,7 @@ void DB::getAllKeys(Context& con)
 
 void DB::save(Context& con)
 {
-    if (_dbServer->flag() & DBServer::RDB_BGSAVE)
+    if (_dbServer->rdb()->childPid() != -1)
         return;
     _dbServer->rdb()->save();
     con.append(db_return_ok);
@@ -282,15 +283,32 @@ void DB::save(Context& con)
     _dbServer->dirtyReset();
 }
 
-void DB::backgroundSave(Context& con)
+void DB::saveBackground(Context& con)
 {
-    if (_dbServer->flag() & DBServer::RDB_BGSAVE)
+    if (_dbServer->aof()->childPid() != -1) {
+        con.append("+Background append only file rewriting ...\r\n");
         return;
-    _dbServer->setFlag(DBServer::RDB_BGSAVE);
-    _dbServer->rdb()->backgroundSave();
+    }
+    if (_dbServer->rdb()->childPid() != -1)
+        return;
+    _dbServer->rdb()->saveBackground();
     con.append("+Background saving started\r\n");
     _dbServer->setLastSaveTime(Angel::TimeStamp::now());
     _dbServer->dirtyReset();
+}
+
+void DB::rewriteAof(Context& con)
+{
+    if (_dbServer->rdb()->childPid() != -1) {
+        _dbServer->setFlag(DBServer::REWRITEAOF_DELAY);
+        return;
+    }
+    if (_dbServer->aof()->childPid() != -1) {
+        return;
+    }
+    _dbServer->aof()->rewriteBackground();
+    con.append("+Background append only file rewriting started\r\n");
+    _dbServer->setLastSaveTime(Angel::TimeStamp::now());
 }
 
 void DB::lastSaveTime(Context& con)
@@ -514,7 +532,7 @@ void DB::_listPush(Context& con, bool leftPush)
             if (leftPush)
                 list.push_front(cmdlist[i]);
             else
-                list.push_back(cmdlist[1]);
+                list.push_back(cmdlist[i]);
         }
         appendNumber(con, list.size());
     } else {
@@ -1221,12 +1239,12 @@ void DB::setUnionStore(Context& con)
 
 void DB::setDiff(Context& con)
 {
-
+    // TODO:
 }
 
 void DB::setDiffStore(Context& con)
 {
-
+    // TODO:
 }
 
 //////////////////////////////////////////////////////////////////

@@ -9,5 +9,5 @@ elif [ "$PLATFORM" == "Linux" ]; then
     CXX=g++
 fi
 
-$CXX $CXXFLAGS server.cc db.cc rdb.cc -langel -o serv
+$CXX $CXXFLAGS server.cc db.cc rdb.cc aof.cc config.cc -langel -o serv
 $CXX $CXXFLAGS client.cc hint.cc -langel -o cli

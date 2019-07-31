@@ -1,4 +1,3 @@
-#include <Angel/Logger.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -36,9 +35,10 @@ namespace Alice {
 
 void Rdb::save()
 {
-    strcpy(_tmpFilename, "tmp.XXXXX");
-    mktemp(_tmpFilename);
-    _fd = open(_tmpFilename, O_RDWR | O_CREAT | O_APPEND, 0660);
+    char tmpfile[16];
+    strcpy(tmpfile, "tmp.XXXXX");
+    mktemp(tmpfile);
+    _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
     append(magic, 5);
     int64_t now = Angel::TimeStamp::now();
     auto& map = _dbServer->db().hashMap();
@@ -68,16 +68,16 @@ void Rdb::save()
     if (_buffer.size() > 0) flush();
     fsync(_fd);
     close(_fd);
-    rename(_tmpFilename, "dump.rdb");
+    rename(tmpfile, "dump.rdb");
 }
 
-// 多线程fork()
-void Rdb::backgroundSave()
+void Rdb::saveBackground()
 {
-    _bgSavePid = fork();
-    if (_bgSavePid == 0) {
+    _childPid = fork();
+    if (_childPid == 0) {
+        childPidReset();
         save();
-        exit(0);
+        abort();
     }
 }
 

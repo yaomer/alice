@@ -15,21 +15,23 @@ public:
 
     explicit Rdb(DBServer *dbServer) 
         : _dbServer(dbServer),
-        _bgSavePid(0),
+        _childPid(-1),
         _fd(-1) 
     { 
-        bzero(_tmpFilename, sizeof(_tmpFilename));
+       
     }
     void save();
-    void backgroundSave();
-    pid_t bgSavePid() { return _bgSavePid; }
+    void saveBackground();
+    pid_t childPid() { return _childPid; }
+    void childPidReset() { _childPid = -1; }
+    void load();
+private:
     void saveString(Pair pair);
     void saveList(Pair pair);
     void saveSet(Pair pair);
     void saveHash(Pair pair);
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);
-    void load();
     char *loadString(char *ptr, int64_t *timevalptr);
     char *loadList(char *ptr, int64_t *timevalptr);
     char *loadSet(char *ptr, int64_t *timevalptr);
@@ -37,11 +39,10 @@ public:
     void append(const std::string& data);
     void append(const void *data, size_t len);
     void flush();
-private:
+
     DBServer *_dbServer;
-    pid_t _bgSavePid;
+    pid_t _childPid;
     std::string _buffer;
-    char _tmpFilename[16];
     int _fd;
 };
 }

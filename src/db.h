@@ -119,7 +119,8 @@ public:
     void deleteKey(Context& con);
     void getAllKeys(Context& con);
     void save(Context& con);
-    void backgroundSave(Context& con);
+    void saveBackground(Context& con);
+    void rewriteAof(Context& con);
     void lastSaveTime(Context& con);
     // String Keys Operation
     void strSet(Context& con);

@@ -97,26 +97,34 @@ void Server::serverCron()
     int64_t now = Angel::TimeStamp::now();
     _lru_cache = now;
 
-    _dbServer.aof()->flush();
-
-    if (_dbServer.flag() & DBServer::RDB_BGSAVE) {
-        pid_t childPid = _dbServer.rdb()->bgSavePid();
-        if (getpid() != childPid) {
-            pid_t pid = waitpid(childPid, nullptr, WNOHANG);
-            if (pid > 0) {
-                _dbServer.clearFlag(DBServer::RDB_BGSAVE);
-            }
+    if (_dbServer.rdb()->childPid() != -1) {
+        pid_t pid = waitpid(_dbServer.rdb()->childPid(), nullptr, WNOHANG);
+        if (pid > 0) {
+            _dbServer.rdb()->childPidReset();
         }
     }
+    if (_dbServer.aof()->childPid() != -1) {
+        pid_t pid = waitpid(_dbServer.aof()->childPid(), nullptr, WNOHANG);
+        if (pid > 0) {
+            _dbServer.aof()->childPidReset();
+        }
+    }
+    if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
+        if (_dbServer.flag() & DBServer::REWRITEAOF_DELAY) {
+            _dbServer.clearFlag(DBServer::REWRITEAOF_DELAY);
+            _dbServer.aof()->rewriteBackground();
+        }
+    }
+
     int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
     for (auto& it : _dbServer.saveParams()) {
         if (saveInterval >= it.seconds() && _dbServer.dirty() >= it.changes()) {
-            if (!(_dbServer.flag() & DBServer::RDB_BGSAVE)) {
-                _dbServer.rdb()->backgroundSave();
+            if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
+                _dbServer.rdb()->saveBackground();
                 _dbServer.setLastSaveTime(Angel::TimeStamp::now());
                 _dbServer.dirtyReset();
-                break;
             }
+            break;
         }
     }
 
@@ -126,6 +134,8 @@ void Server::serverCron()
             _dbServer.delExpireKey(it.first);
         }
     }
+
+    _dbServer.aof()->appendAof(now);
 }
 
 int main()

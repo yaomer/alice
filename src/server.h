@@ -8,6 +8,7 @@
 #include <memory>
 #include "db.h"
 #include "rdb.h"
+#include "aof.h"
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -33,17 +34,21 @@ public:
     using Key = std::string;
     using ExpireMap = std::unordered_map<Key, int64_t>;
     enum FLAG {
-        RDB_BGSAVE = 001,
+        APPENDONLY = 0x02,
+        REWRITEAOF_DELAY = 0x04,
     };
     DBServer() 
         : _db(this),
+        _rdb(new Rdb(this)),
+        _aof(new Aof(this)),
         _flag(0),
-        _lastSaveTime(Angel::TimeStamp::now())
+        _lastSaveTime(Angel::TimeStamp::now()),
+        _dirty(0)
     { 
-        _rdb.reset(new Rdb(this)); 
     }
     DB& db() { return _db; }
     Rdb *rdb() { return _rdb.get(); }
+    Aof *aof() { return _aof.get(); }
     int flag() { return _flag; }
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
@@ -81,6 +86,7 @@ private:
     DB _db;
     ExpireMap _expireMap;
     std::unique_ptr<Rdb> _rdb;
+    std::unique_ptr<Aof> _aof;
     std::vector<SaveParam> _saveParams;
     int _flag;
     int64_t _lastSaveTime;
@@ -89,6 +95,8 @@ private:
 
 class Server {
 public:
+    using ConfParamList = std::vector<std::vector<std::string>>;
+
     Server(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
         : _loop(loop),
         _server(loop, inetAddr)
@@ -99,7 +107,10 @@ public:
                 std::bind(&Server::onMessage, this, _1, _2));
         readConf();
         _loop->runEvery(100, [this]{ this->serverCron(); });
-        _dbServer.rdb()->load();
+        if (_dbServer.flag() & DBServer::APPENDONLY)
+            _dbServer.aof()->load();
+        else
+            _dbServer.rdb()->load();
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
@@ -129,7 +140,7 @@ public:
     }
     void readConf();
     void serverCron();
-    void parseRequest(Context& con, Angel::Buffer& buf);
+    static void parseRequest(Context& con, Angel::Buffer& buf);
     void executeCommand(Context& con);
     void replyResponse(const Angel::TcpConnectionPtr& conn);
     void execError(const Angel::TcpConnectionPtr& conn);
@@ -137,9 +148,12 @@ public:
     DBServer& dbServer() { return _dbServer; }
     Angel::EventLoop *loop() { return _loop; }
 private:
+    void parseConf();
+
     Angel::EventLoop *_loop;
     Angel::TcpServer _server;
     DBServer _dbServer;
+    ConfParamList _confParamList;
 };
 
 extern thread_local int64_t _lru_cache;

@@ -76,6 +76,7 @@ HintInfo hiTable[HTSIZE] = {
     { "KEYS",       4,  " pattern" },
     { "SAVE",       4,  "" },
     { "BGSAVE",     6,  "" },
+    { "BGREWRITEAOF", 12, "" },
     { "LASTSAVE",   8,  "" },
     { "", 0, "" },
 };
