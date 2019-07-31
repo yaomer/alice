@@ -2,3 +2,5 @@
 build/
 serv
 cli
+dump.rdb
+appendonly.aof
