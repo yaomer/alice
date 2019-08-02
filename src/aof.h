@@ -22,7 +22,9 @@ public:
     int mode() const { return _mode; }
     void setMode(int mode) { _mode = mode; }
     void append(Context::CommandList& cmdlist);
+    void appendRewriteBuffer(Context::CommandList& cmdlist);
     void appendAof(int64_t now);
+    void appendRewriteBufferToAof();
     void load();
     void rewriteBackground();
     pid_t childPid() const { return _childPid; }
@@ -41,12 +43,14 @@ private:
 
     DBServer *_dbServer;
     std::string _buffer;
+    std::string _rewriteBuffer;
     int _mode;
     pid_t _childPid;
     int64_t _lastSyncTime;
     size_t _currentFilesize;
     size_t _lastRewriteFilesize;
     int _fd;
+    char tmpfile[16];
 };
 }
 

@@ -7,7 +7,6 @@ using namespace Alice;
 
 void Server::parseConf()
 {
-    // save:1:100
     FILE *fp = fopen("alice.conf", "r");
     char buf[1024];
     while (fgets(buf, sizeof(buf), fp)) {

@@ -3,6 +3,7 @@
 
 #include <Angel/EventLoop.h>
 #include <Angel/TcpServer.h>
+#include <Angel/TcpClient.h>
 #include <unordered_map>
 #include <string>
 #include <memory>
@@ -34,8 +35,9 @@ public:
     using Key = std::string;
     using ExpireMap = std::unordered_map<Key, int64_t>;
     enum FLAG {
-        APPENDONLY = 0x02,
-        REWRITEAOF_DELAY = 0x04,
+        APPENDONLY = 0x01,
+        REWRITEAOF_DELAY = 0x02,
+        PSYNC = 0x04,
     };
     DBServer() 
         : _db(this),
@@ -60,6 +62,12 @@ public:
     int dirty() const { return _dirty; }
     void dirtyIncr() { _dirty++; }
     void dirtyReset() { _dirty = 0; }
+    void setMasterAddr(Angel::InetAddr addr)
+    { _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); }
+    void connectMasterServer();
+    void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
+    void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
+    void sendRdbfileToSlave();
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
@@ -69,19 +77,12 @@ public:
         if (it != _expireMap.end())
             _expireMap.erase(it);
     }
-    bool isExpiredKey(const Key& key)
-    {
-        auto it = _expireMap.find(key);
-        if (it == _expireMap.end())
-            return false;
-        int64_t now = Angel::TimeStamp::now();
-        if (it->second <= now) {
-            delExpireKey(key);
-            _db.delKey(key);
-            return true;
-        } else
-            return false;
-    }
+    bool isExpiredKey(const Key& key);
+    static void appendCommand(std::string& buffer, Context::CommandList& cmdlist);
+    void appendWriteCommand(Context::CommandList& cmdlist);
+    std::vector<size_t>& slaveIds() { return _slaveIds; }
+    void addSlaveId(size_t id)
+    { _slaveIds.push_back(id); }
 private:
     DB _db;
     ExpireMap _expireMap;
@@ -91,6 +92,9 @@ private:
     int _flag;
     int64_t _lastSaveTime;
     int _dirty;
+    std::unique_ptr<Angel::InetAddr> _masterAddr;
+    std::unique_ptr<Angel::TcpClient> _client;
+    std::vector<size_t> _slaveIds;
 };
 
 class Server {
@@ -114,16 +118,16 @@ public:
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
-        conn->setContext(Context(&_dbServer));
+        conn->setContext(Context(&_dbServer, conn));
     }
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
         auto& client = std::any_cast<Context&>(conn->getContext());
         while (true) {
-            switch (client.flag()) {
+            switch (client.state()) {
             case Context::PARSING:
                 parseRequest(client, buf);
-                if (client.flag() == Context::PARSING)
+                if (client.state() == Context::PARSING)
                     return;
                 break;
             case Context::PROTOCOLERR: 
@@ -146,6 +150,7 @@ public:
     void execError(const Angel::TcpConnectionPtr& conn);
     void start() { _server.start(); }
     DBServer& dbServer() { return _dbServer; }
+    Angel::TcpServer& server() { return _server; }
     Angel::EventLoop *loop() { return _loop; }
 private:
     void parseConf();

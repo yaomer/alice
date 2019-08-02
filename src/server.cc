@@ -1,8 +1,12 @@
-#include <unistd.h>
-#include <sys/wait.h>
 #include <Angel/EventLoop.h>
 #include <Angel/TcpServer.h>
+#include <Angel/TcpClient.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <algorithm>
+#include <vector>
+#include <string>
 #include "server.h"
 #include "db.h"
 
@@ -43,13 +47,13 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         argc--;
     }
     buf.retrieve(s - ps);
-    con.setFlag(Context::SUCCEED);
+    con.setState(Context::SUCCEED);
     return;
 clr:
     con.commandList().clear();
     return;
 err:
-    con.setFlag(Context::PROTOCOLERR);
+    con.setState(Context::PROTOCOLERR);
 }
 
 void Server::executeCommand(Context& con)
@@ -69,11 +73,11 @@ void Server::executeCommand(Context& con)
     }
     if (it->second.isWrite()) {
         _dbServer.dirtyIncr();
-        _dbServer.aof()->append(cmdlist);
+        _dbServer.appendWriteCommand(cmdlist);
     }
     it->second._commandCb(con);
 err:
-    con.setFlag(Context::REPLY);
+    con.setState(Context::REPLY);
     cmdlist.clear();
 }
 
@@ -82,7 +86,7 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
     auto& client = std::any_cast<Context&>(conn->getContext());
     conn->send(client.message());
     client.message().clear();
-    client.setFlag(Context::PARSING);
+    client.setState(Context::PARSING);
 }
 
 namespace Alice {
@@ -101,12 +105,17 @@ void Server::serverCron()
         pid_t pid = waitpid(_dbServer.rdb()->childPid(), nullptr, WNOHANG);
         if (pid > 0) {
             _dbServer.rdb()->childPidReset();
+            if (_dbServer.flag() & DBServer::PSYNC) {
+                _dbServer.clearFlag(DBServer::PSYNC);
+                _dbServer.sendRdbfileToSlave();
+            }
         }
     }
     if (_dbServer.aof()->childPid() != -1) {
         pid_t pid = waitpid(_dbServer.aof()->childPid(), nullptr, WNOHANG);
         if (pid > 0) {
             _dbServer.aof()->childPidReset();
+            _dbServer.aof()->appendRewriteBufferToAof();
         }
     }
     if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
@@ -144,14 +153,118 @@ void Server::serverCron()
     _dbServer.aof()->appendAof(now);
 }
 
-int main()
+void DBServer::connectMasterServer()
 {
+    _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get(), "slave"));
+    _client->setConnectionCb(
+            std::bind(&DBServer::sendSyncToMaster, this, _1));
+    _client->setMessageCb(
+            std::bind(&DBServer::recvRdbfileFromMaster, this, _1, _2));
+    _client->start();
+}
+
+void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
+{
+    const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n0\r\n$1\r\n0\r\n";
+    conn->send(sync);
+}
+
+void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
+{
+    char tmpfile[16];
+    strcpy(tmpfile, "tmp.XXXXX");
+    mktemp(tmpfile);
+    int fd = open(tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
+    write(fd, buf.peek(), buf.readable());
+    buf.retrieveAll();
+    fsync(fd);
+    close(fd);
+    rename(tmpfile, "dump.rdb");
+    rdb()->load();
+}
+
+void DBServer::sendRdbfileToSlave()
+{
+    int fd = open("dump.rdb", O_RDONLY);
+    Angel::Buffer buf;
+    while (buf.readFd(fd) > 0) {
+    }
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& it : slaveIds()) {
+        auto conn = maps.find(it);
+        if (conn != maps.end()) {
+            conn->second->send(buf.peek(), buf.readable());
+        }
+    }
+    close(fd);
+}
+
+bool DBServer::isExpiredKey(const Key& key)
+{
+    auto it = _expireMap.find(key);
+    if (it == _expireMap.end()) return false;
+    int64_t now = Angel::TimeStamp::now();
+    if (it->second > now) return false;
+    delExpireKey(key);
+    _db.delKey(key);
+    Context::CommandList cmdlist = { "DEL", key };
+    appendWriteCommand(cmdlist);
+    return true;
+}
+
+void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
+{
+    aof()->append(cmdlist);
+    if (aof()->childPid() != -1)
+        aof()->appendRewriteBuffer(cmdlist);
+    if (flag() & DBServer::PSYNC)
+        rdb()->appendSyncBuffer(cmdlist);
+}
+
+void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist)
+{
+    size_t size = cmdlist.size();
+    if (strncasecmp(cmdlist[0].c_str(), "SET", 3) == 0) {
+        if (size > 3) {
+            buffer += "*3\r\n$7\r\nPEXPIRE\r\n$";
+            buffer += convert(cmdlist[1].size());
+            buffer += "\r\n";
+            buffer += cmdlist[1] + "\r\n$";
+            int64_t milliseconds = atoll(cmdlist[4].c_str()) + Angel::TimeStamp::now();
+            buffer += convert(strlen(convert(milliseconds)));
+            buffer += "\r\n";
+            buffer += convert(milliseconds);
+            buffer += "\r\n";
+            size -= 2;
+        }
+    }
+    buffer += "*";
+    buffer += convert(size);
+    buffer += "\r\n";
+    for (auto& it : cmdlist) {
+        buffer += "$";
+        buffer += convert(it.size());
+        buffer += "\r\n";
+        buffer += it;
+        buffer += "\r\n";
+        if (--size == 0)
+            break;
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 2) {
+        fprintf(stderr, "usage: ./serv [port]\n");
+        return 1;
+    }
     Angel::EventLoop loop;
-    Angel::InetAddr listenAddr(8000);
+    Angel::InetAddr listenAddr(atoi(argv[1]));
     Alice::Server server(&loop, listenAddr);
     g_server = &server;
     Angel::addSignal(SIGINT, []{
             g_server->dbServer().rdb()->save();
+            g_server->dbServer().aof()->rewriteBackground();
             g_server->loop()->quit();
             });
     server.start();

@@ -78,6 +78,8 @@ HintInfo hiTable[HTSIZE] = {
     { "BGSAVE",     6,  "" },
     { "BGREWRITEAOF", 12, "" },
     { "LASTSAVE",   8,  "" },
+    { "FLUSHDB",    7,  "" },
+    { "SLAVEOF",    7,  " host port" },
     { "", 0, "" },
 };
 

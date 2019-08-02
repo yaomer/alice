@@ -166,10 +166,14 @@ void Client::parseResponse(Angel::Buffer& buf)
 void completion(const char *buf, linenoiseCompletions *lc);
 char *hints(const char *buf, int *color, int *bold);
 
-int main()
+int main(int argc, char *argv[])
 {
+    if (argc != 2) {
+        fprintf(stderr, "./cli [port]\n");
+        return 1;
+    }
     Angel::EventLoopThread t_loop;
-    Angel::InetAddr connAddr(8000, "127.0.0.1");
+    Angel::InetAddr connAddr(atoi(argv[1]), "127.0.0.1");
     Alice::Client client(t_loop.getLoop(), connAddr);
     client.start();
 

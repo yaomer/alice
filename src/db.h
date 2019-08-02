@@ -1,6 +1,7 @@
 #ifndef _ALICE_SRC_DB_H
 #define _ALICE_SRC_DB_H
 
+#include <Angel/TcpServer.h>
 #include <unordered_map>
 #include <string>
 #include <functional>
@@ -19,19 +20,22 @@ extern thread_local int64_t _lru_cache;
 
 class Context {
 public:
-    enum ParseStatus { 
+    enum ParseState { 
         PARSING,
         PROTOCOLERR,
         SUCCEED,
         REPLY,
     };
-    explicit Context(DBServer *db) 
+    explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _db(db),
-        _flag(PARSING) 
+        _conn(conn),
+        _state(PARSING),
+        _flag(0)
     {  
     }
     using CommandList = std::vector<std::string>;
     DBServer *db() { return _db; }
+    const Angel::TcpConnectionPtr& conn() { return _conn; }
     void addArg(const char *s, const char *es)
     { _commandList.push_back(std::string(s, es)); }
     CommandList& commandList() { return _commandList; }
@@ -40,32 +44,34 @@ public:
     void assign(const std::string& s)
     { _buffer.assign(s); }
     std::string& message() { return _buffer; }
-    int8_t flag() const { return _flag; }
-    void setFlag(int flag) { _flag = flag; }
+    int state() const { return _state; }
+    void setState(int state) { _state = state; }
+    int flag() const { return _flag; }
+    void setFlag(int flag) { _flag |= flag; }
+    void clearFlag(int flag) { _flag &= ~flag; }
 private:
     DBServer *_db;
+    const Angel::TcpConnectionPtr _conn;
     CommandList _commandList;
     std::string _buffer;
-    int8_t _flag;
+    int _state;
+    int _flag;
 };
 
 class Command {
 public:
     using CommandCallback = std::function<void(Context&)>;
 
-    Command(const std::string& name, int8_t arity, bool isWrite, const CommandCallback _cb)
+    Command(int8_t arity, bool isWrite, const CommandCallback _cb)
         : _commandCb(_cb),
-        _name(name),
         _arity(arity),
         _isWrite(isWrite)
     {
     }
-    const std::string& name() const { return _name; }
     int8_t arity() const { return _arity; }
     bool isWrite() const { return _isWrite; }
     CommandCallback _commandCb;
 private:
-    std::string _name;
     int8_t _arity;
     bool _isWrite;
 };
@@ -122,6 +128,9 @@ public:
     void saveBackground(Context& con);
     void rewriteAof(Context& con);
     void lastSaveTime(Context& con);
+    void flushDb(Context& con);
+    void slaveOf(Context& con);
+    void psync(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);

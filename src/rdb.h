@@ -25,6 +25,7 @@ public:
     pid_t childPid() { return _childPid; }
     void childPidReset() { _childPid = -1; }
     void load();
+    void appendSyncBuffer(Context::CommandList& cmdlist);
 private:
     void saveString(Pair pair);
     void saveList(Pair pair);
@@ -43,6 +44,7 @@ private:
     DBServer *_dbServer;
     pid_t _childPid;
     std::string _buffer;
+    std::string _syncBuffer;
     int _fd;
 };
 }

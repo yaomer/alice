@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <string.h>
 #include "aof.h"
 #include "db.h"
 #include "server.h"
@@ -16,21 +17,17 @@ Aof::Aof(DBServer *dbServer)
     _lastRewriteFilesize(0),
     _fd(-1)
 {
-
+    bzero(tmpfile, sizeof(tmpfile));
 }
 
 void Aof::append(Context::CommandList& cmdlist)
 {
-    _buffer += "*";
-    _buffer += convert(cmdlist.size());
-    _buffer += "\r\n";
-    for (auto& it : cmdlist) {
-        _buffer += "$";
-        _buffer += convert(it.size());
-        _buffer += "\r\n";
-        _buffer += it;
-        _buffer += "\r\n";
-    }
+    DBServer::appendCommand(_buffer, cmdlist);
+}
+
+void Aof::appendRewriteBuffer(Context::CommandList& cmdlist)
+{
+    DBServer::appendCommand(_rewriteBuffer, cmdlist);
 }
 
 void Aof::appendAof(int64_t now)
@@ -54,7 +51,7 @@ void Aof::appendAof(int64_t now)
 
 void Aof::load()
 {
-    Context pseudoClient(_dbServer);
+    Context pseudoClient(_dbServer, nullptr);
     Angel::Buffer buf;
     FILE *fp = fopen("appendonly.aof", "r");
     if (fp == nullptr) return;
@@ -67,9 +64,9 @@ void Aof::load()
         line = nullptr;
         len = 0;
         Server::parseRequest(pseudoClient, buf);
-        if (pseudoClient.flag() == Context::PARSING)
+        if (pseudoClient.state() == Context::PARSING)
             continue;
-        if (pseudoClient.flag() == Context::SUCCEED) {
+        if (pseudoClient.state() == Context::SUCCEED) {
             auto& cmdlist = pseudoClient.commandList();
             auto it = _dbServer->db().commandMap().find(cmdlist[0]);
             if (strncasecmp(cmdlist[0].c_str(), "PEXPIRE", 7) == 0) {
@@ -77,7 +74,7 @@ void Aof::load()
             } else
                 it->second._commandCb(pseudoClient);
             cmdlist.clear();
-            pseudoClient.setFlag(Context::PARSING);
+            pseudoClient.setState(Context::PARSING);
         }
         pseudoClient.message().clear();
     }
@@ -91,6 +88,8 @@ void Aof::load()
 
 void Aof::rewriteBackground()
 {
+    strcpy(tmpfile, "tmp.XXXXX");
+    mktemp(tmpfile);
     _childPid = fork();
     if (_childPid == 0) {
         childPidReset();
@@ -101,9 +100,6 @@ void Aof::rewriteBackground()
 
 void Aof::rewrite()
 {
-    char tmpfile[16];
-    strcpy(tmpfile, "tmp.XXXXX");
-    mktemp(tmpfile);
     _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
     _lastRewriteFilesize = getFilesize(_fd);
     _buffer.clear();
@@ -133,6 +129,15 @@ void Aof::rewrite()
     fsync(_fd);
     close(_fd);
     rename(tmpfile, "appendonly.aof");
+}
+
+void Aof::appendRewriteBufferToAof()
+{
+    if (_rewriteBuffer.empty()) return;
+    int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
+    write(fd, _rewriteBuffer.data(), _rewriteBuffer.size());
+    _rewriteBuffer.clear();
+    close(fd);
 }
 
 void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)

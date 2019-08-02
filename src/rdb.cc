@@ -346,3 +346,8 @@ void Rdb::flush()
     write(_fd, _buffer.data(), _buffer.size());
     _buffer.clear();
 }
+
+void Rdb::appendSyncBuffer(Context::CommandList& cmdlist)
+{
+    DBServer::appendCommand(_syncBuffer, cmdlist);
+}
