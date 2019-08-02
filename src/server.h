@@ -5,6 +5,7 @@
 #include <Angel/TcpServer.h>
 #include <Angel/TcpClient.h>
 #include <unordered_map>
+#include <set>
 #include <string>
 #include <memory>
 #include "db.h"
@@ -72,18 +73,12 @@ public:
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
-    void delExpireKey(const Key& key)
-    {
-        auto it = _expireMap.find(key);
-        if (it != _expireMap.end())
-            _expireMap.erase(it);
-    }
+    void delExpireKey(const Key& key);
     bool isExpiredKey(const Key& key);
     static void appendCommand(std::string& buffer, Context::CommandList& cmdlist);
     void appendWriteCommand(Context::CommandList& cmdlist);
-    std::vector<size_t>& slaveIds() { return _slaveIds; }
-    void addSlaveId(size_t id)
-    { _slaveIds.push_back(id); }
+    std::set<size_t>& slaveIds() { return _slaveIds; }
+    void addSlaveId(size_t id) { _slaveIds.insert(id); }
 private:
     DB _db;
     ExpireMap _expireMap;
@@ -95,7 +90,7 @@ private:
     int _dirty;
     std::unique_ptr<Angel::InetAddr> _masterAddr;
     std::unique_ptr<Angel::TcpClient> _client;
-    std::vector<size_t> _slaveIds;
+    std::set<size_t> _slaveIds;
 };
 
 class Server {
@@ -117,25 +112,31 @@ public:
         else
             _dbServer.rdb()->load();
     }
+    void onClose(const Angel::TcpConnectionPtr& conn)
+    {
+        auto it = _dbServer.slaveIds().find(conn->id());
+        if (it != _dbServer.slaveIds().end())
+            _dbServer.slaveIds().erase(conn->id());
+    }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
         conn->setContext(Context(&_dbServer, conn));
     }
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
-        auto& client = std::any_cast<Context&>(conn->getContext());
+        auto& context = std::any_cast<Context&>(conn->getContext());
         while (true) {
-            switch (client.state()) {
+            switch (context.state()) {
             case Context::PARSING:
-                parseRequest(client, buf);
-                if (client.state() == Context::PARSING)
+                parseRequest(context, buf);
+                if (context.state() == Context::PARSING)
                     return;
                 break;
             case Context::PROTOCOLERR: 
                 conn->close();
                 return;
             case Context::SUCCEED: 
-                executeCommand(client); 
+                executeCommand(context); 
                 break;
             case Context::REPLY: 
                 replyResponse(conn); 

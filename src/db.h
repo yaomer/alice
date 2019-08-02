@@ -28,6 +28,8 @@ public:
     };
     enum Flag{
         SLAVE = 0x01,
+        SYNC_RDB_FILE = 0x02,
+        SYNC_COMMAND = 0x04,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _syncRdbFilesize(0),

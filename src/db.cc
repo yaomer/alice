@@ -344,7 +344,10 @@ void DB::slaveOf(Context& con)
 
 void DB::psync(Context& con)
 {
-    _dbServer->addSlaveId(con.conn()->id());
+    auto it = _dbServer->slaveIds().find(con.conn()->id());
+    if (it == _dbServer->slaveIds().end())
+        _dbServer->addSlaveId(con.conn()->id());
+    con.setFlag(Context::SYNC_RDB_FILE);
     _dbServer->setFlag(DBServer::PSYNC);
     if (_dbServer->rdb()->childPid() != -1)
         return;
