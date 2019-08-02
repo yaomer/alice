@@ -68,6 +68,7 @@ public:
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
     void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void sendRdbfileToSlave();
+    void sendSyncCommandToSlave(Context::CommandList& cmdlist);
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
@@ -131,7 +132,7 @@ public:
                     return;
                 break;
             case Context::PROTOCOLERR: 
-                conn->close(); 
+                conn->close();
                 return;
             case Context::SUCCEED: 
                 executeCommand(client); 

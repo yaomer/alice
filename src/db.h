@@ -26,12 +26,18 @@ public:
         SUCCEED,
         REPLY,
     };
+    enum Flag{
+        SLAVE = 0x01,
+    };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
-        : _db(db),
+        : _syncRdbFilesize(0),
+        _fd(-1),
+        _db(db),
         _conn(conn),
         _state(PARSING),
         _flag(0)
     {  
+        bzero(tmpfile, sizeof(tmpfile));
     }
     using CommandList = std::vector<std::string>;
     DBServer *db() { return _db; }
@@ -49,6 +55,10 @@ public:
     int flag() const { return _flag; }
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
+
+    size_t _syncRdbFilesize;
+    char tmpfile[16];
+    int _fd;
 private:
     DBServer *_db;
     const Angel::TcpConnectionPtr _conn;

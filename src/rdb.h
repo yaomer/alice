@@ -25,6 +25,7 @@ public:
     pid_t childPid() { return _childPid; }
     void childPidReset() { _childPid = -1; }
     void load();
+    std::string& syncBuffer() { return _syncBuffer; }
     void appendSyncBuffer(Context::CommandList& cmdlist);
 private:
     void saveString(Pair pair);

@@ -21,26 +21,29 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
     // 解析命令个数
     const char *next = std::find(s, es, '\n');
     if (next == es) return;
-    if (s[0] != '*' || next[-1] != '\r') goto err;
+    if (s[0] != '*' || next[-1] != '\r') { std::cout << __LINE__ << "\n"; goto err;}
     s += 1;
     argc = atol(s);
     s = std::find_if(s, es, [](char c){ return !isnumber(c); });
-    if (s[0] != '\r' || s[1] != '\n') goto err;
+    if (s[0] != '\r' || s[1] != '\n') { std::cout << __LINE__ << "\n"; goto err;}
     s += 2;
     // 解析各个命令
     while (argc > 0) {
         next = std::find(s, es, '\n');
         if (next == es) goto clr;
-        if (s[0] != '$' || next[-1] != '\r') goto err;
+        if (s[0] != '$' || next[-1] != '\r') { std::cout << __LINE__ << "\n"; goto err;}
+
         s += 1;
         len = atol(s);
         s = std::find_if(s, es, [](char c){ return !isnumber(c); });
-        if (s[0] != '\r' || s[1] != '\n') goto err;
+        if (s[0] != '\r' || s[1] != '\n') { std::cout << __LINE__ << "\n"; goto err;}
+
         s += 2;
         next = std::find(s, es, '\r');
         if (next == es) goto clr;
         if (next[1] != '\n' || next - s != len) {
-            goto err;
+            { std::cout << __LINE__ << "\n"; goto err;}
+
         }
         con.addArg(s, next);
         s = next + 2;
@@ -74,6 +77,7 @@ void Server::executeCommand(Context& con)
     if (it->second.isWrite()) {
         _dbServer.dirtyIncr();
         _dbServer.appendWriteCommand(cmdlist);
+        _dbServer.sendSyncCommandToSlave(cmdlist);
     }
     it->second._commandCb(con);
 err:
@@ -84,7 +88,9 @@ err:
 void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
 {
     auto& client = std::any_cast<Context&>(conn->getContext());
-    conn->send(client.message());
+    // 从服务器不应向主服务器发送回复信息
+    if (!(client.flag() & Context::SLAVE))
+        conn->send(client.message());
     client.message().clear();
     client.setState(Context::PARSING);
 }
@@ -165,22 +171,50 @@ void DBServer::connectMasterServer()
 
 void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
 {
+    conn->setContext(Context(this, conn));
     const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n0\r\n$1\r\n0\r\n";
     conn->send(sync);
 }
 
 void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
 {
-    char tmpfile[16];
-    strcpy(tmpfile, "tmp.XXXXX");
-    mktemp(tmpfile);
-    int fd = open(tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
-    write(fd, buf.peek(), buf.readable());
-    buf.retrieveAll();
-    fsync(fd);
-    close(fd);
-    rename(tmpfile, "dump.rdb");
-    rdb()->load();
+    auto& con = std::any_cast<Context&>(conn->getContext());
+    if (con._syncRdbFilesize == 0) {
+        int crlf = buf.findStr("\r\n\r\n", 4);
+        if (crlf > 0) {
+            con._syncRdbFilesize = atoll(buf.peek());
+            buf.retrieve(crlf + 4);
+            strcpy(con.tmpfile, "tmp.XXXXX");
+            mktemp(con.tmpfile);
+            con._fd = open(con.tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
+            if (buf.readable() > 0)
+                goto next;
+        }
+    } else {
+next:
+        size_t writeBytes = buf.readable();
+        if (writeBytes >= con._syncRdbFilesize) {
+            writeBytes = con._syncRdbFilesize;
+            con._syncRdbFilesize = 0;
+        } else {
+            con._syncRdbFilesize -= writeBytes;
+        }
+        write(con._fd, buf.peek(), writeBytes);
+        buf.retrieve(writeBytes);
+        if (con._syncRdbFilesize == 0) {
+            fsync(con._fd);
+            close(con._fd);
+            con._fd = -1;
+            rename(con.tmpfile, "dump.rdb");
+            rdb()->load();
+            if (buf.readable() > 0)
+                g_server->onMessage(conn, buf);
+            auto& context = std::any_cast<Context&>(conn->getContext());
+            context.setFlag(Context::SLAVE);
+            conn->setMessageCb(
+                    std::bind(&Server::onMessage, g_server, _1, _2));
+        }
+    }
 }
 
 void DBServer::sendRdbfileToSlave()
@@ -193,10 +227,35 @@ void DBServer::sendRdbfileToSlave()
     for (auto& it : slaveIds()) {
         auto conn = maps.find(it);
         if (conn != maps.end()) {
+            conn->second->send(convert(buf.readable()));
+            conn->second->send("\r\n\r\n");
             conn->second->send(buf.peek(), buf.readable());
+            conn->second->send(rdb()->syncBuffer());
         }
     }
     close(fd);
+}
+
+void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
+{
+    std::string buffer;
+    buffer.append("*");
+    buffer.append(convert(cmdlist.size()));
+    buffer.append("\r\n");
+    for (auto& it : cmdlist) {
+        buffer.append("$");
+        buffer.append(convert(it.size()));
+        buffer.append("\r\n");
+        buffer.append(it);
+        buffer.append("\r\n");
+    }
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& it : slaveIds()) {
+        auto conn = maps.find(it);
+        if (conn != maps.end()) {
+            conn->second->send(buffer);
+        }
+    }
 }
 
 bool DBServer::isExpiredKey(const Key& key)
