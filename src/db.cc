@@ -449,12 +449,12 @@ void DB::strAppend(Context& con)
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
         appendNumber(con, cmdlist[2].size());
+        return;
     }
     checkType(con, it, String);
-    String& oldvalue = getStringValue(it);
-    oldvalue += cmdlist[2];
-    _hashMap[cmdlist[1]] = oldvalue;
-    appendNumber(con, oldvalue.size());
+    String& string = getStringValue(it);
+    string.append(cmdlist[2]);
+    appendNumber(con, string.size());
 }
 
 void DB::strMset(Context& con)
