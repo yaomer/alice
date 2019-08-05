@@ -34,6 +34,7 @@ public:
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _syncRdbFilesize(0),
         _fd(-1),
+        _offset(0),
         _db(db),
         _conn(conn),
         _state(PARSING),
@@ -61,6 +62,8 @@ public:
     size_t _syncRdbFilesize;
     char tmpfile[16];
     int _fd;
+    size_t _offset;
+    size_t _runId;
 private:
     DBServer *_db;
     const Angel::TcpConnectionPtr _conn;
@@ -143,6 +146,7 @@ public:
     void flushDb(Context& con);
     void slaveOf(Context& con);
     void psync(Context& con);
+    void replconf(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);

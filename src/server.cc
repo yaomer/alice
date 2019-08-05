@@ -47,6 +47,8 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         argc--;
     }
     buf.retrieve(s - ps);
+    if (con.flag() & Context::SLAVE)
+        con._offset += s - ps;
     con.setState(Context::SUCCEED);
     return;
 clr:
@@ -84,12 +86,12 @@ err:
 
 void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
 {
-    auto& client = std::any_cast<Context&>(conn->getContext());
+    auto& context = std::any_cast<Context&>(conn->getContext());
     // 从服务器不应向主服务器发送回复信息
-    if (!(client.flag() & Context::SLAVE))
-        conn->send(client.message());
-    client.message().clear();
-    client.setState(Context::PARSING);
+    if (!(context.flag() & Context::SLAVE))
+        conn->send(context.message());
+    context.message().clear();
+    context.setState(Context::PARSING);
 }
 
 namespace Alice {
@@ -176,7 +178,7 @@ void DBServer::connectMasterServer()
 void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
 {
     conn->setContext(Context(this, conn));
-    const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n0\r\n$1\r\n0\r\n";
+    const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
     conn->send(sync);
 }
 
@@ -184,6 +186,22 @@ void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel:
 {
     auto& con = std::any_cast<Context&>(conn->getContext());
     if (con._syncRdbFilesize == 0) {
+        if (strncasecmp(buf.c_str(), "+FULLRESYNC", 11) == 0) {
+            char *s = buf.peek();
+            const char *ps = s;
+            int crlf = buf.findStr(s, "\r\n", 2);
+            if (crlf < 0) return;
+            s += 13;
+            crlf = buf.findStr(s, "\r\n", 2);
+            if (crlf < 0) return;
+            con._runId = atoll(s);
+            s += crlf + 2;
+            crlf = buf.findStr(s, "\r\n", 2);
+            if (crlf < 0) return;
+            con._offset = atoll(s);
+            s += crlf + 2;
+            buf.retrieve(s - ps);
+        }
         int crlf = buf.findStr("\r\n\r\n", 4);
         if (crlf > 0) {
             con._syncRdbFilesize = atoll(buf.peek());
@@ -217,6 +235,8 @@ next:
             context.setFlag(Context::SLAVE);
             conn->setMessageCb(
                     std::bind(&Server::onMessage, g_server, _1, _2));
+            g_server->loop()->runEvery(1000,
+                    [this, conn]{ this->sendAckToMaster(conn); });
         }
     }
 }
@@ -242,7 +262,7 @@ void DBServer::sendRdbfileToSlave()
             }
         }
     }
-    rdb()->syncBuffer().c_str();
+    rdb()->syncBuffer().clear();
     close(fd);
 }
 
@@ -270,6 +290,18 @@ void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
     }
 }
 
+void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
+{
+    auto& context = std::any_cast<Context&>(conn->getContext());
+    std::string buffer;
+    buffer += "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$";
+    buffer += convert(strlen(convert(context._offset)));
+    buffer += "\r\n";
+    buffer += convert(context._offset);
+    buffer += "\r\n";
+    conn->send(buffer);
+}
+
 bool DBServer::isExpiredKey(const Key& key)
 {
     auto it = _expireMap.find(key);
@@ -290,6 +322,20 @@ void DBServer::delExpireKey(const Key& key)
         _expireMap.erase(it);
 }
 
+void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
+{
+    std::string buffer;
+    appendCommand(buffer, cmdlist);
+    _offset += buffer.size();
+    size_t remainBytes = copy_backlog_buffer_size - _copyBacklogBuffer.size();
+    if (remainBytes < buffer.size()) {
+        size_t popsize = buffer.size() - remainBytes;
+        _copyBacklogBuffer.erase(0, popsize);
+    }
+    _copyBacklogBuffer.append(buffer);
+    std::cout << "master offset = " << _offset << "\n";
+}
+
 void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
 {
     aof()->append(cmdlist);
@@ -297,6 +343,8 @@ void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
         aof()->appendRewriteBuffer(cmdlist);
     if (flag() & DBServer::PSYNC)
         rdb()->appendSyncBuffer(cmdlist);
+    if (!slaveIds().empty())
+        appendCopyBacklogBuffer(cmdlist);
 }
 
 void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist)

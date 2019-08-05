@@ -14,77 +14,80 @@
 using namespace Alice;
 using std::placeholders::_1;
 
+#define BIND(f) std::bind(&DB::f, this, _1)
+
 DB::DB(DBServer *dbServer)
     : _dbServer(dbServer)
 {
     _commandMap = {
-        { "SET",        { 3, true, std::bind(&DB::strSet, this, _1) } },
-        { "SETNX",      { -3, true, std::bind(&DB::strSetIfNotExist, this, _1) } },
-        { "GET",        { -2, false, std::bind(&DB::strGet, this, _1) } },
-        { "GETSET",     { -3, true, std::bind(&DB::strGetSet, this, _1) } },
-        { "APPEND",     { -3, true, std::bind(&DB::strAppend, this, _1) } },
-        { "STRLEN",     { -2, false, std::bind(&DB::strLen, this, _1) } },
-        { "MSET",       { 3, true, std::bind(&DB::strMset, this, _1) } },
-        { "MGET",       { 2, false, std::bind(&DB::strMget, this, _1) } },
-        { "INCR",       { -2, true, std::bind(&DB::strIncr, this, _1) } },
-        { "INCRBY",     { -3, true, std::bind(&DB::strIncrBy, this, _1) } },
-        { "DECR",       { -2, true, std::bind(&DB::strDecr, this, _1) } },
-        { "DECRBY",     { -3, true, std::bind(&DB::strDecrBy, this, _1) } },
-        { "LPUSH",      { 3, true, std::bind(&DB::listLeftPush, this, _1) } },
-        { "LPUSHX",     { -3, true, std::bind(&DB::listHeadPush, this, _1) } },
-        { "RPUSH",      { 3, true, std::bind(&DB::listRightPush, this, _1) } },
-        { "RPUSHX",     { -3, true, std::bind(&DB::listTailPush, this, _1) } },
-        { "LPOP",       { -2, true, std::bind(&DB::listLeftPop, this, _1) } },
-        { "RPOP",       { -2, true, std::bind(&DB::listRightPop, this, _1) } },
-        { "RPOPLPUSH",  { -3, true, std::bind(&DB::listRightPopToLeftPush, this, _1) } },
-        { "LREM",       { -4, true, std::bind(&DB::listRem, this, _1) } },
-        { "LLEN",       { -2, false, std::bind(&DB::listLen, this, _1) } },
-        { "LINDEX",     { -3, false, std::bind(&DB::listIndex, this, _1) } },
-        { "LSET",       { -4, true, std::bind(&DB::listSet, this, _1) } },
-        { "LRANGE",     { -4, false, std::bind(&DB::listRange, this, _1) } },
-        { "LTRIM",      { -4, true, std::bind(&DB::listTrim, this, _1) } },
-        { "SADD",       { 3, true, std::bind(&DB::setAdd, this, _1) } },
-        { "SISMEMBER",  { -3, false, std::bind(&DB::setIsMember, this, _1) } },
-        { "SPOP",       { -2, true, std::bind(&DB::setPop, this, _1) } },
-        { "SRANDMEMBER",{ 2, false, std::bind(&DB::setRandMember, this, _1) } },
-        { "SREM",       { 3, true, std::bind(&DB::setRem, this, _1) } },
-        { "SMOVE",      { -4, true, std::bind(&DB::setMove, this, _1) } },
-        { "SCARD",      { -2, false, std::bind(&DB::setCard, this, _1) } },
-        { "SMEMBERS",   { -2, false, std::bind(&DB::setMembers, this, _1) } },
-        { "SINTER",     { 2, false, std::bind(&DB::setInter, this, _1) } },
-        { "SINTERSTORE",{ 3, true, std::bind(&DB::setInterStore, this, _1) } },
-        { "SUNION",     { 2, false, std::bind(&DB::setUnion, this, _1) } },
-        { "SUNIONSTORE",{ 3, true, std::bind(&DB::setUnionStore, this, _1) } },
-        { "SDIFF",      { 2, false, std::bind(&DB::setDiff, this, _1) } },
-        { "SDIFFSTORE", { 3, true, std::bind(&DB::setDiffStore, this, _1) } },
-        { "HSET",       { -4, true, std::bind(&DB::hashSet, this, _1) } },
-        { "HSETNX",     { -4, true, std::bind(&DB::hashSetIfNotExists, this, _1) } },
-        { "HGET",       { -3, false, std::bind(&DB::hashGet, this, _1) } },
-        { "HEXISTS",    { -3, false, std::bind(&DB::hashFieldExists, this, _1) } },
-        { "HDEL",       { 3, true, std::bind(&DB::hashDelete, this, _1) } },
-        { "HLEN",       { -2, false, std::bind(&DB::hashFieldLen, this, _1) } },
-        { "HSTRLEN",    { -3, false, std::bind(&DB::hashValueLen, this, _1) } },
-        { "HINCRBY",    { -4, true, std::bind(&DB::hashIncrBy, this, _1) } },
-        { "HMSET",      { 4, true, std::bind(&DB::hashMset, this, _1) } },
-        { "HMGET",      { 3, false, std::bind(&DB::hashMget, this, _1) } },
-        { "HKEYS",      { -2, false, std::bind(&DB::hashGetKeys, this, _1) } },
-        { "HVALS",      { -2, false, std::bind(&DB::hashGetValues, this, _1) } },
-        { "HGETALL",    { -2, false, std::bind(&DB::hashGetAll, this, _1) } },
-        { "EXISTS",     { -2, false, std::bind(&DB::isKeyExists, this, _1) } },
-        { "TYPE",       { -2, false, std::bind(&DB::getKeyType, this, _1) } },
-        { "TTL",        { -2, false, std::bind(&DB::getTtlSecs, this, _1) } },
-        { "PTTL",       { -2, false, std::bind(&DB::getTtlMils, this, _1) } },
-        { "EXPIRE",     { -3, true, std::bind(&DB::setKeyExpireSecs, this, _1) } },
-        { "PEXPIRE",    { -3, true, std::bind(&DB::setKeyExpireMils, this, _1) } },
-        { "DEL",        { 2, true, std::bind(&DB::deleteKey, this, _1) } },
-        { "KEYS",       { -2, false, std::bind(&DB::getAllKeys, this, _1) } },
-        { "SAVE",       { -1, false, std::bind(&DB::save, this, _1) } },
-        { "BGSAVE",     { -1, false, std::bind(&DB::saveBackground, this, _1) } },
-        { "BGREWRITEAOF",{ -1, false, std::bind(&DB::rewriteAof, this, _1) } },
-        { "LASTSAVE",   { -1, false, std::bind(&DB::lastSaveTime, this, _1) } },
-        { "FLUSHDB",    { -1, true, std::bind(&DB::flushDb, this, _1) } },
-        { "SLAVEOF",    { -3, false, std::bind(&DB::slaveOf, this, _1) } },
-        { "PSYNC",      { -3, false, std::bind(&DB::psync, this, _1) } },
+        { "SET",        {  3,   true,   BIND(strSet) } },
+        { "SETNX",      { -3,   true,   BIND(strSetIfNotExist) } },
+        { "GET",        { -2,   false,  BIND(strGet) } },
+        { "GETSET",     { -3,   true,   BIND(strGetSet) } },
+        { "APPEND",     { -3,   true,   BIND(strAppend) } },
+        { "STRLEN",     { -2,   false,  BIND(strLen) } },
+        { "MSET",       {  3,   true,   BIND(strMset) } },
+        { "MGET",       {  2,   false,  BIND(strMget) } },
+        { "INCR",       { -2,   true,   BIND(strIncr) } },
+        { "INCRBY",     { -3,   true,   BIND(strIncrBy) } },
+        { "DECR",       { -2,   true,   BIND(strDecr) } },
+        { "DECRBY",     { -3,   true,   BIND(strDecrBy) } },
+        { "LPUSH",      {  3,   true,   BIND(listLeftPush) } },
+        { "LPUSHX",     { -3,   true,   BIND(listHeadPush) } },
+        { "RPUSH",      {  3,   true,   BIND(listRightPush) } },
+        { "RPUSHX",     { -3,   true,   BIND(listTailPush) } },
+        { "LPOP",       { -2,   true,   BIND(listLeftPop) } },
+        { "RPOP",       { -2,   true,   BIND(listRightPop) } },
+        { "RPOPLPUSH",  { -3,   true,   BIND(listRightPopToLeftPush) } },
+        { "LREM",       { -4,   true,   BIND(listRem) } },
+        { "LLEN",       { -2,   false,  BIND(listLen) } },
+        { "LINDEX",     { -3,   false,  BIND(listIndex) } },
+        { "LSET",       { -4,   true,   BIND(listSet) } },
+        { "LRANGE",     { -4,   false,  BIND(listRange) } },
+        { "LTRIM",      { -4,   true,   BIND(listTrim) } },
+        { "SADD",       {  3,   true,   BIND(setAdd) } },
+        { "SISMEMBER",  { -3,   false,  BIND(setIsMember) } },
+        { "SPOP",       { -2,   true,   BIND(setPop) } },
+        { "SRANDMEMBER",{  2,   false,  BIND(setRandMember) } },
+        { "SREM",       {  3,   true,   BIND(setRem)  } },
+        { "SMOVE",      { -4,   true,   BIND(setMove) } },
+        { "SCARD",      { -2,   false,  BIND(setCard) } },
+        { "SMEMBERS",   { -2,   false,  BIND(setMembers) } },
+        { "SINTER",     {  2,   false,  BIND(setInter) } },
+        { "SINTERSTORE",{  3,   true,   BIND(setInterStore) } },
+        { "SUNION",     {  2,   false,  BIND(setUnion) } },
+        { "SUNIONSTORE",{  3,   true,   BIND(setUnionStore) } },
+        { "SDIFF",      {  2,   false,  BIND(setDiff) } },
+        { "SDIFFSTORE", {  3,   true,   BIND(setDiffStore) } },
+        { "HSET",       { -4,   true,   BIND(hashSet) } },
+        { "HSETNX",     { -4,   true,   BIND(hashSetIfNotExists) } },
+        { "HGET",       { -3,   false,  BIND(hashGet) } },
+        { "HEXISTS",    { -3,   false,  BIND(hashFieldExists) } },
+        { "HDEL",       {  3,   true,   BIND(hashDelete) } },
+        { "HLEN",       { -2,   false,  BIND(hashFieldLen) } },
+        { "HSTRLEN",    { -3,   false,  BIND(hashValueLen) } },
+        { "HINCRBY",    { -4,   true,   BIND(hashIncrBy) } },
+        { "HMSET",      {  4,   true,   BIND(hashMset) } },
+        { "HMGET",      {  3,   false,  BIND(hashMget) } },
+        { "HKEYS",      { -2,   false,  BIND(hashGetKeys) } },
+        { "HVALS",      { -2,   false,  BIND(hashGetValues) } },
+        { "HGETALL",    { -2,   false,  BIND(hashGetAll) } },
+        { "EXISTS",     { -2,   false,  BIND(isKeyExists) } },
+        { "TYPE",       { -2,   false,  BIND(getKeyType) } },
+        { "TTL",        { -2,   false,  BIND(getTtlSecs) } },
+        { "PTTL",       { -2,   false,  BIND(getTtlMils) } },
+        { "EXPIRE",     { -3,   true,   BIND(setKeyExpireSecs) } },
+        { "PEXPIRE",    { -3,   true,   BIND(setKeyExpireMils) } },
+        { "DEL",        {  2,   true,   BIND(deleteKey) } },
+        { "KEYS",       { -2,   false,  BIND(getAllKeys) } },
+        { "SAVE",       { -1,   false,  BIND(save) } },
+        { "BGSAVE",     { -1,   false,  BIND(saveBackground) } },
+        { "BGREWRITEAOF",{ -1,  false,  BIND(rewriteAof) } },
+        { "LASTSAVE",   { -1,   false,  BIND(lastSaveTime) } },
+        { "FLUSHDB",    { -1,   true,   BIND(flushDb) } },
+        { "SLAVEOF",    { -3,   false,  BIND(slaveOf) } },
+        { "PSYNC",      { -3,   false,  BIND(psync) } },
+        { "REPLCONF",   { -3,   false,  BIND(replconf) } },
     };
 }
 
@@ -349,9 +352,29 @@ void DB::psync(Context& con)
         _dbServer->addSlaveId(con.conn()->id());
     con.setFlag(Context::SYNC_RDB_FILE);
     _dbServer->setFlag(DBServer::PSYNC);
+    con.append("+FULLRESYNC\r\n");
+    con.append(convert(_dbServer->runId()));
+    con.append("\r\n");
+    con.append(convert(_dbServer->offset()));
+    con.append("\r\n");
     if (_dbServer->rdb()->childPid() != -1)
         return;
     _dbServer->rdb()->saveBackground();
+}
+
+void DB::replconf(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    size_t offset = atoll(cmdlist[2].c_str());
+    if (offset > 0)
+        std::cout << "slave offset = " << offset << "\n";
+    if (offset < _dbServer->offset()) {
+        if (_dbServer->offset() - offset > DBServer::copy_backlog_buffer_size) {
+            // 完整重同步
+        } else {
+            // 部分重同步
+        }
+    }
 }
 
 //////////////////////////////////////////////////////////////////

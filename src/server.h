@@ -46,7 +46,10 @@ public:
         _aof(new Aof(this)),
         _flag(0),
         _lastSaveTime(Angel::TimeStamp::now()),
-        _dirty(0)
+        _dirty(0),
+        _copyBacklogBuffer(copy_backlog_buffer_size, 0),
+        _offset(0),
+        _runId(1)
     { 
     }
     DB& db() { return _db; }
@@ -70,6 +73,7 @@ public:
     void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void sendRdbfileToSlave();
     void sendSyncCommandToSlave(Context::CommandList& cmdlist);
+    void sendAckToMaster(const Angel::TcpConnectionPtr& conn);
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
@@ -79,6 +83,12 @@ public:
     void appendWriteCommand(Context::CommandList& cmdlist);
     std::set<size_t>& slaveIds() { return _slaveIds; }
     void addSlaveId(size_t id) { _slaveIds.insert(id); }
+    size_t offset() { return _offset; }
+    std::string& copyBacklogBuffer() { return _copyBacklogBuffer; }
+    void appendCopyBacklogBuffer(Context::CommandList& cmdlist);
+    size_t runId() const { return _runId; }
+
+    static const size_t copy_backlog_buffer_size = 1024 * 1024;
 private:
     DB _db;
     ExpireMap _expireMap;
@@ -91,6 +101,9 @@ private:
     std::unique_ptr<Angel::InetAddr> _masterAddr;
     std::unique_ptr<Angel::TcpClient> _client;
     std::set<size_t> _slaveIds;
+    std::string _copyBacklogBuffer;
+    size_t _offset;
+    size_t _runId;
 };
 
 class Server {
@@ -105,6 +118,8 @@ public:
                 std::bind(&Server::onConnection, this, _1));
         _server.setMessageCb(
                 std::bind(&Server::onMessage, this, _1, _2));
+        _server.setCloseCb(
+                std::bind(&Server::onClose, this, _1));
         readConf();
         _loop->runEvery(100, [this]{ this->serverCron(); });
         if (_dbServer.flag() & DBServer::APPENDONLY)
