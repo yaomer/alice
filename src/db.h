@@ -27,20 +27,26 @@ public:
         REPLY,
     };
     enum Flag{
-        SLAVE = 0x01,
-        SYNC_RDB_FILE = 0x02,
-        SYNC_COMMAND = 0x04,
+        SLAVE = 0x01, // for slave
+        SYNC_RDB_FILE = 0x02, // for master
+        SYNC_COMMAND = 0x04, // for master and slave
+        SYNC_WAIT = 0x08, // for slave
+        SYNC_FULL = 0x10, // for slave
+        SYNC_PART = 0x20, // for slave
+        SYNC_OK = 0x40, // for slave
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _syncRdbFilesize(0),
         _fd(-1),
         _offset(0),
+        _lastRecvPingTime(0),
         _db(db),
         _conn(conn),
         _state(PARSING),
         _flag(0)
     {  
         bzero(tmpfile, sizeof(tmpfile));
+        bzero(_masterRunId, sizeof(_masterRunId));
     }
     using CommandList = std::vector<std::string>;
     DBServer *db() { return _db; }
@@ -58,12 +64,15 @@ public:
     int flag() const { return _flag; }
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
+    const char *masterRunId() { return _masterRunId; }
+    void setMasterRunId(const char *s)
+    { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
 
     size_t _syncRdbFilesize;
     char tmpfile[16];
     int _fd;
     size_t _offset;
-    size_t _runId;
+    int64_t _lastRecvPingTime;
 private:
     DBServer *_db;
     const Angel::TcpConnectionPtr _conn;
@@ -71,6 +80,7 @@ private:
     std::string _buffer;
     int _state;
     int _flag;
+    char _masterRunId[33];
 };
 
 class Command {
@@ -89,6 +99,7 @@ public:
 private:
     int8_t _arity;
     bool _isWrite;
+    // TODO: 命令权限
 };
 
 class Value {
@@ -147,6 +158,8 @@ public:
     void slaveOf(Context& con);
     void psync(Context& con);
     void replconf(Context& con);
+    void ping(Context& con);
+    void pong(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);

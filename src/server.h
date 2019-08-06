@@ -48,9 +48,9 @@ public:
         _lastSaveTime(Angel::TimeStamp::now()),
         _dirty(0),
         _copyBacklogBuffer(copy_backlog_buffer_size, 0),
-        _offset(0),
-        _runId(1)
+        _offset(0)
     { 
+        setRunId();
     }
     DB& db() { return _db; }
     Rdb *rdb() { return _rdb.get(); }
@@ -70,26 +70,31 @@ public:
     { _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); }
     void connectMasterServer();
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
+    void recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void sendRdbfileToSlave();
     void sendSyncCommandToSlave(Context::CommandList& cmdlist);
     void sendAckToMaster(const Angel::TcpConnectionPtr& conn);
+    void sendPingToMaster(const Angel::TcpConnectionPtr& conn);
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
     void delExpireKey(const Key& key);
     bool isExpiredKey(const Key& key);
-    static void appendCommand(std::string& buffer, Context::CommandList& cmdlist);
+    static void appendCommand(std::string& buffer, Context::CommandList& cmdlist,
+            bool repl_set);
     void appendWriteCommand(Context::CommandList& cmdlist);
     std::set<size_t>& slaveIds() { return _slaveIds; }
     void addSlaveId(size_t id) { _slaveIds.insert(id); }
     size_t offset() { return _offset; }
     std::string& copyBacklogBuffer() { return _copyBacklogBuffer; }
     void appendCopyBacklogBuffer(Context::CommandList& cmdlist);
-    size_t runId() const { return _runId; }
+    const char *runId() const { return _runId; }
 
     static const size_t copy_backlog_buffer_size = 1024 * 1024;
 private:
+    void setRunId();
+
     DB _db;
     ExpireMap _expireMap;
     std::unique_ptr<Rdb> _rdb;
@@ -103,7 +108,7 @@ private:
     std::set<size_t> _slaveIds;
     std::string _copyBacklogBuffer;
     size_t _offset;
-    size_t _runId;
+    char _runId[33];
 };
 
 class Server {

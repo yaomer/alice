@@ -22,12 +22,12 @@ Aof::Aof(DBServer *dbServer)
 
 void Aof::append(Context::CommandList& cmdlist)
 {
-    DBServer::appendCommand(_buffer, cmdlist);
+    DBServer::appendCommand(_buffer, cmdlist, true);
 }
 
 void Aof::appendRewriteBuffer(Context::CommandList& cmdlist)
 {
-    DBServer::appendCommand(_rewriteBuffer, cmdlist);
+    DBServer::appendCommand(_rewriteBuffer, cmdlist, true);
 }
 
 void Aof::appendAof(int64_t now)

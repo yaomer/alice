@@ -349,5 +349,5 @@ void Rdb::flush()
 
 void Rdb::appendSyncBuffer(Context::CommandList& cmdlist)
 {
-    DBServer::appendCommand(_syncBuffer, cmdlist);
+    DBServer::appendCommand(_syncBuffer, cmdlist, false);
 }

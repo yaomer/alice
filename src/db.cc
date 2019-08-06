@@ -88,6 +88,8 @@ DB::DB(DBServer *dbServer)
         { "SLAVEOF",    { -3,   false,  BIND(slaveOf) } },
         { "PSYNC",      { -3,   false,  BIND(psync) } },
         { "REPLCONF",   { -3,   false,  BIND(replconf) } },
+        { "PING",       { -1,   false,  BIND(ping) } },
+        { "PONG",       { -1,   false,  BIND(pong) } },
     };
 }
 
@@ -135,14 +137,14 @@ namespace Alice {
 #define getXXType(it, _type) \
     (std::any_cast<_type>((it)->second.value()))
 
-#define appendAmount(con, size) \
+#define appendReplyMulti(con, size) \
     do { \
         (con).append("*"); \
         (con).append(convert(size)); \
         (con).append("\r\n"); \
     } while (0)
 
-#define appendString(con, it) \
+#define appendReplySingle(con, it) \
     do { \
         (con).append("$"); \
         (con).append(convert((it).size())); \
@@ -151,7 +153,7 @@ namespace Alice {
         (con).append("\r\n"); \
     } while (0)
 
-#define appendNumber(con, size) \
+#define appendReplyNumber(con, size) \
     do { \
         (con).append(": "); \
         (con).append(convert(size)); \
@@ -204,7 +206,7 @@ void DB::_getTtl(Context& con, bool seconds)
     int64_t milliseconds = expire->second - Angel::TimeStamp::now();
     if (seconds)
         milliseconds /= 1000;
-    appendNumber(con, milliseconds);
+    appendReplyNumber(con, milliseconds);
 }
 
 void DB::getTtlSecs(Context& con)
@@ -259,7 +261,7 @@ void DB::deleteKey(Context& con)
             retval++;
         }
     }
-    appendNumber(con, retval);
+    appendReplyNumber(con, retval);
 }
 
 void DB::getAllKeys(Context& con)
@@ -273,11 +275,11 @@ void DB::getAllKeys(Context& con)
         con.append(db_return_nil);
         return;
     }
-    appendAmount(con, _hashMap.size());
+    appendReplyMulti(con, _hashMap.size());
     size_t size = con.message().size();
     for (auto& it : _hashMap) {
         con.db()->isExpiredKey(it.first);
-        appendString(con, it.first);
+        appendReplySingle(con, it.first);
     }
     if (size == con.message().size())
         con.assign(db_return_nil);
@@ -323,7 +325,7 @@ void DB::rewriteAof(Context& con)
 
 void DB::lastSaveTime(Context& con)
 {
-    appendNumber(con, _dbServer->lastSaveTime());
+    appendReplyNumber(con, _dbServer->lastSaveTime());
 }
 
 void DB::flushDb(Context& con)
@@ -347,34 +349,71 @@ void DB::slaveOf(Context& con)
 
 void DB::psync(Context& con)
 {
+    auto& cmdlist = con.commandList();
     auto it = _dbServer->slaveIds().find(con.conn()->id());
     if (it == _dbServer->slaveIds().end())
         _dbServer->addSlaveId(con.conn()->id());
-    con.setFlag(Context::SYNC_RDB_FILE);
-    _dbServer->setFlag(DBServer::PSYNC);
-    con.append("+FULLRESYNC\r\n");
-    con.append(convert(_dbServer->runId()));
-    con.append("\r\n");
-    con.append(convert(_dbServer->offset()));
-    con.append("\r\n");
-    if (_dbServer->rdb()->childPid() != -1)
-        return;
-    _dbServer->rdb()->saveBackground();
+    if (cmdlist[1].compare("?") == 0 && cmdlist[2].compare("-1") == 0) {
+sync:
+        // 执行完整重同步
+        con.setFlag(Context::SYNC_RDB_FILE);
+        _dbServer->setFlag(DBServer::PSYNC);
+        con.append("+FULLRESYNC\r\n");
+        con.append(_dbServer->runId());
+        con.append("\r\n");
+        con.append(convert(_dbServer->offset()));
+        con.append("\r\n");
+        if (_dbServer->rdb()->childPid() != -1)
+            return;
+        _dbServer->rdb()->saveBackground();
+    } else {
+        if (cmdlist[1].compare(_dbServer->runId()) == 0) {
+            size_t offset = atoll(cmdlist[2].c_str());
+            ssize_t lastoffset = _dbServer->offset() - offset;
+            if (lastoffset <= DBServer::copy_backlog_buffer_size) {
+                // 执行部分重同步
+                con.append("+CONTINUE\r\n");
+                size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
+                con.append(std::string(
+                            &_dbServer->copyBacklogBuffer()[start], lastoffset));
+            } else
+                goto sync;
+        } else
+            goto sync;
+    }
 }
 
 void DB::replconf(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t offset = atoll(cmdlist[2].c_str());
-    if (offset > 0)
-        std::cout << "slave offset = " << offset << "\n";
-    if (offset < _dbServer->offset()) {
-        if (_dbServer->offset() - offset > DBServer::copy_backlog_buffer_size) {
-            // 完整重同步
+    std::cout << "master offset = " << _dbServer->offset() << ", "
+        << "slave offset = " << offset << "\n";
+    ssize_t lastoffset = _dbServer->offset() - offset;
+    if (lastoffset > 0) {
+        if (lastoffset > DBServer::copy_backlog_buffer_size) {
+            // TODO: 重新同步
         } else {
-            // 部分重同步
+            // 重传丢失的命令
+            // size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
+            // con.append(std::string(
+                        // &_dbServer->copyBacklogBuffer()[start], lastoffset));
         }
     }
+}
+
+void DB::ping(Context& con)
+{
+    con.append("*1\r\n$4\r\nPONG\r\n");
+}
+
+void DB::pong(Context& con)
+{
+    int64_t now = Angel::TimeStamp::now();
+    if (now - con._lastRecvPingTime > 8) {
+        // TODO: 重连master
+    } else
+        con._lastRecvPingTime = now;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -431,7 +470,7 @@ void DB::strGet(Context& con)
     }
     checkType(con, it, String);
     auto& value = getStringValue(it);
-    appendString(con, value);
+    appendReplySingle(con, value);
 }
 
 void DB::strGetSet(Context& con)
@@ -447,7 +486,7 @@ void DB::strGetSet(Context& con)
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
     _hashMap[cmdlist[1]] = cmdlist[2];
-    appendString(con, oldvalue);
+    appendReplySingle(con, oldvalue);
 }
 
 void DB::strLen(Context& con)
@@ -461,7 +500,7 @@ void DB::strLen(Context& con)
     }
     checkType(con, it, String);
     String& value = getStringValue(it);
-    appendNumber(con, value.size());
+    appendReplyNumber(con, value.size());
 }
 
 void DB::strAppend(Context& con)
@@ -471,13 +510,13 @@ void DB::strAppend(Context& con)
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
-        appendNumber(con, cmdlist[2].size());
+        appendReplyNumber(con, cmdlist[2].size());
         return;
     }
     checkType(con, it, String);
     String& string = getStringValue(it);
     string.append(cmdlist[2]);
-    appendNumber(con, string.size());
+    appendReplyNumber(con, string.size());
 }
 
 void DB::strMset(Context& con)
@@ -499,7 +538,7 @@ void DB::strMget(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    appendAmount(con, size - 1);
+    appendReplyMulti(con, size - 1);
     for (auto i = 1; i < size; i++) {
         con.db()->isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
@@ -509,7 +548,7 @@ void DB::strMget(Context& con)
                 continue;
             }
             String& value = getStringValue(it);
-            appendString(con, value);
+            appendReplySingle(con, value);
         } else
             con.append(db_return_nil);
     }
@@ -539,14 +578,14 @@ void DB::_strIdCr(Context& con, int64_t incr)
             int64_t number = atoll(value.c_str());
             number += incr;
             _hashMap[cmdlist[1]] = String(convert(number));
-            appendNumber(con, number);
+            appendReplyNumber(con, number);
         } else {
             con.append(db_return_interger_err);
             return;
         }
     } else {
         _hashMap[cmdlist[1]] = String(convert(incr));
-        appendNumber(con, incr);
+        appendReplyNumber(con, incr);
     }
 }
 
@@ -595,7 +634,7 @@ void DB::_listPush(Context& con, bool leftPush)
             else
                 list.push_back(cmdlist[i]);
         }
-        appendNumber(con, list.size());
+        appendReplyNumber(con, list.size());
     } else {
         List list;
         for (auto i = 2; i < size; i++) {
@@ -605,7 +644,7 @@ void DB::_listPush(Context& con, bool leftPush)
                 list.push_back(cmdlist[i]);
         }
         _hashMap[cmdlist[1]] = list;
-        appendNumber(con, list.size());
+        appendReplyNumber(con, list.size());
     }
 }
 
@@ -634,7 +673,7 @@ void DB::_listEndsPush(Context& con, bool frontPush)
         list.push_front(cmdlist[2]);
     else
         list.push_back(cmdlist[2]);
-    appendNumber(con, list.size());
+    appendReplyNumber(con, list.size());
 }
 
 void DB::listHeadPush(Context& con)
@@ -663,10 +702,10 @@ void DB::_listPop(Context& con, bool leftPop)
         return;
     }
     if (leftPop) {
-        appendString(con, list.front());
+        appendReplySingle(con, list.front());
         list.pop_front();
     } else {
-        appendString(con, list.back());
+        appendReplySingle(con, list.back());
         list.pop_back();
     }
 }
@@ -697,7 +736,7 @@ void DB::listRightPopToLeftPush(Context& con)
         con.append(db_return_nil);
         return;
     }
-    appendString(con, srclist.back());
+    appendReplySingle(con, srclist.back());
     auto des = _hashMap.find(cmdlist[2]);
     if (des != _hashMap.end()) {
         checkType(con, des, List);
@@ -753,7 +792,7 @@ void DB::listRem(Context& con)
             }
         }
     }
-    appendNumber(con, retval);
+    appendReplyNumber(con, retval);
 }
 
 void DB::listLen(Context& con)
@@ -767,7 +806,7 @@ void DB::listLen(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    appendNumber(con, list.size());
+    appendReplyNumber(con, list.size());
 }
 
 void DB::listIndex(Context& con)
@@ -791,7 +830,7 @@ void DB::listIndex(Context& con)
     }
     for (auto& it : list)
         if (index-- == 0) {
-            appendString(con, it);
+            appendReplySingle(con, it);
             break;
         }
 }
@@ -847,7 +886,7 @@ void DB::listRange(Context& con)
         con.append(db_return_nil);
         return;
     }
-    appendAmount(con, stop - start + 1);
+    appendReplyMulti(con, stop - start + 1);
     int i = 0;
     for (auto& it : list) {
         if (i < start) {
@@ -856,7 +895,7 @@ void DB::listRange(Context& con)
         }
         if (i > stop)
             break;
-        appendString(con, it);
+        appendReplySingle(con, it);
         i++;
     }
 }
@@ -923,13 +962,13 @@ void DB::setAdd(Context& con)
                 retval++;
             }
         }
-        appendNumber(con, retval);
+        appendReplyNumber(con, retval);
     } else {
         Set set;
         for (auto i = 2; i < members; i++)
             set.insert(cmdlist[i]);
         _hashMap[cmdlist[1]] = std::move(set);
-        appendNumber(con, members - 2);
+        appendReplyNumber(con, members - 2);
     }
 }
 
@@ -982,7 +1021,7 @@ void DB::setPop(Context& con)
     for (auto it = set.cbegin(bucketNumber);
             it != set.cend(bucketNumber); it++)
         if (where-- == 0) {
-            appendString(con, *it);
+            appendReplySingle(con, *it);
             set.erase(set.find(*it));
             break;
         }
@@ -1013,16 +1052,16 @@ void DB::setRandMember(Context& con)
     }
     // 类型转换，int -> size_t
     if (count >= static_cast<ssize_t>(set.size())) {
-        appendAmount(con, set.size());
+        appendReplyMulti(con, set.size());
         for (auto& it : set) {
-            appendString(con, it);
+            appendReplySingle(con, it);
         }
         return;
     }
     if (count == 0 || count < 0) {
         if (count == 0)
             count = -1;
-        appendAmount(con, -count);
+        appendReplyMulti(con, -count);
         while (count++ < 0) {
             auto bucket = getRandBucketNumber(set);
             size_t bucketNumber = std::get<0>(bucket);
@@ -1030,14 +1069,14 @@ void DB::setRandMember(Context& con)
             for (auto it = set.cbegin(bucketNumber);
                     it != set.cend(bucketNumber); it++) {
                 if (where-- == 0) {
-                    appendString(con, *it);
+                    appendReplySingle(con, *it);
                     break;
                 }
             }
         }
         return;
     }
-    appendAmount(con, count);
+    appendReplyMulti(con, count);
     Set tset;
     while (count-- > 0) {
         auto bucket = getRandBucketNumber(set);
@@ -1056,7 +1095,7 @@ void DB::setRandMember(Context& con)
         }
     }
     for (auto it : tset) {
-        appendString(con, it);
+        appendReplySingle(con, it);
     }
 }
 
@@ -1080,7 +1119,7 @@ void DB::setRem(Context& con)
             retval++;
         }
     }
-    appendNumber(con, retval);
+    appendReplyNumber(con, retval);
 }
 
 void DB::setMove(Context& con)
@@ -1127,7 +1166,7 @@ void DB::setCard(Context& con)
     }
     checkType(con, it, Set);
     Set& set = getSetValue(it);
-    appendNumber(con, set.size());
+    appendReplyNumber(con, set.size());
 }
 
 void DB::setMembers(Context& con)
@@ -1141,9 +1180,9 @@ void DB::setMembers(Context& con)
     }
     checkType(con, it, Set);
     Set& set = getSetValue(it);
-    appendAmount(con, set.size());
+    appendReplyMulti(con, set.size());
     for (auto& it : set) {
-        appendString(con, it);
+        appendReplySingle(con, it);
     }
 }
 
@@ -1186,9 +1225,9 @@ void DB::setInter(Context& con)
         if (i == size)
             retSet.insert(it);
     }
-    appendAmount(con, retSet.size());
+    appendReplyMulti(con, retSet.size());
     for (auto& it : retSet)
-        appendString(con, it);
+        appendReplySingle(con, it);
 }
 
 void DB::setInterStore(Context& con)
@@ -1236,9 +1275,9 @@ void DB::setInterStore(Context& con)
         checkType(con, it, Set);
         Set& set = getSetValue(it);
         set.swap(retSet);
-        appendNumber(con, set.size());
+        appendReplyNumber(con, set.size());
     } else {
-        appendNumber(con, retSet.size());
+        appendReplyNumber(con, retSet.size());
         _hashMap[cmdlist[1]] = std::move(retSet);
     }
 }
@@ -1263,9 +1302,9 @@ void DB::setUnion(Context& con)
     if (retSet.empty())
         con.append(db_return_nil);
     else {
-        appendAmount(con, retSet.size());
+        appendReplyMulti(con, retSet.size());
         for (auto& it : retSet)
-            appendString(con, it);
+            appendReplySingle(con, it);
     }
 }
 
@@ -1291,9 +1330,9 @@ void DB::setUnionStore(Context& con)
         checkType(con, it, Set);
         Set& set = getSetValue(it);
         set.swap(retSet);
-        appendNumber(con, set.size());
+        appendReplyNumber(con, set.size());
     } else {
-        appendNumber(con, retSet.size());
+        appendReplyNumber(con, retSet.size());
         _hashMap[cmdlist[1]] = std::move(retSet);
     }
 }
@@ -1371,7 +1410,7 @@ void DB::hashGet(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        appendString(con, value->second);
+        appendReplySingle(con, value->second);
     } else
         con.append(db_return_nil);
 }
@@ -1414,7 +1453,7 @@ void DB::hashDelete(Context& con)
             retval++;
         }
     }
-    appendNumber(con, retval);
+    appendReplyNumber(con, retval);
 }
 
 void DB::hashFieldLen(Context& con)
@@ -1425,7 +1464,7 @@ void DB::hashFieldLen(Context& con)
     if (it != _hashMap.end()) {
         checkType(con, it, Hash);
         Hash& hash = getHashValue(it);
-        appendNumber(con, hash.size());
+        appendReplyNumber(con, hash.size());
     } else {
         con.append(db_return_integer_0);
     }
@@ -1444,7 +1483,7 @@ void DB::hashValueLen(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        appendNumber(con, value->second.size());
+        appendReplyNumber(con, value->second.size());
     } else {
         con.append(db_return_integer_0);
     }
@@ -1478,10 +1517,10 @@ void DB::hashIncrBy(Context& con)
         int64_t i64 = atoll(value->second.c_str());
         i64 += incr;
         value->second.assign(convert(i64));
-        appendNumber(con, i64);
+        appendReplyNumber(con, i64);
     } else {
         hash[cmdlist[2]] = String(convert(incr));
-        appendNumber(con, incr);
+        appendReplyNumber(con, incr);
     }
 }
 
@@ -1518,7 +1557,7 @@ void DB::hashMget(Context& con)
     con.db()->isExpiredKey(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
-    appendAmount(con, size - 2);
+    appendReplyMulti(con, size - 2);
     if (it == _hashMap.end()) {
         for (auto i = 2; i < size; i++)
             con.append(db_return_nil);
@@ -1529,7 +1568,7 @@ void DB::hashMget(Context& con)
     for (auto i = 2; i < size; i++) {
         auto it = hash.find(cmdlist[i]);
         if (it != hash.end()) {
-            appendString(con, it->second);
+            appendReplySingle(con, it->second);
         } else {
             con.append(db_return_nil);
         }
@@ -1556,17 +1595,17 @@ void DB::_hashGetXX(Context& con, int getXX)
         return;
     }
     if (getXX == GETALL)
-        appendAmount(con, hash.size() * 2);
+        appendReplyMulti(con, hash.size() * 2);
     else
-        appendAmount(con, hash.size());
+        appendReplyMulti(con, hash.size());
     for (auto& it : hash) {
         if (getXX == GETKEYS) {
-            appendString(con, it.first);
+            appendReplySingle(con, it.first);
         } else if (getXX == GETVALUES) {
-            appendString(con, it.second);
+            appendReplySingle(con, it.second);
         } else if (getXX == GETALL) {
-            appendString(con, it.first);
-            appendString(con, it.second);
+            appendReplySingle(con, it.first);
+            appendReplySingle(con, it.second);
         }
     }
 }
