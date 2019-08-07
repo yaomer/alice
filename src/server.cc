@@ -118,7 +118,6 @@ void Server::serverCron()
             if (_dbServer.flag() & DBServer::PSYNC) {
                 _dbServer.clearFlag(DBServer::PSYNC);
                 _dbServer.sendRdbfileToSlave();
-                _dbServer.setLastSaveTime(now);
             }
         }
     }
@@ -127,7 +126,6 @@ void Server::serverCron()
         if (pid > 0) {
             _dbServer.aof()->childPidReset();
             _dbServer.aof()->appendRewriteBufferToAof();
-            _dbServer.setLastSaveTime(now);
         }
     }
     if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
@@ -152,6 +150,7 @@ void Server::serverCron()
     if (_dbServer.aof()->rewriteIsOk()) {
         if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
             _dbServer.aof()->rewriteBackground();
+            _dbServer.setLastSaveTime(now);
         }
     }
 

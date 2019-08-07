@@ -160,7 +160,7 @@ public:
                 break;
             case Context::REPLY: 
                 replyResponse(conn); 
-                return;
+                break;
             }
         }
     }

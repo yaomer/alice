@@ -387,17 +387,15 @@ void DB::replconf(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t offset = atoll(cmdlist[2].c_str());
-    std::cout << "master offset = " << _dbServer->offset() << ", "
-        << "slave offset = " << offset << "\n";
     ssize_t lastoffset = _dbServer->offset() - offset;
     if (lastoffset > 0) {
         if (lastoffset > DBServer::copy_backlog_buffer_size) {
             // TODO: 重新同步
         } else {
             // 重传丢失的命令
-            // size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
-            // con.append(std::string(
-                        // &_dbServer->copyBacklogBuffer()[start], lastoffset));
+            size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
+            con.append(std::string(
+                        &_dbServer->copyBacklogBuffer()[start], lastoffset));
         }
     }
 }
