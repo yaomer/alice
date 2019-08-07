@@ -18,6 +18,12 @@ class Command;
 
 extern thread_local int64_t _lru_cache;
 
+enum CommandPerm {
+    IS_READ = 0x01,
+    IS_WRITE = 0x02,
+    IS_INTER = 0x04,
+};
+
 class Context {
 public:
     enum ParseState { 
@@ -43,7 +49,8 @@ public:
         _db(db),
         _conn(conn),
         _state(PARSING),
-        _flag(0)
+        _flag(0),
+        _perm(IS_READ | IS_WRITE)
     {  
         bzero(tmpfile, sizeof(tmpfile));
         bzero(_masterRunId, sizeof(_masterRunId));
@@ -64,6 +71,9 @@ public:
     int flag() const { return _flag; }
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
+    int perm() const { return _perm; }
+    void setPerm(int perm) { _perm |= perm; }
+    void clearPerm(int perm) { _perm &= ~perm; }
     const char *masterRunId() { return _masterRunId; }
     void setMasterRunId(const char *s)
     { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
@@ -81,25 +91,25 @@ private:
     int _state;
     int _flag;
     char _masterRunId[33];
+    int _perm;
 };
 
 class Command {
 public:
     using CommandCallback = std::function<void(Context&)>;
 
-    Command(int8_t arity, bool isWrite, const CommandCallback _cb)
+    Command(int arity, int perm, const CommandCallback _cb)
         : _commandCb(_cb),
         _arity(arity),
-        _isWrite(isWrite)
+        _perm(perm)
     {
     }
-    int8_t arity() const { return _arity; }
-    bool isWrite() const { return _isWrite; }
+    int arity() const { return _arity; }
+    int perm() const { return _perm; }
     CommandCallback _commandCb;
 private:
-    int8_t _arity;
-    bool _isWrite;
-    // TODO: 命令权限
+    int _arity;
+    int _perm;
 };
 
 class Value {

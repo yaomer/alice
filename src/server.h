@@ -69,6 +69,7 @@ public:
     void setMasterAddr(Angel::InetAddr addr)
     { _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); }
     void connectMasterServer();
+    void setSlaveToReadonly();
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
     void recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);

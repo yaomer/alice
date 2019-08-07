@@ -73,12 +73,16 @@ void Server::executeCommand(Context& con)
         con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
         goto err;
     }
+    if (!(con.perm() & it->second.perm())) {
+        con.append("-ERR permission denied\r\n");
+        goto err;
+    }
     arity = it->second.arity();
     if ((arity > 0 && cmdlist.size() < arity) || (arity < 0 && cmdlist.size() != -arity)) {
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
-    if (it->second.isWrite()) {
+    if (it->second.perm() & IS_WRITE) {
         _dbServer.dirtyIncr();
         _dbServer.appendWriteCommand(cmdlist);
         _dbServer.sendSyncCommandToSlave(cmdlist);
@@ -164,6 +168,17 @@ void Server::serverCron()
     _dbServer.aof()->appendAof(now);
 }
 
+void DBServer::setSlaveToReadonly()
+{
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& it : maps) {
+        if (it.second->getContext().has_value()) {
+            auto& context = std::any_cast<Context&>(it.second->getContext());
+            context.clearPerm(IS_WRITE);
+        }
+    }
+}
+
 void DBServer::connectMasterServer()
 {
     if (_client) {
@@ -183,9 +198,11 @@ void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
 {
     if (!conn->getContext().has_value()) {
         // slave -> master: 第一次复制
+        setSlaveToReadonly();
         const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
         Context context(this, conn);
         context.setFlag(Context::SYNC_WAIT);
+        context.setPerm(IS_INTER);
         conn->setContext(context);
         conn->send(sync);
     } else {
