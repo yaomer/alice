@@ -138,7 +138,9 @@ public:
     HashMap& hashMap() { return _hashMap; }
     void delKey(const Key& key)
     {
-        _hashMap.erase(key);
+        auto it = _hashMap.find(key);
+        if (it != _hashMap.end())
+            _hashMap.erase(key);
     }
     CommandMap& commandMap() { return _commandMap; }
 

@@ -426,6 +426,7 @@ void DB::strSet(Context& con)
     int64_t expire;
     con.db()->isExpiredKey(cmdlist[1]);
     if (cmdlist.size() == 3) {
+        con.db()->delExpireKey(cmdlist[1]);
         _hashMap[cmdlist[1]] = cmdlist[2];
         con.append(db_return_ok);
         return;
@@ -435,6 +436,7 @@ void DB::strSet(Context& con)
         if (strcasecmp(cmdlist[3].c_str(), "XX") == 0) {
             auto it = _hashMap.find(cmdlist[1]);
             if (it != _hashMap.end()) {
+                con.db()->delExpireKey(cmdlist[1]);
                 _hashMap[cmdlist[1]] = cmdlist[2];
                 con.append(db_return_ok);
             } else
@@ -442,6 +444,7 @@ void DB::strSet(Context& con)
         } else if (strcasecmp(cmdlist[3].c_str(), "NX") == 0) {
             auto it = _hashMap.find(cmdlist[1]);
             if (it == _hashMap.end()) {
+                con.db()->delExpireKey(cmdlist[1]);
                 _hashMap[cmdlist[1]] = cmdlist[2];
                 con.append(db_return_ok);
             } else
@@ -456,13 +459,11 @@ void DB::strSet(Context& con)
                 con.append(db_return_interger_err);
                 return;
             }
+            con.db()->delExpireKey(cmdlist[1]);
             _hashMap[cmdlist[1]] = cmdlist[2];
             expire = atoll(cmdlist[4].c_str());
             if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
                 expire *= 1000;
-            auto it = con.db()->expireMap().find(cmdlist[1]);
-            if (it != con.db()->expireMap().end())
-                con.db()->delExpireKey(cmdlist[1]);
             con.db()->addExpireKey(cmdlist[1], expire);
             con.append(db_return_ok);
         } else
@@ -478,6 +479,7 @@ void DB::strSet(Context& con)
             if (strcasecmp(cmdlist[5].c_str(), "XX") == 0) {
                 auto it = _hashMap.find(cmdlist[1]);
                 if (it != _hashMap.end()) {
+                    con.db()->delExpireKey(cmdlist[1]);
                     _hashMap[cmdlist[1]] = cmdlist[2];
                 } else {
                     con.append(db_return_nil);
@@ -486,6 +488,7 @@ void DB::strSet(Context& con)
             } else if (strcasecmp(cmdlist[5].c_str(), "NX") == 0) {
                 auto it = _hashMap.find(cmdlist[1]);
                 if (it == _hashMap.end()) {
+                    con.db()->delExpireKey(cmdlist[1]);
                     _hashMap[cmdlist[1]] = cmdlist[2];
                 } else {
                     con.append(db_return_nil);
@@ -496,9 +499,6 @@ void DB::strSet(Context& con)
             expire = atoll(cmdlist[4].c_str());
             if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
                 expire *= 1000;
-            auto it = con.db()->expireMap().find(cmdlist[1]);
-            if (it != con.db()->expireMap().end())
-                con.db()->delExpireKey(cmdlist[1]);
             con.db()->addExpireKey(cmdlist[1], expire);
             con.append(db_return_ok);
         } else
