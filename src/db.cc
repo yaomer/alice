@@ -425,24 +425,92 @@ void DB::strSet(Context& con)
     auto& cmdlist = con.commandList();
     int64_t expire;
     con.db()->isExpiredKey(cmdlist[1]);
-    if (cmdlist.size() > 3) {
-        std::transform(cmdlist[3].begin(), cmdlist[3].end(), cmdlist[3].begin(), ::toupper);
-        expire = atoll(cmdlist[4].c_str());
-        if (cmdlist[3].compare("EX") == 0)
-            expire *= 1000;
-        else if (cmdlist[3].compare("PX")) {
-            con.append(db_return_syntax_err);
-            return;
-        }
+    if (cmdlist.size() == 3) {
+        _hashMap[cmdlist[1]] = cmdlist[2];
+        con.append(db_return_ok);
+        return;
     }
-    _hashMap[cmdlist[1]] = cmdlist[2];
-    if (cmdlist.size() > 3) {
-        auto it = con.db()->expireMap().find(cmdlist[1]);
-        if (it != con.db()->expireMap().end())
-            con.db()->delExpireKey(cmdlist[1]);
-        con.db()->addExpireKey(cmdlist[1], expire);
+    switch (cmdlist.size()) {
+    case 4: // SET key value [NX|XX]
+        if (strcasecmp(cmdlist[3].c_str(), "XX") == 0) {
+            auto it = _hashMap.find(cmdlist[1]);
+            if (it != _hashMap.end()) {
+                _hashMap[cmdlist[1]] = cmdlist[2];
+                con.append(db_return_ok);
+            } else
+                con.append(db_return_nil);
+        } else if (strcasecmp(cmdlist[3].c_str(), "NX") == 0) {
+            auto it = _hashMap.find(cmdlist[1]);
+            if (it == _hashMap.end()) {
+                _hashMap[cmdlist[1]] = cmdlist[2];
+                con.append(db_return_ok);
+            } else
+                con.append(db_return_nil);
+        } else
+            goto syntax_err;
+        break;
+    case 5: // SET key value [EX seconds|PX milliseconds]
+        if (strcasecmp(cmdlist[3].c_str(), "EX") == 0
+         || strcasecmp(cmdlist[3].c_str(), "PX") == 0) {
+            if (!_strIsNumber(cmdlist[4])) {
+                con.append(db_return_interger_err);
+                return;
+            }
+            _hashMap[cmdlist[1]] = cmdlist[2];
+            expire = atoll(cmdlist[4].c_str());
+            if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
+                expire *= 1000;
+            auto it = con.db()->expireMap().find(cmdlist[1]);
+            if (it != con.db()->expireMap().end())
+                con.db()->delExpireKey(cmdlist[1]);
+            con.db()->addExpireKey(cmdlist[1], expire);
+            con.append(db_return_ok);
+        } else
+            goto syntax_err;
+        break;
+    case 6: // SET key value [EX seconds|PX milliseconds] [NX|XX]
+        if (strcasecmp(cmdlist[3].c_str(), "EX") == 0
+         || strcasecmp(cmdlist[3].c_str(), "PX") == 0) {
+            if (!_strIsNumber(cmdlist[4])) {
+                con.append(db_return_interger_err);
+                return;
+            }
+            if (strcasecmp(cmdlist[5].c_str(), "XX") == 0) {
+                auto it = _hashMap.find(cmdlist[1]);
+                if (it != _hashMap.end()) {
+                    _hashMap[cmdlist[1]] = cmdlist[2];
+                } else {
+                    con.append(db_return_nil);
+                    return;
+                }
+            } else if (strcasecmp(cmdlist[5].c_str(), "NX") == 0) {
+                auto it = _hashMap.find(cmdlist[1]);
+                if (it == _hashMap.end()) {
+                    _hashMap[cmdlist[1]] = cmdlist[2];
+                } else {
+                    con.append(db_return_nil);
+                    return;
+                }
+            } else
+                goto syntax_err;
+            expire = atoll(cmdlist[4].c_str());
+            if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
+                expire *= 1000;
+            auto it = con.db()->expireMap().find(cmdlist[1]);
+            if (it != con.db()->expireMap().end())
+                con.db()->delExpireKey(cmdlist[1]);
+            con.db()->addExpireKey(cmdlist[1], expire);
+            con.append(db_return_ok);
+        } else
+            goto syntax_err;
+        break;
+    default:
+        goto syntax_err;
     }
-    con.append(db_return_ok);
+    return;
+syntax_err:
+    con.append(db_return_syntax_err);
+    return;
 }
 
 void DB::strSetIfNotExist(Context& con)

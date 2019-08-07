@@ -15,7 +15,7 @@ typedef struct {
 
 HintInfo hiTable[HTSIZE] = {
     { "SETNX",      5,  " key value" },
-    { "SET",        3,  " key value [EX seconds|PX milliseconds]" },
+    { "SET",        3,  " key value [EX seconds|PX milliseconds] [NX|XX]" },
     { "GETSET",     6,  " key value" },
     { "GET",        3,  " key" },
     { "APPEND",     6,  " key value" },
