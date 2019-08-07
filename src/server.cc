@@ -326,16 +326,7 @@ void DBServer::sendRdbfileToSlave()
 void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
 {
     std::string buffer;
-    buffer.append("*");
-    buffer.append(convert(cmdlist.size()));
-    buffer.append("\r\n");
-    for (auto& it : cmdlist) {
-        buffer.append("$");
-        buffer.append(convert(it.size()));
-        buffer.append("\r\n");
-        buffer.append(it);
-        buffer.append("\r\n");
-    }
+    appendCommand(buffer, cmdlist, false);
     auto& maps = g_server->server().connectionMaps();
     for (auto& id : slaveIds()) {
         auto conn = maps.find(id);
@@ -412,8 +403,10 @@ void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
         bool repl_set)
 {
     size_t size = cmdlist.size();
+    bool set6 = false;
     if (repl_set && strncasecmp(cmdlist[0].c_str(), "SET", 3) == 0) {
-        if (size > 3) {
+        if (size == 5 || size == 6) {
+            if (size == 6) set6 = true;
             buffer += "*3\r\n$7\r\nPEXPIRE\r\n$";
             buffer += convert(cmdlist[1].size());
             buffer += "\r\n";
@@ -435,7 +428,15 @@ void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
         buffer += "\r\n";
         buffer += it;
         buffer += "\r\n";
-        if (--size == 0)
+        if (--size == 1 && set6) {
+            buffer += "$";
+            buffer += convert(cmdlist[5].size());
+            buffer += "\r\n";
+            buffer += cmdlist[5];
+            buffer += "\r\n";
+            break;
+        }
+        if (size == 0)
             break;
     }
 }
