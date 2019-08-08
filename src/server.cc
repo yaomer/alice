@@ -48,11 +48,6 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         s = next + 2;
         argc--;
     }
-    if (con.flag() & Context::SLAVE) {
-        if (strncasecmp(buf.c_str(), "*1\r\n$4\r\nPONG\r\n", 14)) {
-            con._offset += s - ps;
-        }
-    }
     buf.retrieve(s - ps);
     con.setState(Context::SUCCEED);
     return;
@@ -86,6 +81,11 @@ void Server::executeCommand(Context& con)
         _dbServer.dirtyIncr();
         _dbServer.appendWriteCommand(cmdlist);
         _dbServer.sendSyncCommandToSlave(cmdlist);
+        if (_dbServer.flag() & DBServer::SLAVE) {
+            std::string buffer;
+            DBServer::appendCommand(buffer, cmdlist, false);
+            _dbServer.slaveOffsetIncr(buffer.size());
+        }
     }
     it->second._commandCb(con);
 err:
@@ -174,7 +174,8 @@ void DBServer::setSlaveToReadonly()
     for (auto& it : maps) {
         if (it.second->getContext().has_value()) {
             auto& context = std::any_cast<Context&>(it.second->getContext());
-            context.clearPerm(IS_WRITE);
+            if (!(context.perm() & IS_INTER))
+                context.clearPerm(IS_WRITE);
         }
     }
 }
@@ -182,6 +183,8 @@ void DBServer::setSlaveToReadonly()
 void DBServer::connectMasterServer()
 {
     if (_client) {
+        if (_heartBeatTimerId > 0)
+            g_server->loop()->cancelTimer(_heartBeatTimerId);
         _client->quit();
         _client.reset();
     }
@@ -196,25 +199,24 @@ void DBServer::connectMasterServer()
 
 void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
 {
-    if (!conn->getContext().has_value()) {
+    Context context(this, conn);
+    context.setFlag(Context::SYNC_WAIT);
+    context.setPerm(IS_INTER);
+    conn->setContext(context);
+    if (!(_flag & SLAVE)) {
         // slave -> master: 第一次复制
+        setFlag(SLAVE);
         setSlaveToReadonly();
         const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-        Context context(this, conn);
-        context.setFlag(Context::SYNC_WAIT);
-        context.setPerm(IS_INTER);
-        conn->setContext(context);
         conn->send(sync);
     } else {
-        auto& context = std::any_cast<Context&>(conn->getContext());
-        context.setFlag(Context::SYNC_WAIT);
         std::string buffer;
         buffer += "*3\r\n$5\r\nPSYNC\r\n$32\r\n";
-        buffer += context.masterRunId();
+        buffer += masterRunId();
         buffer += "\r\n$";
-        buffer += convert(strlen(convert(context._offset)));
+        buffer += convert(strlen(convert(slaveOffset())));
         buffer += "\r\n";
-        buffer += convert(context._offset);
+        buffer += convert(slaveOffset());
         buffer += "\r\n";
         conn->send(buffer);
     }
@@ -235,11 +237,11 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
                 s += 13;
                 int crlf = buf.findStr(s, "\r\n", 2);
                 if (crlf < 0) return;
-                context.setMasterRunId(s);
+                setMasterRunId(s);
                 s += crlf + 2;
                 crlf = buf.findStr(s, "\r\n", 2);
                 if (crlf < 0) return;
-                context._offset = atoll(s);
+                _slaveOffset = atoll(s);
                 s += crlf + 2;
                 buf.retrieve(s - ps);
                 context.clearFlag(Context::SYNC_WAIT);
@@ -247,7 +249,8 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
             } else if (strncasecmp(buf.c_str(), "+CONTINUE\r\n", 11) == 0) {
                 buf.retrieve(11);
                 context.clearFlag(Context::SYNC_WAIT);
-                context.setFlag(Context::SYNC_PART);
+                context.setFlag(Context::SLAVE | Context::SYNC_COMMAND);
+                setHeartBeatTimer(conn);
             } else
                 break;
         } else if (context.flag() & Context::SYNC_OK){
@@ -255,9 +258,6 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
             break;
         } else if (context.flag() & Context::SYNC_FULL) {
             recvRdbfileFromMaster(conn, buf);
-        } else if (context.flag() & Context::SYNC_PART) {
-            context.clearFlag(Context::SYNC_PART);
-            context.setFlag(Context::SYNC_COMMAND);
         } else if (context.flag() & Context::SYNC_COMMAND) {
             g_server->onMessage(conn, buf);
             break;
@@ -268,47 +268,37 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
 void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
-    if (context._syncRdbFilesize == 0) {
+    if (_syncRdbFilesize == 0) {
         int crlf = buf.findStr("\r\n\r\n", 4);
-        if (crlf > 0) {
-            context._syncRdbFilesize = atoll(buf.peek());
-            buf.retrieve(crlf + 4);
-            strcpy(context.tmpfile, "tmp.XXXXX");
-            mktemp(context.tmpfile);
-            context._fd = open(context.tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
-            if (buf.readable() > 0)
-                goto next;
-            else
-                goto jump;
-        } else
-            goto jump;
+        if (crlf <= 0) goto jump;
+        _syncRdbFilesize = atoll(buf.peek());
+        buf.retrieve(crlf + 4);
+        strcpy(_tmpfile, "tmp.XXXXX");
+        mktemp(_tmpfile);
+        _syncFd = open(_tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
+        if (buf.readable() == 0) goto jump;
+        goto next;
     } else {
 next:
         size_t writeBytes = buf.readable();
-        if (writeBytes >= context._syncRdbFilesize) {
-            writeBytes = context._syncRdbFilesize;
-            context._syncRdbFilesize = 0;
+        if (writeBytes >= _syncRdbFilesize) {
+            writeBytes = _syncRdbFilesize;
+            _syncRdbFilesize = 0;
         } else {
-            context._syncRdbFilesize -= writeBytes;
+            _syncRdbFilesize -= writeBytes;
         }
-        write(context._fd, buf.peek(), writeBytes);
-        buf.retrieve(writeBytes);
-        if (context._syncRdbFilesize == 0) {
-            fsync(context._fd);
-            close(context._fd);
-            context._fd = -1;
-            rename(context.tmpfile, "dump.rdb");
-            db().hashMap().clear();
-            rdb()->load();
-            context.clearFlag(Context::SYNC_FULL);
-            context.setFlag(Context::SLAVE | Context::SYNC_COMMAND);
-            g_server->loop()->runEvery(1000, [this, conn]{
-                    this->sendAckToMaster(conn);
-                    this->sendPingToMaster(conn);
-                    });
-        } else {
-            goto jump;
-        }
+        ssize_t n = write(_syncFd, buf.peek(), writeBytes);
+        if (n > 0) buf.retrieve(n);
+        if (_syncRdbFilesize > 0) goto jump;
+        fsync(_syncFd);
+        close(_syncFd);
+        _syncFd = -1;
+        rename(_tmpfile, "dump.rdb");
+        db().hashMap().clear();
+        rdb()->load();
+        context.clearFlag(Context::SYNC_FULL);
+        context.setFlag(Context::SLAVE | Context::SYNC_COMMAND);
+        setHeartBeatTimer(conn);
     }
     return;
 jump:
@@ -362,12 +352,11 @@ void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
 
 void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
 {
-    auto& context = std::any_cast<Context&>(conn->getContext());
     std::string buffer;
     buffer += "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$";
-    buffer += convert(strlen(convert(context._offset)));
+    buffer += convert(strlen(convert(slaveOffset())));
     buffer += "\r\n";
-    buffer += convert(context._offset);
+    buffer += convert(slaveOffset());
     buffer += "\r\n";
     conn->send(buffer);
 }
@@ -396,7 +385,7 @@ void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
 {
     std::string buffer;
     appendCommand(buffer, cmdlist, false);
-    _offset += buffer.size();
+    masterOffsetIncr(buffer.size());
     size_t remainBytes = copy_backlog_buffer_size - _copyBacklogBuffer.size();
     if (remainBytes < buffer.size()) {
         size_t popsize = buffer.size() - remainBytes;
@@ -458,18 +447,22 @@ void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
     }
 }
 
-void DBServer::setRunId()
+void DBServer::setSelfRunId()
 {
     struct timespec tsp;
     clock_gettime(_CLOCK_REALTIME, &tsp);
     std::uniform_int_distribution<size_t> u;
     std::mt19937_64 e(tsp.tv_sec * 1000000000 + tsp.tv_nsec);
-    snprintf(_runId, 17, "%lx", u(e));
-    snprintf(_runId + 16, 17, "%lx", u(e));
-    _runId[6] &= 0x0f;
-    _runId[6] |= 0x40;
-    _runId[8] &= 0x3f;
-    _runId[8] |= 0x80;
+    snprintf(_selfRunId, 17, "%lx", u(e));
+    snprintf(_selfRunId + 16, 17, "%lx", u(e));
+}
+
+void DBServer::setHeartBeatTimer(const Angel::TcpConnectionPtr& conn)
+{
+    _heartBeatTimerId = g_server->loop()->runEvery(1000, [this, conn]{
+            this->sendAckToMaster(conn);
+            this->sendPingToMaster(conn);
+            });
 }
 
 int main(int argc, char *argv[])
@@ -482,6 +475,12 @@ int main(int argc, char *argv[])
     Angel::InetAddr listenAddr(atoi(argv[1]));
     Alice::Server server(&loop, listenAddr);
     g_server = &server;
+    server.readConf();
+    loop.runEvery(100, []{ g_server->serverCron(); });
+    if (server.dbServer().flag() & DBServer::APPENDONLY)
+        server.dbServer().aof()->load();
+    else
+        server.dbServer().rdb()->load();
     Angel::addSignal(SIGINT, []{
             g_server->dbServer().rdb()->save();
             g_server->dbServer().aof()->rewriteBackground();

@@ -20,76 +20,76 @@ DB::DB(DBServer *dbServer)
     : _dbServer(dbServer)
 {
     _commandMap = {
-        { "SET",        {  3,   IS_WRITE,   BIND(strSet) } },
-        { "SETNX",      { -3,   IS_WRITE,   BIND(strSetIfNotExist) } },
-        { "GET",        { -2,   IS_READ,  BIND(strGet) } },
-        { "GETSET",     { -3,   IS_WRITE,   BIND(strGetSet) } },
-        { "APPEND",     { -3,   IS_WRITE,   BIND(strAppend) } },
-        { "STRLEN",     { -2,   IS_READ,  BIND(strLen) } },
-        { "MSET",       {  3,   IS_WRITE,   BIND(strMset) } },
-        { "MGET",       {  2,   IS_READ,  BIND(strMget) } },
-        { "INCR",       { -2,   IS_WRITE,   BIND(strIncr) } },
-        { "INCRBY",     { -3,   IS_WRITE,   BIND(strIncrBy) } },
-        { "DECR",       { -2,   IS_WRITE,   BIND(strDecr) } },
-        { "DECRBY",     { -3,   IS_WRITE,   BIND(strDecrBy) } },
-        { "LPUSH",      {  3,   IS_WRITE,   BIND(listLeftPush) } },
-        { "LPUSHX",     { -3,   IS_WRITE,   BIND(listHeadPush) } },
-        { "RPUSH",      {  3,   IS_WRITE,   BIND(listRightPush) } },
-        { "RPUSHX",     { -3,   IS_WRITE,   BIND(listTailPush) } },
-        { "LPOP",       { -2,   IS_WRITE,   BIND(listLeftPop) } },
-        { "RPOP",       { -2,   IS_WRITE,   BIND(listRightPop) } },
-        { "RPOPLPUSH",  { -3,   IS_WRITE,   BIND(listRightPopToLeftPush) } },
-        { "LREM",       { -4,   IS_WRITE,   BIND(listRem) } },
-        { "LLEN",       { -2,   IS_READ,  BIND(listLen) } },
-        { "LINDEX",     { -3,   IS_READ,  BIND(listIndex) } },
-        { "LSET",       { -4,   IS_WRITE,   BIND(listSet) } },
-        { "LRANGE",     { -4,   IS_READ,  BIND(listRange) } },
-        { "LTRIM",      { -4,   IS_WRITE,   BIND(listTrim) } },
-        { "SADD",       {  3,   IS_WRITE,   BIND(setAdd) } },
-        { "SISMEMBER",  { -3,   IS_READ,  BIND(setIsMember) } },
-        { "SPOP",       { -2,   IS_WRITE,   BIND(setPop) } },
-        { "SRANDMEMBER",{  2,   IS_READ,  BIND(setRandMember) } },
-        { "SREM",       {  3,   IS_WRITE,   BIND(setRem)  } },
-        { "SMOVE",      { -4,   IS_WRITE,   BIND(setMove) } },
-        { "SCARD",      { -2,   IS_READ,  BIND(setCard) } },
-        { "SMEMBERS",   { -2,   IS_READ,  BIND(setMembers) } },
-        { "SINTER",     {  2,   IS_READ,  BIND(setInter) } },
-        { "SINTERSTORE",{  3,   IS_WRITE,   BIND(setInterStore) } },
-        { "SUNION",     {  2,   IS_READ,  BIND(setUnion) } },
-        { "SUNIONSTORE",{  3,   IS_WRITE,   BIND(setUnionStore) } },
-        { "SDIFF",      {  2,   IS_READ,  BIND(setDiff) } },
-        { "SDIFFSTORE", {  3,   IS_WRITE,   BIND(setDiffStore) } },
-        { "HSET",       { -4,   IS_WRITE,   BIND(hashSet) } },
-        { "HSETNX",     { -4,   IS_WRITE,   BIND(hashSetIfNotExists) } },
-        { "HGET",       { -3,   IS_READ,  BIND(hashGet) } },
-        { "HEXISTS",    { -3,   IS_READ,  BIND(hashFieldExists) } },
-        { "HDEL",       {  3,   IS_WRITE,   BIND(hashDelete) } },
-        { "HLEN",       { -2,   IS_READ,  BIND(hashFieldLen) } },
-        { "HSTRLEN",    { -3,   IS_READ,  BIND(hashValueLen) } },
-        { "HINCRBY",    { -4,   IS_WRITE,   BIND(hashIncrBy) } },
-        { "HMSET",      {  4,   IS_WRITE,   BIND(hashMset) } },
-        { "HMGET",      {  3,   IS_READ,  BIND(hashMget) } },
-        { "HKEYS",      { -2,   IS_READ,  BIND(hashGetKeys) } },
-        { "HVALS",      { -2,   IS_READ,  BIND(hashGetValues) } },
-        { "HGETALL",    { -2,   IS_READ,  BIND(hashGetAll) } },
-        { "EXISTS",     { -2,   IS_READ,  BIND(isKeyExists) } },
-        { "TYPE",       { -2,   IS_READ,  BIND(getKeyType) } },
-        { "TTL",        { -2,   IS_READ,  BIND(getTtlSecs) } },
-        { "PTTL",       { -2,   IS_READ,  BIND(getTtlMils) } },
-        { "EXPIRE",     { -3,   IS_WRITE,   BIND(setKeyExpireSecs) } },
-        { "PEXPIRE",    { -3,   IS_WRITE,   BIND(setKeyExpireMils) } },
-        { "DEL",        {  2,   IS_WRITE,   BIND(deleteKey) } },
-        { "KEYS",       { -2,   IS_READ,  BIND(getAllKeys) } },
-        { "SAVE",       { -1,   IS_READ,  BIND(save) } },
-        { "BGSAVE",     { -1,   IS_READ,  BIND(saveBackground) } },
-        { "BGREWRITEAOF",{ -1,  IS_READ,  BIND(rewriteAof) } },
-        { "LASTSAVE",   { -1,   IS_READ,  BIND(lastSaveTime) } },
-        { "FLUSHDB",    { -1,   IS_WRITE,   BIND(flushDb) } },
-        { "SLAVEOF",    { -3,   IS_READ,  BIND(slaveOf) } },
-        { "PSYNC",      { -3,   IS_READ,  BIND(psync) } },
-        { "REPLCONF",   { -3,   IS_INTER,  BIND(replconf) } },
-        { "PING",       { -1,   IS_READ,  BIND(ping) } },
-        { "PONG",       { -1,   IS_INTER,  BIND(pong) } },
+        { "SET",        {  3, IS_WRITE, BIND(strSet) } },
+        { "SETNX",      { -3, IS_WRITE, BIND(strSetIfNotExist) } },
+        { "GET",        { -2, IS_READ,  BIND(strGet) } },
+        { "GETSET",     { -3, IS_WRITE, BIND(strGetSet) } },
+        { "APPEND",     { -3, IS_WRITE, BIND(strAppend) } },
+        { "STRLEN",     { -2, IS_READ,  BIND(strLen) } },
+        { "MSET",       {  3, IS_WRITE, BIND(strMset) } },
+        { "MGET",       {  2, IS_READ,  BIND(strMget) } },
+        { "INCR",       { -2, IS_WRITE, BIND(strIncr) } },
+        { "INCRBY",     { -3, IS_WRITE, BIND(strIncrBy) } },
+        { "DECR",       { -2, IS_WRITE, BIND(strDecr) } },
+        { "DECRBY",     { -3, IS_WRITE, BIND(strDecrBy) } },
+        { "LPUSH",      {  3, IS_WRITE, BIND(listLeftPush) } },
+        { "LPUSHX",     { -3, IS_WRITE, BIND(listHeadPush) } },
+        { "RPUSH",      {  3, IS_WRITE, BIND(listRightPush) } },
+        { "RPUSHX",     { -3, IS_WRITE, BIND(listTailPush) } },
+        { "LPOP",       { -2, IS_WRITE, BIND(listLeftPop) } },
+        { "RPOP",       { -2, IS_WRITE, BIND(listRightPop) } },
+        { "RPOPLPUSH",  { -3, IS_WRITE, BIND(listRightPopToLeftPush) } },
+        { "LREM",       { -4, IS_WRITE, BIND(listRem) } },
+        { "LLEN",       { -2, IS_READ,  BIND(listLen) } },
+        { "LINDEX",     { -3, IS_READ,  BIND(listIndex) } },
+        { "LSET",       { -4, IS_WRITE, BIND(listSet) } },
+        { "LRANGE",     { -4, IS_READ,  BIND(listRange) } },
+        { "LTRIM",      { -4, IS_WRITE, BIND(listTrim) } },
+        { "SADD",       {  3, IS_WRITE, BIND(setAdd) } },
+        { "SISMEMBER",  { -3, IS_READ,  BIND(setIsMember) } },
+        { "SPOP",       { -2, IS_WRITE, BIND(setPop) } },
+        { "SRANDMEMBER",{  2, IS_READ,  BIND(setRandMember) } },
+        { "SREM",       {  3, IS_WRITE, BIND(setRem)  } },
+        { "SMOVE",      { -4, IS_WRITE, BIND(setMove) } },
+        { "SCARD",      { -2, IS_READ,  BIND(setCard) } },
+        { "SMEMBERS",   { -2, IS_READ,  BIND(setMembers) } },
+        { "SINTER",     {  2, IS_READ,  BIND(setInter) } },
+        { "SINTERSTORE",{  3, IS_WRITE, BIND(setInterStore) } },
+        { "SUNION",     {  2, IS_READ,  BIND(setUnion) } },
+        { "SUNIONSTORE",{  3, IS_WRITE, BIND(setUnionStore) } },
+        { "SDIFF",      {  2, IS_READ,  BIND(setDiff) } },
+        { "SDIFFSTORE", {  3, IS_WRITE, BIND(setDiffStore) } },
+        { "HSET",       { -4, IS_WRITE, BIND(hashSet) } },
+        { "HSETNX",     { -4, IS_WRITE, BIND(hashSetIfNotExists) } },
+        { "HGET",       { -3, IS_READ,  BIND(hashGet) } },
+        { "HEXISTS",    { -3, IS_READ,  BIND(hashFieldExists) } },
+        { "HDEL",       {  3, IS_WRITE, BIND(hashDelete) } },
+        { "HLEN",       { -2, IS_READ,  BIND(hashFieldLen) } },
+        { "HSTRLEN",    { -3, IS_READ,  BIND(hashValueLen) } },
+        { "HINCRBY",    { -4, IS_WRITE, BIND(hashIncrBy) } },
+        { "HMSET",      {  4, IS_WRITE, BIND(hashMset) } },
+        { "HMGET",      {  3, IS_READ,  BIND(hashMget) } },
+        { "HKEYS",      { -2, IS_READ,  BIND(hashGetKeys) } },
+        { "HVALS",      { -2, IS_READ,  BIND(hashGetValues) } },
+        { "HGETALL",    { -2, IS_READ,  BIND(hashGetAll) } },
+        { "EXISTS",     { -2, IS_READ,  BIND(isKeyExists) } },
+        { "TYPE",       { -2, IS_READ,  BIND(getKeyType) } },
+        { "TTL",        { -2, IS_READ,  BIND(getTtlSecs) } },
+        { "PTTL",       { -2, IS_READ,  BIND(getTtlMils) } },
+        { "EXPIRE",     { -3, IS_WRITE, BIND(setKeyExpireSecs) } },
+        { "PEXPIRE",    { -3, IS_WRITE, BIND(setKeyExpireMils) } },
+        { "DEL",        {  2, IS_WRITE, BIND(deleteKey) } },
+        { "KEYS",       { -2, IS_READ,  BIND(getAllKeys) } },
+        { "SAVE",       { -1, IS_READ,  BIND(save) } },
+        { "BGSAVE",     { -1, IS_READ,  BIND(saveBackground) } },
+        { "BGREWRITEAOF",{-1, IS_READ,  BIND(rewriteAof) } },
+        { "LASTSAVE",   { -1, IS_READ,  BIND(lastSaveTime) } },
+        { "FLUSHDB",    { -1, IS_WRITE, BIND(flushDb) } },
+        { "SLAVEOF",    { -3, IS_READ,  BIND(slaveOf) } },
+        { "PSYNC",      { -3, IS_READ,  BIND(psync) } },
+        { "REPLCONF",   { -3, IS_INTER, BIND(replconf) } },
+        { "PING",       { -1, IS_READ,  BIND(ping) } },
+        { "PONG",       { -1, IS_INTER, BIND(pong) } },
     };
 }
 
@@ -340,8 +340,7 @@ void DB::slaveOf(Context& con)
     if (_strIsNumber(cmdlist[2])) {
         _dbServer->setMasterAddr(
                 Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[1].c_str()));
-        g_server->loop()->queueInLoop(
-                [this]{ this->_dbServer->connectMasterServer(); });
+        _dbServer->connectMasterServer();
         con.append(db_return_ok);
     } else
         con.append(db_return_interger_err);
@@ -360,27 +359,28 @@ sync:
         con.setFlag(Context::SYNC_RDB_FILE);
         _dbServer->setFlag(DBServer::PSYNC);
         con.append("+FULLRESYNC\r\n");
-        con.append(_dbServer->runId());
+        con.append(_dbServer->selfRunId());
         con.append("\r\n");
-        con.append(convert(_dbServer->offset()));
+        con.append(convert(_dbServer->masterOffset()));
         con.append("\r\n");
         if (_dbServer->rdb()->childPid() != -1)
             return;
         _dbServer->rdb()->saveBackground();
     } else {
-        if (cmdlist[1].compare(_dbServer->runId()) == 0) {
-            size_t offset = atoll(cmdlist[2].c_str());
-            ssize_t lastoffset = _dbServer->offset() - offset;
-            if (lastoffset <= DBServer::copy_backlog_buffer_size) {
-                // 执行部分重同步
-                con.append("+CONTINUE\r\n");
-                size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
-                con.append(std::string(
-                            &_dbServer->copyBacklogBuffer()[start], lastoffset));
-            } else
-                goto sync;
-        } else
+        if (cmdlist[1].compare(_dbServer->selfRunId()))
             goto sync;
+        size_t offset = atoll(cmdlist[2].c_str());
+        ssize_t lastoffset = _dbServer->masterOffset() - offset;
+        if (lastoffset < 0 || lastoffset > DBServer::copy_backlog_buffer_size)
+            goto sync;
+        // 执行部分重同步
+        con.setFlag(Context::SYNC_COMMAND);
+        con.append("+CONTINUE\r\n");
+        if (lastoffset > 0) {
+            size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
+            con.append(std::string(
+                        &_dbServer->copyBacklogBuffer()[start], lastoffset));
+        }
     }
 }
 
@@ -388,7 +388,7 @@ void DB::replconf(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t offset = atoll(cmdlist[2].c_str());
-    ssize_t lastoffset = _dbServer->offset() - offset;
+    ssize_t lastoffset = _dbServer->masterOffset() - offset;
     if (lastoffset > 0) {
         if (lastoffset > DBServer::copy_backlog_buffer_size) {
             // TODO: 重新同步
@@ -409,10 +409,14 @@ void DB::ping(Context& con)
 void DB::pong(Context& con)
 {
     int64_t now = Angel::TimeStamp::now();
-    if (now - con._lastRecvPingTime > 8) {
-        // TODO: 重连master
+    if (_dbServer->lastRecvHeartBeatTime() == 0) {
+        _dbServer->setLastRecvHeartBeatTime(now);
+        return;
+    }
+    if (now - _dbServer->lastRecvHeartBeatTime() > 8000) {
+        _dbServer->connectMasterServer();
     } else
-        con._lastRecvPingTime = now;
+        _dbServer->setLastRecvHeartBeatTime(now);
 }
 
 //////////////////////////////////////////////////////////////////

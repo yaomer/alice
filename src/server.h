@@ -39,6 +39,7 @@ public:
         APPENDONLY = 0x01,
         REWRITEAOF_DELAY = 0x02,
         PSYNC = 0x04,
+        SLAVE = 0x08,
     };
     DBServer() 
         : _db(this),
@@ -48,9 +49,16 @@ public:
         _lastSaveTime(Angel::TimeStamp::now()),
         _dirty(0),
         _copyBacklogBuffer(copy_backlog_buffer_size, 0),
-        _offset(0)
+        _masterOffset(0),
+        _slaveOffset(0),
+        _syncRdbFilesize(0),
+        _syncFd(-1),
+        _lastRecvHeartBeatTime(0),
+        _heartBeatTimerId(0)
     { 
-        setRunId();
+        setSelfRunId();
+        bzero(_masterRunId, sizeof(_masterRunId));
+        bzero(_tmpfile, sizeof(_tmpfile));
     }
     DB& db() { return _db; }
     Rdb *rdb() { return _rdb.get(); }
@@ -67,7 +75,10 @@ public:
     void dirtyIncr() { _dirty++; }
     void dirtyReset() { _dirty = 0; }
     void setMasterAddr(Angel::InetAddr addr)
-    { _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); }
+    { 
+        if (_masterAddr) _masterAddr.reset();
+        _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); 
+    }
     void connectMasterServer();
     void setSlaveToReadonly();
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
@@ -87,14 +98,23 @@ public:
     void appendWriteCommand(Context::CommandList& cmdlist);
     std::set<size_t>& slaveIds() { return _slaveIds; }
     void addSlaveId(size_t id) { _slaveIds.insert(id); }
-    size_t offset() { return _offset; }
+    size_t masterOffset() const { return _masterOffset; }
+    void masterOffsetIncr(ssize_t incr) { _masterOffset += incr; }
+    size_t slaveOffset() const { return _slaveOffset; }
+    void slaveOffsetIncr(ssize_t incr) { _slaveOffset += incr; }
+    int64_t lastRecvHeartBeatTime() const { return _lastRecvHeartBeatTime; }
+    void setLastRecvHeartBeatTime(int64_t tv) { _lastRecvHeartBeatTime = tv; }
     std::string& copyBacklogBuffer() { return _copyBacklogBuffer; }
     void appendCopyBacklogBuffer(Context::CommandList& cmdlist);
-    const char *runId() const { return _runId; }
+    const char *selfRunId() const { return _selfRunId; }
+    const char *masterRunId() const { return _masterRunId; }
+    void setMasterRunId(const char *s)
+    { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
+    void setHeartBeatTimer(const Angel::TcpConnectionPtr& conn);
 
     static const size_t copy_backlog_buffer_size = 1024 * 1024;
 private:
-    void setRunId();
+    void setSelfRunId();
 
     DB _db;
     ExpireMap _expireMap;
@@ -102,14 +122,34 @@ private:
     std::unique_ptr<Aof> _aof;
     std::vector<SaveParam> _saveParams;
     int _flag;
+    // 上一次执行持久化的时间
     int64_t _lastSaveTime;
+    // 自上一次rdb持久化以后，执行了多少次写操作
     int _dirty;
+    // 服务器作为从服务器运行时的主服务器inetAddr
     std::unique_ptr<Angel::InetAddr> _masterAddr;
+    // 服务器作为从服务器时，与主服务器的连接
     std::unique_ptr<Angel::TcpClient> _client;
+    // 服务器作为主服务器运行时，与之同步的所有从服务器id
     std::set<size_t> _slaveIds;
+    // 复制积压缓冲区
     std::string _copyBacklogBuffer;
-    size_t _offset;
-    char _runId[33];
+    // 服务器作为主服务器运行时的复制偏移量
+    size_t _masterOffset;
+    // 服务器作为从服务器运行时的复制偏移量
+    size_t _slaveOffset;
+    // 服务器自身的运行ID
+    char _selfRunId[33];
+    // 服务器作为从服务器去复制主服务器时的主服务器运行ID
+    char _masterRunId[33];
+    // 要发送给从服务器的rdb文件大小 
+    size_t _syncRdbFilesize;
+    char _tmpfile[16];
+    int _syncFd;
+    // 最后一次接收到主服务发送来的心跳包的时间
+    int64_t _lastRecvHeartBeatTime;
+    // 发送心跳包的定时器ID
+    size_t _heartBeatTimerId;
 };
 
 class Server {
@@ -126,12 +166,6 @@ public:
                 std::bind(&Server::onMessage, this, _1, _2));
         _server.setCloseCb(
                 std::bind(&Server::onClose, this, _1));
-        readConf();
-        _loop->runEvery(100, [this]{ this->serverCron(); });
-        if (_dbServer.flag() & DBServer::APPENDONLY)
-            _dbServer.aof()->load();
-        else
-            _dbServer.rdb()->load();
     }
     void onClose(const Angel::TcpConnectionPtr& conn)
     {
@@ -141,7 +175,10 @@ public:
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
-        conn->setContext(Context(&_dbServer, conn));
+        Context context(&_dbServer, conn);
+        if (_dbServer.flag() & DBServer::SLAVE)
+            context.clearFlag(IS_WRITE);
+        conn->setContext(context);
     }
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
@@ -184,8 +221,8 @@ private:
     ConfParamList _confParamList;
 };
 
-extern thread_local int64_t _lru_cache;
 extern Alice::Server *g_server;
+extern thread_local int64_t _lru_cache;
 
 }
 

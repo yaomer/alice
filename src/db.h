@@ -27,33 +27,33 @@ enum CommandPerm {
 class Context {
 public:
     enum ParseState { 
-        PARSING,
-        PROTOCOLERR,
-        SUCCEED,
-        REPLY,
+        PARSING,        // 正在解析命令请求
+        PROTOCOLERR,    // 协议错误
+        SUCCEED,        // 解析完成
+        REPLY,          // 发送响应
     };
     enum Flag{
+        // 从服务器中设置该标志的连接表示与主服务器相连
         SLAVE = 0x01, // for slave
-        SYNC_RDB_FILE = 0x02, // for master
+        // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件 
+        // 从服务器设置该标志表示该连接处于接收同步文件的状态
+        SYNC_RDB_FILE = 0x02, // for master and slave
+        // 主服务器向设置SYNC_COMMAND标志的连接传播同步命令
+        // 从服务器设置该标志表示该连接处于接收同步命令的状态
         SYNC_COMMAND = 0x04, // for master and slave
+        // 从服务器处于等待接收主服务器的同步信息的状态
         SYNC_WAIT = 0x08, // for slave
+        // 将要进行完全重同步
         SYNC_FULL = 0x10, // for slave
-        SYNC_PART = 0x20, // for slave
-        SYNC_OK = 0x40, // for slave
+        SYNC_OK = 0x20, // for slave
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
-        : _syncRdbFilesize(0),
-        _fd(-1),
-        _offset(0),
-        _lastRecvPingTime(0),
-        _db(db),
+        : _db(db),
         _conn(conn),
         _state(PARSING),
         _flag(0),
         _perm(IS_READ | IS_WRITE)
     {  
-        bzero(tmpfile, sizeof(tmpfile));
-        bzero(_masterRunId, sizeof(_masterRunId));
     }
     using CommandList = std::vector<std::string>;
     DBServer *db() { return _db; }
@@ -74,23 +74,16 @@ public:
     int perm() const { return _perm; }
     void setPerm(int perm) { _perm |= perm; }
     void clearPerm(int perm) { _perm &= ~perm; }
-    const char *masterRunId() { return _masterRunId; }
-    void setMasterRunId(const char *s)
-    { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
-
-    size_t _syncRdbFilesize;
-    char tmpfile[16];
-    int _fd;
-    size_t _offset;
-    int64_t _lastRecvPingTime;
 private:
     DBServer *_db;
     const Angel::TcpConnectionPtr _conn;
+    // 请求命令表
     CommandList _commandList;
+    // 发送缓冲区
     std::string _buffer;
     int _state;
     int _flag;
-    char _masterRunId[33];
+    // 能执行的命令的权限
     int _perm;
 };
 
