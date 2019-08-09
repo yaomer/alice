@@ -20,81 +20,81 @@ DB::DB(DBServer *dbServer)
     : _dbServer(dbServer)
 {
     _commandMap = {
-        { "SET",        {  3, IS_WRITE, BIND(strSet) } },
-        { "SETNX",      { -3, IS_WRITE, BIND(strSetIfNotExist) } },
-        { "GET",        { -2, IS_READ,  BIND(strGet) } },
-        { "GETSET",     { -3, IS_WRITE, BIND(strGetSet) } },
-        { "APPEND",     { -3, IS_WRITE, BIND(strAppend) } },
-        { "STRLEN",     { -2, IS_READ,  BIND(strLen) } },
-        { "MSET",       {  3, IS_WRITE, BIND(strMset) } },
-        { "MGET",       {  2, IS_READ,  BIND(strMget) } },
-        { "INCR",       { -2, IS_WRITE, BIND(strIncr) } },
-        { "INCRBY",     { -3, IS_WRITE, BIND(strIncrBy) } },
-        { "DECR",       { -2, IS_WRITE, BIND(strDecr) } },
-        { "DECRBY",     { -3, IS_WRITE, BIND(strDecrBy) } },
-        { "LPUSH",      {  3, IS_WRITE, BIND(listLeftPush) } },
-        { "LPUSHX",     { -3, IS_WRITE, BIND(listHeadPush) } },
-        { "RPUSH",      {  3, IS_WRITE, BIND(listRightPush) } },
-        { "RPUSHX",     { -3, IS_WRITE, BIND(listTailPush) } },
-        { "LPOP",       { -2, IS_WRITE, BIND(listLeftPop) } },
-        { "RPOP",       { -2, IS_WRITE, BIND(listRightPop) } },
-        { "RPOPLPUSH",  { -3, IS_WRITE, BIND(listRightPopToLeftPush) } },
-        { "LREM",       { -4, IS_WRITE, BIND(listRem) } },
-        { "LLEN",       { -2, IS_READ,  BIND(listLen) } },
-        { "LINDEX",     { -3, IS_READ,  BIND(listIndex) } },
-        { "LSET",       { -4, IS_WRITE, BIND(listSet) } },
-        { "LRANGE",     { -4, IS_READ,  BIND(listRange) } },
-        { "LTRIM",      { -4, IS_WRITE, BIND(listTrim) } },
-        { "SADD",       {  3, IS_WRITE, BIND(setAdd) } },
-        { "SISMEMBER",  { -3, IS_READ,  BIND(setIsMember) } },
-        { "SPOP",       { -2, IS_WRITE, BIND(setPop) } },
-        { "SRANDMEMBER",{  2, IS_READ,  BIND(setRandMember) } },
-        { "SREM",       {  3, IS_WRITE, BIND(setRem)  } },
-        { "SMOVE",      { -4, IS_WRITE, BIND(setMove) } },
-        { "SCARD",      { -2, IS_READ,  BIND(setCard) } },
-        { "SMEMBERS",   { -2, IS_READ,  BIND(setMembers) } },
-        { "SINTER",     {  2, IS_READ,  BIND(setInter) } },
-        { "SINTERSTORE",{  3, IS_WRITE, BIND(setInterStore) } },
-        { "SUNION",     {  2, IS_READ,  BIND(setUnion) } },
-        { "SUNIONSTORE",{  3, IS_WRITE, BIND(setUnionStore) } },
-        { "SDIFF",      {  2, IS_READ,  BIND(setDiff) } },
-        { "SDIFFSTORE", {  3, IS_WRITE, BIND(setDiffStore) } },
-        { "HSET",       { -4, IS_WRITE, BIND(hashSet) } },
-        { "HSETNX",     { -4, IS_WRITE, BIND(hashSetIfNotExists) } },
-        { "HGET",       { -3, IS_READ,  BIND(hashGet) } },
-        { "HEXISTS",    { -3, IS_READ,  BIND(hashFieldExists) } },
-        { "HDEL",       {  3, IS_WRITE, BIND(hashDelete) } },
-        { "HLEN",       { -2, IS_READ,  BIND(hashFieldLen) } },
-        { "HSTRLEN",    { -3, IS_READ,  BIND(hashValueLen) } },
-        { "HINCRBY",    { -4, IS_WRITE, BIND(hashIncrBy) } },
-        { "HMSET",      {  4, IS_WRITE, BIND(hashMset) } },
-        { "HMGET",      {  3, IS_READ,  BIND(hashMget) } },
-        { "HKEYS",      { -2, IS_READ,  BIND(hashGetKeys) } },
-        { "HVALS",      { -2, IS_READ,  BIND(hashGetValues) } },
-        { "HGETALL",    { -2, IS_READ,  BIND(hashGetAll) } },
-        { "EXISTS",     { -2, IS_READ,  BIND(isKeyExists) } },
-        { "TYPE",       { -2, IS_READ,  BIND(getKeyType) } },
-        { "TTL",        { -2, IS_READ,  BIND(getTtlSecs) } },
-        { "PTTL",       { -2, IS_READ,  BIND(getTtlMils) } },
-        { "EXPIRE",     { -3, IS_WRITE, BIND(setKeyExpireSecs) } },
-        { "PEXPIRE",    { -3, IS_WRITE, BIND(setKeyExpireMils) } },
-        { "DEL",        {  2, IS_WRITE, BIND(deleteKey) } },
-        { "KEYS",       { -2, IS_READ,  BIND(getAllKeys) } },
-        { "SAVE",       { -1, IS_READ,  BIND(save) } },
-        { "BGSAVE",     { -1, IS_READ,  BIND(saveBackground) } },
-        { "BGREWRITEAOF",{-1, IS_READ,  BIND(rewriteAof) } },
-        { "LASTSAVE",   { -1, IS_READ,  BIND(lastSaveTime) } },
-        { "FLUSHDB",    { -1, IS_WRITE, BIND(flushDb) } },
-        { "SLAVEOF",    { -3, IS_READ,  BIND(slaveOf) } },
-        { "PSYNC",      { -3, IS_READ,  BIND(psync) } },
-        { "REPLCONF",   { -3, IS_INTER, BIND(replconf) } },
-        { "PING",       { -1, IS_READ,  BIND(ping) } },
-        { "PONG",       { -1, IS_INTER, BIND(pong) } },
-        { "MULTI",      { -1, IS_READ,  BIND(multi) } },
-        { "EXEC",       { -1, IS_READ,  BIND(exec) } },
-        { "DISCARD",    { -1, IS_READ,  BIND(discard) } },
-        { "WATCH",      {  2, IS_READ,  BIND(watch) } },
-        { "UNWATCH",    { -1, IS_READ,  BIND(unwatch) } },
+        { "SET",        {  3, IS_WRITE, BIND(setCommand) } },
+        { "SETNX",      { -3, IS_WRITE, BIND(setnxCommand) } },
+        { "GET",        { -2, IS_READ,  BIND(getCommand) } },
+        { "GETSET",     { -3, IS_WRITE, BIND(getSetCommand) } },
+        { "APPEND",     { -3, IS_WRITE, BIND(appendCommand) } },
+        { "STRLEN",     { -2, IS_READ,  BIND(strlenCommand) } },
+        { "MSET",       {  3, IS_WRITE, BIND(msetCommand) } },
+        { "MGET",       {  2, IS_READ,  BIND(mgetCommand) } },
+        { "INCR",       { -2, IS_WRITE, BIND(incrCommand) } },
+        { "INCRBY",     { -3, IS_WRITE, BIND(incrbyCommand) } },
+        { "DECR",       { -2, IS_WRITE, BIND(decrCommand) } },
+        { "DECRBY",     { -3, IS_WRITE, BIND(decrbyCommand) } },
+        { "LPUSH",      {  3, IS_WRITE, BIND(lpushCommand) } },
+        { "LPUSHX",     { -3, IS_WRITE, BIND(lpushxCommand) } },
+        { "RPUSH",      {  3, IS_WRITE, BIND(rpushCommand) } },
+        { "RPUSHX",     { -3, IS_WRITE, BIND(rpushxCommand) } },
+        { "LPOP",       { -2, IS_WRITE, BIND(lpopCommand) } },
+        { "RPOP",       { -2, IS_WRITE, BIND(rpopCommand) } },
+        { "RPOPLPUSH",  { -3, IS_WRITE, BIND(rpoplpushCommand) } },
+        { "LREM",       { -4, IS_WRITE, BIND(lremCommand) } },
+        { "LLEN",       { -2, IS_READ,  BIND(llenCommand) } },
+        { "LINDEX",     { -3, IS_READ,  BIND(lindexCommand) } },
+        { "LSET",       { -4, IS_WRITE, BIND(lsetCommand) } },
+        { "LRANGE",     { -4, IS_READ,  BIND(lrangeCommand) } },
+        { "LTRIM",      { -4, IS_WRITE, BIND(ltrimCommand) } },
+        { "SADD",       {  3, IS_WRITE, BIND(saddCommand) } },
+        { "SISMEMBER",  { -3, IS_READ,  BIND(sisMemberCommand) } },
+        { "SPOP",       { -2, IS_WRITE, BIND(spopCommand) } },
+        { "SRANDMEMBER",{  2, IS_READ,  BIND(srandMemberCommand) } },
+        { "SREM",       {  3, IS_WRITE, BIND(sremCommand)  } },
+        { "SMOVE",      { -4, IS_WRITE, BIND(smoveCommand) } },
+        { "SCARD",      { -2, IS_READ,  BIND(scardCommand) } },
+        { "SMEMBERS",   { -2, IS_READ,  BIND(smembersCommand) } },
+        { "SINTER",     {  2, IS_READ,  BIND(sinterCommand) } },
+        { "SINTERSTORE",{  3, IS_WRITE, BIND(sinterStoreCommand) } },
+        { "SUNION",     {  2, IS_READ,  BIND(sunionCommand) } },
+        { "SUNIONSTORE",{  3, IS_WRITE, BIND(sunionStoreCommand) } },
+        { "SDIFF",      {  2, IS_READ,  BIND(sdiffCommand) } },
+        { "SDIFFSTORE", {  3, IS_WRITE, BIND(sdiffStoreCommand) } },
+        { "HSET",       { -4, IS_WRITE, BIND(hsetCommand) } },
+        { "HSETNX",     { -4, IS_WRITE, BIND(hsetnxCommand) } },
+        { "HGET",       { -3, IS_READ,  BIND(hgetCommand) } },
+        { "HEXISTS",    { -3, IS_READ,  BIND(hexistsCommand) } },
+        { "HDEL",       {  3, IS_WRITE, BIND(hdelCommand) } },
+        { "HLEN",       { -2, IS_READ,  BIND(hlenCommand) } },
+        { "HSTRLEN",    { -3, IS_READ,  BIND(hstrlenCommand) } },
+        { "HINCRBY",    { -4, IS_WRITE, BIND(hincrbyCommand) } },
+        { "HMSET",      {  4, IS_WRITE, BIND(hmsetCommand) } },
+        { "HMGET",      {  3, IS_READ,  BIND(hmgetCommand) } },
+        { "HKEYS",      { -2, IS_READ,  BIND(hkeysCommand) } },
+        { "HVALS",      { -2, IS_READ,  BIND(hvalsCommand) } },
+        { "HGETALL",    { -2, IS_READ,  BIND(hgetAllCommand) } },
+        { "EXISTS",     { -2, IS_READ,  BIND(existsCommand) } },
+        { "TYPE",       { -2, IS_READ,  BIND(typeCommand) } },
+        { "TTL",        { -2, IS_READ,  BIND(ttlCommand) } },
+        { "PTTL",       { -2, IS_READ,  BIND(pttlCommand) } },
+        { "EXPIRE",     { -3, IS_WRITE, BIND(expireCommand) } },
+        { "PEXPIRE",    { -3, IS_WRITE, BIND(pexpireCommand) } },
+        { "DEL",        {  2, IS_WRITE, BIND(delCommand) } },
+        { "KEYS",       { -2, IS_READ,  BIND(keysCommand) } },
+        { "SAVE",       { -1, IS_READ,  BIND(saveCommand) } },
+        { "BGSAVE",     { -1, IS_READ,  BIND(bgSaveCommand) } },
+        { "BGREWRITEAOF",{-1, IS_READ,  BIND(bgRewriteAofCommand) } },
+        { "LASTSAVE",   { -1, IS_READ,  BIND(lastSaveCommand) } },
+        { "FLUSHDB",    { -1, IS_WRITE, BIND(flushdbCommand) } },
+        { "SLAVEOF",    { -3, IS_READ,  BIND(slaveofCommand) } },
+        { "PSYNC",      { -3, IS_READ,  BIND(psyncCommand) } },
+        { "REPLCONF",   { -3, IS_INTER, BIND(replconfCommand) } },
+        { "PING",       { -1, IS_READ,  BIND(pingCommand) } },
+        { "PONG",       { -1, IS_INTER, BIND(pongCommand) } },
+        { "MULTI",      { -1, IS_READ,  BIND(multiCommand) } },
+        { "EXEC",       { -1, IS_READ,  BIND(execCommand) } },
+        { "DISCARD",    { -1, IS_READ,  BIND(discardCommand) } },
+        { "WATCH",      {  2, IS_READ,  BIND(watchCommand) } },
+        { "UNWATCH",    { -1, IS_READ,  BIND(unwatchCommand) } },
     };
 }
 
@@ -167,7 +167,7 @@ namespace Alice {
 
 //////////////////////////////////////////////////////////////////
 
-void DB::isKeyExists(Context& con)
+void DB::existsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -179,7 +179,7 @@ void DB::isKeyExists(Context& con)
     }
 }
 
-void DB::getKeyType(Context& con)
+void DB::typeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     auto it = _hashMap.find(cmdlist[1]);
@@ -214,12 +214,12 @@ void DB::_getTtl(Context& con, bool seconds)
     appendReplyNumber(con, milliseconds);
 }
 
-void DB::getTtlSecs(Context& con)
+void DB::ttlCommand(Context& con)
 {
     _getTtl(con, true);
 }
 
-void DB::getTtlMils(Context& con)
+void DB::pttlCommand(Context& con)
 {
     _getTtl(con, false);
 }
@@ -243,17 +243,17 @@ void DB::_setKeyExpire(Context& con, bool seconds)
     }
 }
 
-void DB::setKeyExpireSecs(Context& con)
+void DB::expireCommand(Context& con)
 {
     _setKeyExpire(con, true);
 }
 
-void DB::setKeyExpireMils(Context& con)
+void DB::pexpireCommand(Context& con)
 {
     _setKeyExpire(con, false);
 }
 
-void DB::deleteKey(Context& con)
+void DB::delCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -269,7 +269,7 @@ void DB::deleteKey(Context& con)
     appendReplyNumber(con, retval);
 }
 
-void DB::getAllKeys(Context& con)
+void DB::keysCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     if (cmdlist[1].compare("*")) {
@@ -290,7 +290,7 @@ void DB::getAllKeys(Context& con)
         con.assign(db_return_nil);
 }
 
-void DB::save(Context& con)
+void DB::saveCommand(Context& con)
 {
     if (_dbServer->rdb()->childPid() != -1)
         return;
@@ -300,7 +300,7 @@ void DB::save(Context& con)
     _dbServer->dirtyReset();
 }
 
-void DB::saveBackground(Context& con)
+void DB::bgSaveCommand(Context& con)
 {
     if (_dbServer->aof()->childPid() != -1) {
         con.append("+Background append only file rewriting ...\r\n");
@@ -314,7 +314,7 @@ void DB::saveBackground(Context& con)
     _dbServer->dirtyReset();
 }
 
-void DB::rewriteAof(Context& con)
+void DB::bgRewriteAofCommand(Context& con)
 {
     if (_dbServer->rdb()->childPid() != -1) {
         _dbServer->setFlag(DBServer::REWRITEAOF_DELAY);
@@ -328,18 +328,18 @@ void DB::rewriteAof(Context& con)
     _dbServer->setLastSaveTime(Angel::TimeStamp::now());
 }
 
-void DB::lastSaveTime(Context& con)
+void DB::lastSaveCommand(Context& con)
 {
     appendReplyNumber(con, _dbServer->lastSaveTime());
 }
 
-void DB::flushDb(Context& con)
+void DB::flushdbCommand(Context& con)
 {
     _hashMap.clear();
     con.append(db_return_ok);
 }
 
-void DB::slaveOf(Context& con)
+void DB::slaveofCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     if (_strIsNumber(cmdlist[2])) {
@@ -351,7 +351,7 @@ void DB::slaveOf(Context& con)
         con.append(db_return_interger_err);
 }
 
-void DB::psync(Context& con)
+void DB::psyncCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     auto it = _dbServer->slaveIds().find(con.conn()->id());
@@ -389,7 +389,7 @@ sync:
     }
 }
 
-void DB::replconf(Context& con)
+void DB::replconfCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t offset = atoll(cmdlist[2].c_str());
@@ -406,12 +406,12 @@ void DB::replconf(Context& con)
     }
 }
 
-void DB::ping(Context& con)
+void DB::pingCommand(Context& con)
 {
     con.append("*1\r\n$4\r\nPONG\r\n");
 }
 
-void DB::pong(Context& con)
+void DB::pongCommand(Context& con)
 {
     int64_t now = Angel::TimeStamp::now();
     if (_dbServer->lastRecvHeartBeatTime() == 0) {
@@ -424,13 +424,13 @@ void DB::pong(Context& con)
         _dbServer->setLastRecvHeartBeatTime(now);
 }
 
-void DB::multi(Context& con)
+void DB::multiCommand(Context& con)
 {
     con.setFlag(Context::EXEC_MULTI);
     con.append(db_return_ok);
 }
 
-void DB::exec(Context& con)
+void DB::execCommand(Context& con)
 {
     if (con.flag() & Context::EXEC_MULTI_ERR) {
         con.clearFlag(Context::EXEC_MULTI_ERR);
@@ -451,7 +451,7 @@ end:
     con.clearFlag(Context::EXEC_MULTI);
 }
 
-void DB::discard(Context& con)
+void DB::discardCommand(Context& con)
 {
     con.transactionList().clear();
     _dbServer->unwatchKeys();
@@ -459,7 +459,7 @@ void DB::discard(Context& con)
     con.append(db_return_ok);
 }
 
-void DB::watch(Context& con)
+void DB::watchCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     for (int i = 1; i < cmdlist.size(); i++) {
@@ -473,7 +473,7 @@ void DB::watch(Context& con)
     return;
 }
 
-void DB::unwatch(Context& con)
+void DB::unwatchCommand(Context& con)
 {
     _dbServer->unwatchKeys();
     con.append(db_return_ok);
@@ -485,7 +485,7 @@ void DB::unwatch(Context& con)
 
 #define getStringValue(it) getXXType(it, String&)
 
-void DB::strSet(Context& con)
+void DB::setCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t expire;
@@ -580,7 +580,7 @@ syntax_err:
     return;
 }
 
-void DB::strSetIfNotExist(Context& con)
+void DB::setnxCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     auto it = _hashMap.find(cmdlist[1]);
@@ -593,7 +593,7 @@ void DB::strSetIfNotExist(Context& con)
     }
 }
 
-void DB::strGet(Context& con)
+void DB::getCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -607,7 +607,7 @@ void DB::strGet(Context& con)
     appendReplySingle(con, value);
 }
 
-void DB::strGetSet(Context& con)
+void DB::getSetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -624,7 +624,7 @@ void DB::strGetSet(Context& con)
     appendReplySingle(con, oldvalue);
 }
 
-void DB::strLen(Context& con)
+void DB::strlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -638,7 +638,7 @@ void DB::strLen(Context& con)
     appendReplyNumber(con, value.size());
 }
 
-void DB::strAppend(Context& con)
+void DB::appendCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -655,7 +655,7 @@ void DB::strAppend(Context& con)
     appendReplyNumber(con, string.size());
 }
 
-void DB::strMset(Context& con)
+void DB::msetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -671,7 +671,7 @@ void DB::strMset(Context& con)
     con.append(db_return_ok);
 }
 
-void DB::strMget(Context& con)
+void DB::mgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -727,24 +727,24 @@ void DB::_strIdCr(Context& con, int64_t incr)
     _dbServer->touchWatchKey(cmdlist[1]);
 }
 
-void DB::strIncr(Context& con)
+void DB::incrCommand(Context& con)
 {
     _strIdCr(con, 1);
 }
 
-void DB::strIncrBy(Context& con)
+void DB::incrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t incr = atol(cmdlist[2].c_str());
     _strIdCr(con, incr);
 }
 
-void DB::strDecr(Context& con)
+void DB::decrCommand(Context& con)
 {
     _strIdCr(con, -1);
 }
 
-void DB::strDecrBy(Context& con)
+void DB::decrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t decr = -atol(cmdlist[2].c_str());
@@ -787,12 +787,12 @@ void DB::_listPush(Context& con, bool leftPush)
     _dbServer->touchWatchKey(cmdlist[1]);
 }
 
-void DB::listLeftPush(Context& con)
+void DB::lpushCommand(Context& con)
 {
     _listPush(con, true);
 }
 
-void DB::listRightPush(Context& con)
+void DB::rpushCommand(Context& con)
 {
     _listPush(con, false);
 }
@@ -816,12 +816,12 @@ void DB::_listEndsPush(Context& con, bool frontPush)
     appendReplyNumber(con, list.size());
 }
 
-void DB::listHeadPush(Context& con)
+void DB::lpushxCommand(Context& con)
 {
     _listEndsPush(con, true);
 }
 
-void DB::listTailPush(Context& con)
+void DB::rpushxCommand(Context& con)
 {
     _listEndsPush(con, false);
 }
@@ -851,17 +851,17 @@ void DB::_listPop(Context& con, bool leftPop)
     _dbServer->touchWatchKey(cmdlist[1]);
 }
 
-void DB::listLeftPop(Context& con)
+void DB::lpopCommand(Context& con)
 {
     _listPop(con, true);
 }
 
-void DB::listRightPop(Context& con)
+void DB::rpopCommand(Context& con)
 {
     _listPop(con, false);
 }
 
-void DB::listRightPopToLeftPush(Context& con)
+void DB::rpoplpushCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -892,7 +892,7 @@ void DB::listRightPopToLeftPush(Context& con)
     srclist.pop_back();
 }
 
-void DB::listRem(Context& con)
+void DB::lremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -940,7 +940,7 @@ void DB::listRem(Context& con)
     appendReplyNumber(con, retval);
 }
 
-void DB::listLen(Context& con)
+void DB::llenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -954,7 +954,7 @@ void DB::listLen(Context& con)
     appendReplyNumber(con, list.size());
 }
 
-void DB::listIndex(Context& con)
+void DB::lindexCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -980,7 +980,7 @@ void DB::listIndex(Context& con)
         }
 }
 
-void DB::listSet(Context& con)
+void DB::lsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1008,7 +1008,7 @@ void DB::listSet(Context& con)
     con.append(db_return_ok);
 }
 
-void DB::listRange(Context& con)
+void DB::lrangeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1046,7 +1046,7 @@ void DB::listRange(Context& con)
     }
 }
 
-void DB::listTrim(Context& con)
+void DB::ltrimCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1093,7 +1093,7 @@ void DB::listTrim(Context& con)
 
 #define getSetValue(it) getXXType(it, Set&)
 
-void DB::setAdd(Context& con)
+void DB::saddCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1120,7 +1120,7 @@ void DB::setAdd(Context& con)
     _dbServer->touchWatchKey(cmdlist[1]);
 }
 
-void DB::setIsMember(Context& con)
+void DB::sisMemberCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1148,7 +1148,7 @@ static std::tuple<size_t, size_t> getRandBucketNumber(DB::Set& set)
     return std::make_tuple(bucketNumber, _u(e));
 }
 
-void DB::setPop(Context& con)
+void DB::spopCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1176,7 +1176,7 @@ void DB::setPop(Context& con)
     _dbServer->touchWatchKey(cmdlist[1]);
 }
 
-void DB::setRandMember(Context& con)
+void DB::srandMemberCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1248,7 +1248,7 @@ void DB::setRandMember(Context& con)
     }
 }
 
-void DB::setRem(Context& con)
+void DB::sremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1272,7 +1272,7 @@ void DB::setRem(Context& con)
     appendReplyNumber(con, retval);
 }
 
-void DB::setMove(Context& con)
+void DB::smoveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1307,7 +1307,7 @@ void DB::setMove(Context& con)
     con.append(db_return_integer_1);
 }
 
-void DB::setCard(Context& con)
+void DB::scardCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1321,7 +1321,7 @@ void DB::setCard(Context& con)
     appendReplyNumber(con, set.size());
 }
 
-void DB::setMembers(Context& con)
+void DB::smembersCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1338,7 +1338,7 @@ void DB::setMembers(Context& con)
     }
 }
 
-void DB::setInter(Context& con)
+void DB::sinterCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -1382,7 +1382,7 @@ void DB::setInter(Context& con)
         appendReplySingle(con, it);
 }
 
-void DB::setInterStore(Context& con)
+void DB::sinterStoreCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1434,7 +1434,7 @@ void DB::setInterStore(Context& con)
     }
 }
 
-void DB::setUnion(Context& con)
+void DB::sunionCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -1460,7 +1460,7 @@ void DB::setUnion(Context& con)
     }
 }
 
-void DB::setUnionStore(Context& con)
+void DB::sunionStoreCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -1489,12 +1489,12 @@ void DB::setUnionStore(Context& con)
     }
 }
 
-void DB::setDiff(Context& con)
+void DB::sdiffCommand(Context& con)
 {
     // TODO:
 }
 
-void DB::setDiffStore(Context& con)
+void DB::sdiffStoreCommand(Context& con)
 {
     // TODO:
 }
@@ -1505,7 +1505,7 @@ void DB::setDiffStore(Context& con)
 
 #define getHashValue(it) getXXType(it, Hash&)
 
-void DB::hashSet(Context& con)
+void DB::hsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1528,7 +1528,7 @@ void DB::hashSet(Context& con)
     hash[cmdlist[2]] = cmdlist[3];
 }
 
-void DB::hashSetIfNotExists(Context& con)
+void DB::hsetnxCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1552,7 +1552,7 @@ void DB::hashSetIfNotExists(Context& con)
     }
 }
 
-void DB::hashGet(Context& con)
+void DB::hgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1570,7 +1570,7 @@ void DB::hashGet(Context& con)
         con.append(db_return_nil);
 }
 
-void DB::hashFieldExists(Context& con)
+void DB::hexistsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1588,7 +1588,7 @@ void DB::hashFieldExists(Context& con)
     }
 }
 
-void DB::hashDelete(Context& con)
+void DB::hdelCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1612,7 +1612,7 @@ void DB::hashDelete(Context& con)
     appendReplyNumber(con, retval);
 }
 
-void DB::hashFieldLen(Context& con)
+void DB::hlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1626,7 +1626,7 @@ void DB::hashFieldLen(Context& con)
     }
 }
 
-void DB::hashValueLen(Context& con)
+void DB::hstrlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1645,7 +1645,7 @@ void DB::hashValueLen(Context& con)
     }
 }
 
-void DB::hashIncrBy(Context& con)
+void DB::hincrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1682,7 +1682,7 @@ void DB::hashIncrBy(Context& con)
     _dbServer->touchWatchKey(cmdlist[1]);
 }
 
-void DB::hashMset(Context& con)
+void DB::hmsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1710,7 +1710,7 @@ void DB::hashMset(Context& con)
     con.append(db_return_ok);
 }
 
-void DB::hashMget(Context& con)
+void DB::hmgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1769,17 +1769,17 @@ void DB::_hashGetXX(Context& con, int getXX)
     }
 }
 
-void DB::hashGetKeys(Context& con)
+void DB::hkeysCommand(Context& con)
 {
     _hashGetXX(con, GETKEYS);
 }
 
-void DB::hashGetValues(Context& con)
+void DB::hvalsCommand(Context& con)
 {
     _hashGetXX(con, GETVALUES);
 }
 
-void DB::hashGetAll(Context& con)
+void DB::hgetAllCommand(Context& con)
 {
     _hashGetXX(con, GETALL);
 }
