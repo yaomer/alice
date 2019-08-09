@@ -77,6 +77,16 @@ void Server::executeCommand(Context& con)
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
+    if (con.flag() & Context::EXEC_MULTI) {
+        if (cmdlist[0].compare("MULTI")
+         && cmdlist[0].compare("EXEC")
+         && cmdlist[0].compare("WATCH")
+         && cmdlist[0].compare("DISCARD")) {
+            con.addMultiArg(cmdlist);
+            con.append("+QUEUED\r\n");
+            goto end;
+        }
+    }
     if (it->second.perm() & IS_WRITE) {
         _dbServer.dirtyIncr();
         _dbServer.appendWriteCommand(cmdlist);
@@ -88,7 +98,13 @@ void Server::executeCommand(Context& con)
         }
     }
     it->second._commandCb(con);
+    goto end;
 err:
+    if (con.flag() & Context::EXEC_MULTI) {
+        con.clearFlag(Context::EXEC_MULTI);
+        con.setFlag(Context::EXEC_MULTI_ERR);
+    }
+end:
     con.setState(Context::REPLY);
     cmdlist.clear();
 }
@@ -194,7 +210,14 @@ void DBServer::connectMasterServer()
             std::bind(&DBServer::sendSyncToMaster, this, _1));
     _client->setMessageCb(
             std::bind(&DBServer::recvSyncFromMaster, this, _1, _2));
+    _client->setCloseCb(
+            std::bind(&DBServer::slaveClientCloseCb, this, _1));
     _client->start();
+}
+
+void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
+{
+    g_server->loop()->cancelTimer(_heartBeatTimerId);
 }
 
 void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
@@ -463,6 +486,32 @@ void DBServer::setHeartBeatTimer(const Angel::TcpConnectionPtr& conn)
             this->sendAckToMaster(conn);
             this->sendPingToMaster(conn);
             });
+}
+
+void DBServer::watchKeyForClient(const Key& key, size_t id)
+{
+    auto it = _watchMap.find(key);
+    if (it == _watchMap.end()) {
+        std::vector<size_t> clist = { id };
+        _watchMap[key] = std::move(clist);
+    } else {
+        it->second.push_back(id);
+    }
+}
+
+void DBServer::touchWatchKey(const Key& key)
+{
+    auto clist = _watchMap.find(key);
+    if (clist == _watchMap.end())
+        return;
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& id : clist->second) {
+        auto conn = maps.find(id);
+        if (conn != maps.end()) {
+            auto& context = std::any_cast<Context&>(conn->second->getContext());
+            context.setFlag(Context::EXEC_MULTI_ERR);
+        }
+    }
 }
 
 int main(int argc, char *argv[])

@@ -46,6 +46,10 @@ public:
         // 将要进行完全重同步
         SYNC_FULL = 0x10, // for slave
         SYNC_OK = 0x20, // for slave
+        // 客户端正在执行事务
+        EXEC_MULTI = 0x40,
+        // 事务的安全性被破坏
+        EXEC_MULTI_ERR = 0x80,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _db(db),
@@ -56,11 +60,16 @@ public:
     {  
     }
     using CommandList = std::vector<std::string>;
+    using TransactionList = std::vector<CommandList>;
+
     DBServer *db() { return _db; }
     const Angel::TcpConnectionPtr& conn() { return _conn; }
     void addArg(const char *s, const char *es)
     { _commandList.push_back(std::string(s, es)); }
     CommandList& commandList() { return _commandList; }
+    void addMultiArg(CommandList& cmdlist)
+    { _transactionList.push_back(cmdlist); }
+    TransactionList& transactionList() { return _transactionList; }
     void append(const std::string& s)
     { _buffer.append(s); }
     void assign(const std::string& s)
@@ -79,6 +88,8 @@ private:
     const Angel::TcpConnectionPtr _conn;
     // 请求命令表
     CommandList _commandList;
+    // 事务队列
+    TransactionList _transactionList;
     // 发送缓冲区
     std::string _buffer;
     int _state;
@@ -165,6 +176,11 @@ public:
     void replconf(Context& con);
     void ping(Context& con);
     void pong(Context& con);
+    void multi(Context& con);
+    void exec(Context& con);
+    void discard(Context& con);
+    void watch(Context& con);
+    void unwatch(Context& con);
     // String Keys Operation
     void strSet(Context& con);
     void strSetIfNotExist(Context& con);

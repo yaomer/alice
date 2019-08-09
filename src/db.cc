@@ -90,6 +90,11 @@ DB::DB(DBServer *dbServer)
         { "REPLCONF",   { -3, IS_INTER, BIND(replconf) } },
         { "PING",       { -1, IS_READ,  BIND(ping) } },
         { "PONG",       { -1, IS_INTER, BIND(pong) } },
+        { "MULTI",      { -1, IS_READ,  BIND(multi) } },
+        { "EXEC",       { -1, IS_READ,  BIND(exec) } },
+        { "DISCARD",    { -1, IS_READ,  BIND(discard) } },
+        { "WATCH",      {  2, IS_READ,  BIND(watch) } },
+        { "UNWATCH",    { -1, IS_READ,  BIND(unwatch) } },
     };
 }
 
@@ -419,6 +424,61 @@ void DB::pong(Context& con)
         _dbServer->setLastRecvHeartBeatTime(now);
 }
 
+void DB::multi(Context& con)
+{
+    con.setFlag(Context::EXEC_MULTI);
+    con.append(db_return_ok);
+}
+
+void DB::exec(Context& con)
+{
+    if (con.flag() & Context::EXEC_MULTI_ERR) {
+        con.clearFlag(Context::EXEC_MULTI_ERR);
+        con.append(db_return_nil);
+        goto end;
+    }
+    con.commandList().clear();
+    for (auto& cmdlist : con.transactionList()) {
+        auto command = _dbServer->db().commandMap().find(cmdlist[0]);
+        for (auto& it : cmdlist)
+            con.commandList().push_back(it);
+        command->second._commandCb(con);
+        con.commandList().clear();
+    }
+    _dbServer->unwatchKeys();
+end:
+    con.transactionList().clear();
+    con.clearFlag(Context::EXEC_MULTI);
+}
+
+void DB::discard(Context& con)
+{
+    con.transactionList().clear();
+    _dbServer->unwatchKeys();
+    con.clearFlag(Context::EXEC_MULTI);
+    con.append(db_return_ok);
+}
+
+void DB::watch(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    for (int i = 1; i < cmdlist.size(); i++) {
+        con.db()->isExpiredKey(cmdlist[i]);
+        auto it = _hashMap.find(cmdlist[i]);
+        if (it != _hashMap.end()) {
+            _dbServer->watchKeyForClient(cmdlist[i], con.conn()->id());
+        }
+    }
+    con.append(db_return_ok);
+    return;
+}
+
+void DB::unwatch(Context& con)
+{
+    _dbServer->unwatchKeys();
+    con.append(db_return_ok);
+}
+
 //////////////////////////////////////////////////////////////////
 // String Keys Operation
 //////////////////////////////////////////////////////////////////
@@ -433,6 +493,7 @@ void DB::strSet(Context& con)
     if (cmdlist.size() == 3) {
         con.db()->delExpireKey(cmdlist[1]);
         _hashMap[cmdlist[1]] = cmdlist[2];
+        _dbServer->touchWatchKey(cmdlist[1]);
         con.append(db_return_ok);
         return;
     }
@@ -512,6 +573,7 @@ void DB::strSet(Context& con)
     default:
         goto syntax_err;
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
     return;
 syntax_err:
     con.append(db_return_syntax_err);
@@ -526,6 +588,7 @@ void DB::strSetIfNotExist(Context& con)
         con.append(db_return_integer_0);
     } else {
         _hashMap[cmdlist[1]] = cmdlist[2];
+        _dbServer->touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_1);
     }
 }
@@ -548,6 +611,7 @@ void DB::strGetSet(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
+    _dbServer->touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
@@ -578,6 +642,7 @@ void DB::strAppend(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
+    _dbServer->touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
@@ -601,6 +666,7 @@ void DB::strMset(Context& con)
     for (auto i = 1; i < size; i += 2) {
         con.db()->isExpiredKey(cmdlist[i]);
         _hashMap[cmdlist[i]] = cmdlist[i + 1];
+        _dbServer->touchWatchKey(cmdlist[i]);
     }
     con.append(db_return_ok);
 }
@@ -658,6 +724,7 @@ void DB::_strIdCr(Context& con, int64_t incr)
         _hashMap[cmdlist[1]] = String(convert(incr));
         appendReplyNumber(con, incr);
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
 }
 
 void DB::strIncr(Context& con)
@@ -717,6 +784,7 @@ void DB::_listPush(Context& con, bool leftPush)
         _hashMap[cmdlist[1]] = list;
         appendReplyNumber(con, list.size());
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
 }
 
 void DB::listLeftPush(Context& con)
@@ -744,6 +812,7 @@ void DB::_listEndsPush(Context& con, bool frontPush)
         list.push_front(cmdlist[2]);
     else
         list.push_back(cmdlist[2]);
+    _dbServer->touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, list.size());
 }
 
@@ -779,6 +848,7 @@ void DB::_listPop(Context& con, bool leftPop)
         appendReplySingle(con, list.back());
         list.pop_back();
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
 }
 
 void DB::listLeftPop(Context& con)
@@ -813,8 +883,11 @@ void DB::listRightPopToLeftPush(Context& con)
         checkType(con, des, List);
         List& deslist = getListValue(des);
         deslist.push_front(std::move(srclist.back()));
+        _dbServer->touchWatchKey(cmdlist[1]);
+        _dbServer->touchWatchKey(cmdlist[2]);
     } else {
         srclist.push_front(std::move(srclist.back()));
+        _dbServer->touchWatchKey(cmdlist[1]);
     }
     srclist.pop_back();
 }
@@ -863,6 +936,7 @@ void DB::listRem(Context& con)
             }
         }
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
 
@@ -930,6 +1004,7 @@ void DB::listSet(Context& con)
             it.assign(cmdlist[3]);
             break;
         }
+    _dbServer->touchWatchKey(cmdlist[1]);
     con.append(db_return_ok);
 }
 
@@ -1008,6 +1083,7 @@ void DB::listTrim(Context& con)
         } else
             i++;
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
     con.append(db_return_ok);
 }
 
@@ -1041,6 +1117,7 @@ void DB::setAdd(Context& con)
         _hashMap[cmdlist[1]] = std::move(set);
         appendReplyNumber(con, members - 2);
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
 }
 
 void DB::setIsMember(Context& con)
@@ -1096,6 +1173,7 @@ void DB::setPop(Context& con)
             set.erase(set.find(*it));
             break;
         }
+    _dbServer->touchWatchKey(cmdlist[1]);
 }
 
 void DB::setRandMember(Context& con)
@@ -1190,6 +1268,7 @@ void DB::setRem(Context& con)
             retval++;
         }
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
 
@@ -1223,6 +1302,8 @@ void DB::setMove(Context& con)
         set.insert(cmdlist[3]);
         _hashMap[cmdlist[2]] = std::move(set);
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
+    _dbServer->touchWatchKey(cmdlist[2]);
     con.append(db_return_integer_1);
 }
 
@@ -1428,6 +1509,7 @@ void DB::hashSet(Context& con)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
+    _dbServer->touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;
@@ -1454,8 +1536,9 @@ void DB::hashSetIfNotExists(Context& con)
     if (it == _hashMap.end()) {
         Hash hash;
         hash[cmdlist[2]] = cmdlist[3];
-        con.append(db_return_integer_1);
         _hashMap[cmdlist[1]] = std::move(hash);
+        _dbServer->touchWatchKey(cmdlist[1]);
+        con.append(db_return_integer_1);
         return;
     }
     checkType(con, it, Hash);
@@ -1464,6 +1547,7 @@ void DB::hashSetIfNotExists(Context& con)
         con.append(db_return_integer_0);
     } else {
         hash[cmdlist[2]] = cmdlist[3];
+        _dbServer->touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_1);
     }
 }
@@ -1524,6 +1608,7 @@ void DB::hashDelete(Context& con)
             retval++;
         }
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
 
@@ -1574,6 +1659,7 @@ void DB::hashIncrBy(Context& con)
         Hash hash;
         hash[cmdlist[2]] = cmdlist[3];
         _hashMap[cmdlist[1]] = std::move(hash);
+        _dbServer->touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_0);
         return;
     }
@@ -1593,6 +1679,7 @@ void DB::hashIncrBy(Context& con)
         hash[cmdlist[2]] = String(convert(incr));
         appendReplyNumber(con, incr);
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
 }
 
 void DB::hashMset(Context& con)
@@ -1604,6 +1691,7 @@ void DB::hashMset(Context& con)
         con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
         return;
     }
+    _dbServer->touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;

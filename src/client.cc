@@ -77,7 +77,7 @@ void Client::parseResponse(Angel::Buffer& buf)
     case '+':
     case '-': {
         int crlf = buf.findCrlf();
-        if (crlf < 0) return;
+        if (crlf < 0) goto noenough;
         answer.assign(s + 1, crlf);
         if (s[0] == '-') std::cout << "(error) ";
         buf.retrieve(crlf + 2);
@@ -87,14 +87,14 @@ void Client::parseResponse(Angel::Buffer& buf)
     case '$': {
         const char *ps = s;
         const char *next = std::find(s, es, '\r');
-        if (next == es) return;
+        if (next == es) goto noenough;
         s += 1;
         size_t len = atoi(s);
-        if (len == 0) return;
+        if (len == 0) goto noenough;
         s = next + 2;
         next = std::find(s, es, '\r');
-        if (next == es) return;
-        if (next - s != len) return;
+        if (next == es) goto noenough;
+        if (next - s != len) goto noenough;
         answer.assign(s, len);
         buf.retrieve(next + 2 - ps);
         std::cout << "\"" << answer << "\"\n";
@@ -103,22 +103,22 @@ void Client::parseResponse(Angel::Buffer& buf)
     case '*': {
         const char *ps = s;
         const char *next = std::find(s, es, '\r');
-        if (next == es) return;
-        if (next[1] != '\n') return;
+        if (next == es) goto noenough;
+        if (next[1] != '\n') goto noenough;
         s += 1;
         size_t len = atoi(s);
         if (len == 0) {
             answer.assign("(nil)");
             std::cout << answer << "\n";
             buf.retrieve(next + 2 - ps);
-            return;
+            goto noenough;
         }
         s = next + 2;
         int i = 1;
         while (len > 0) {
             if (s[0] != '$' && s[0] != '+') break;
             next = std::find(s, es, '\r');
-            if (next == es) return;
+            if (next == es) goto noenough;
             if (s[0] == '+') {
                 s += 1;
                 answer.append(convert(i));
@@ -132,11 +132,11 @@ void Client::parseResponse(Angel::Buffer& buf)
             }
             s += 1;
             size_t l = atoi(s);
-            if (l == 0) return;
+            if (l == 0) goto noenough;
             s = next + 2;
             next = std::find(s, es, '\r');
-            if (next == es) return;
-            if (next - s != l) return;
+            if (next == es) goto noenough;
+            if (next - s != l) goto noenough;
             answer.append(convert(i));
             answer.append(") \"");
             answer.append(std::string(s, l));
@@ -154,13 +154,16 @@ void Client::parseResponse(Angel::Buffer& buf)
     case ':': {
         const char *next = std::find(s, es, '\r');
         s += 1;
-        if (next == es) return;
+        if (next == es) goto noenough;
         answer.assign(s, next - s);
         std::cout << "(integer)" << answer << "\n";
         buf.retrieve(next + 2 - (s - 1));
         break;
     }
     }
+    return;
+noenough:
+    _state = NOENOUGH;
 }
 
 void completion(const char *buf, linenoiseCompletions *lc);

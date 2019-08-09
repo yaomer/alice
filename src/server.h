@@ -35,6 +35,7 @@ class DBServer {
 public:
     using Key = std::string;
     using ExpireMap = std::unordered_map<Key, int64_t>;
+    using WatchMap = std::unordered_map<Key, std::vector<size_t>>; 
     enum FLAG {
         APPENDONLY = 0x01,
         REWRITEAOF_DELAY = 0x02,
@@ -80,6 +81,7 @@ public:
         _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); 
     }
     void connectMasterServer();
+    void slaveClientCloseCb(const Angel::TcpConnectionPtr& conn);
     void setSlaveToReadonly();
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
     void recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
@@ -111,6 +113,10 @@ public:
     void setMasterRunId(const char *s)
     { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
     void setHeartBeatTimer(const Angel::TcpConnectionPtr& conn);
+    WatchMap& watchMap() { return _watchMap; }
+    void watchKeyForClient(const Key& key, size_t id);
+    void unwatchKeys() { _watchMap.clear(); }
+    void touchWatchKey(const Key& key);
 
     static const size_t copy_backlog_buffer_size = 1024 * 1024;
 private:
@@ -150,6 +156,8 @@ private:
     int64_t _lastRecvHeartBeatTime;
     // 发送心跳包的定时器ID
     size_t _heartBeatTimerId;
+    // atch命令使用的监视表
+    WatchMap _watchMap;
 };
 
 class Server {
