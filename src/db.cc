@@ -195,7 +195,7 @@ void DB::typeCommand(Context& con)
         con.append(db_return_set_type);
 }
 
-void DB::_getTtl(Context& con, bool seconds)
+void DB::_ttl(Context& con, bool seconds)
 {
     auto& cmdlist = con.commandList();
     auto it = _hashMap.find(cmdlist[1]);
@@ -216,15 +216,15 @@ void DB::_getTtl(Context& con, bool seconds)
 
 void DB::ttlCommand(Context& con)
 {
-    _getTtl(con, true);
+    _ttl(con, true);
 }
 
 void DB::pttlCommand(Context& con)
 {
-    _getTtl(con, false);
+    _ttl(con, false);
 }
 
-void DB::_setKeyExpire(Context& con, bool seconds)
+void DB::_expire(Context& con, bool seconds)
 {
     auto& cmdlist = con.commandList();
     auto it = _hashMap.find(cmdlist[1]);
@@ -245,12 +245,12 @@ void DB::_setKeyExpire(Context& con, bool seconds)
 
 void DB::expireCommand(Context& con)
 {
-    _setKeyExpire(con, true);
+    _expire(con, true);
 }
 
 void DB::pexpireCommand(Context& con)
 {
-    _setKeyExpire(con, false);
+    _expire(con, false);
 }
 
 void DB::delCommand(Context& con)
@@ -432,18 +432,25 @@ void DB::multiCommand(Context& con)
 
 void DB::execCommand(Context& con)
 {
+    Context::CommandList tlist = { "MULTI" };
     if (con.flag() & Context::EXEC_MULTI_ERR) {
         con.clearFlag(Context::EXEC_MULTI_ERR);
         con.append(db_return_nil);
         goto end;
     }
-    con.commandList().clear();
+    if (con.flag() & Context::EXEC_MULTI_WRITE)
+        _dbServer->doWriteCommand(tlist);
     for (auto& cmdlist : con.transactionList()) {
         auto command = _dbServer->db().commandMap().find(cmdlist[0]);
-        for (auto& it : cmdlist)
-            con.commandList().push_back(it);
+        con.commandList().swap(cmdlist);
         command->second._commandCb(con);
-        con.commandList().clear();
+        if (con.flag() & Context::EXEC_MULTI_WRITE)
+            _dbServer->doWriteCommand(con.commandList());
+    }
+    if (con.flag() & Context::EXEC_MULTI_WRITE) {
+        tlist = { "EXEC" };
+        _dbServer->doWriteCommand(tlist);
+        con.clearFlag(Context::EXEC_MULTI_WRITE);
     }
     _dbServer->unwatchKeys();
 end:
@@ -456,6 +463,10 @@ void DB::discardCommand(Context& con)
     con.transactionList().clear();
     _dbServer->unwatchKeys();
     con.clearFlag(Context::EXEC_MULTI);
+    if (con.flag() & Context::EXEC_MULTI_ERR)
+        con.clearFlag(Context::EXEC_MULTI_ERR);
+    if (con.flag() & Context::EXEC_MULTI_WRITE)
+        con.clearFlag(Context::EXEC_MULTI_WRITE);
     con.append(db_return_ok);
 }
 
@@ -703,7 +714,7 @@ bool DB::_strIsNumber(const String& s)
     return isNumber;
 }
 
-void DB::_strIdCr(Context& con, int64_t incr)
+void DB::_incr(Context& con, int64_t incr)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -729,26 +740,26 @@ void DB::_strIdCr(Context& con, int64_t incr)
 
 void DB::incrCommand(Context& con)
 {
-    _strIdCr(con, 1);
+    _incr(con, 1);
 }
 
 void DB::incrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t incr = atol(cmdlist[2].c_str());
-    _strIdCr(con, incr);
+    _incr(con, incr);
 }
 
 void DB::decrCommand(Context& con)
 {
-    _strIdCr(con, -1);
+    _incr(con, -1);
 }
 
 void DB::decrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t decr = -atol(cmdlist[2].c_str());
-    _strIdCr(con, decr);
+    _incr(con, decr);
 }
 
 //////////////////////////////////////////////////////////////////
@@ -757,7 +768,7 @@ void DB::decrbyCommand(Context& con)
 
 #define getListValue(it) getXXType(it, List&)
 
-void DB::_listPush(Context& con, bool leftPush)
+void DB::_lpush(Context& con, bool leftPush)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -789,15 +800,15 @@ void DB::_listPush(Context& con, bool leftPush)
 
 void DB::lpushCommand(Context& con)
 {
-    _listPush(con, true);
+    _lpush(con, true);
 }
 
 void DB::rpushCommand(Context& con)
 {
-    _listPush(con, false);
+    _lpush(con, false);
 }
 
-void DB::_listEndsPush(Context& con, bool frontPush)
+void DB::_lpushx(Context& con, bool frontPush)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -818,15 +829,15 @@ void DB::_listEndsPush(Context& con, bool frontPush)
 
 void DB::lpushxCommand(Context& con)
 {
-    _listEndsPush(con, true);
+    _lpushx(con, true);
 }
 
 void DB::rpushxCommand(Context& con)
 {
-    _listEndsPush(con, false);
+    _lpushx(con, false);
 }
 
-void DB::_listPop(Context& con, bool leftPop)
+void DB::_lpop(Context& con, bool leftPop)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -853,12 +864,12 @@ void DB::_listPop(Context& con, bool leftPop)
 
 void DB::lpopCommand(Context& con)
 {
-    _listPop(con, true);
+    _lpop(con, true);
 }
 
 void DB::rpopCommand(Context& con)
 {
-    _listPop(con, false);
+    _lpop(con, false);
 }
 
 void DB::rpoplpushCommand(Context& con)
@@ -1738,7 +1749,7 @@ void DB::hmgetCommand(Context& con)
 #define GETVALUES   1
 #define GETALL      2
 
-void DB::_hashGetXX(Context& con, int getXX)
+void DB::_hgetXX(Context& con, int getXX)
 {
     auto& cmdlist = con.commandList();
     con.db()->isExpiredKey(cmdlist[1]);
@@ -1771,17 +1782,17 @@ void DB::_hashGetXX(Context& con, int getXX)
 
 void DB::hkeysCommand(Context& con)
 {
-    _hashGetXX(con, GETKEYS);
+    _hgetXX(con, GETKEYS);
 }
 
 void DB::hvalsCommand(Context& con)
 {
-    _hashGetXX(con, GETVALUES);
+    _hgetXX(con, GETVALUES);
 }
 
 void DB::hgetAllCommand(Context& con)
 {
-    _hashGetXX(con, GETALL);
+    _hgetXX(con, GETALL);
 }
 
 #undef GETKEYS

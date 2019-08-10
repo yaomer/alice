@@ -82,20 +82,15 @@ void Server::executeCommand(Context& con)
          && cmdlist[0].compare("EXEC")
          && cmdlist[0].compare("WATCH")
          && cmdlist[0].compare("DISCARD")) {
+            if (!(con.flag() & Context::EXEC_MULTI_WRITE) && (it->second.perm() & IS_WRITE))
+                con.setFlag(Context::EXEC_MULTI_WRITE);
             con.addMultiArg(cmdlist);
             con.append("+QUEUED\r\n");
             goto end;
         }
     }
     if (it->second.perm() & IS_WRITE) {
-        _dbServer.dirtyIncr();
-        _dbServer.appendWriteCommand(cmdlist);
-        _dbServer.sendSyncCommandToSlave(cmdlist);
-        if (_dbServer.flag() & DBServer::SLAVE) {
-            std::string buffer;
-            DBServer::appendCommand(buffer, cmdlist, false);
-            _dbServer.slaveOffsetIncr(buffer.size());
-        }
+        _dbServer.doWriteCommand(cmdlist);
     }
     it->second._commandCb(con);
     goto end;
@@ -117,6 +112,18 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
         conn->send(context.message());
     context.message().clear();
     context.setState(Context::PARSING);
+}
+
+void DBServer::doWriteCommand(Context::CommandList& cmdlist)
+{
+    dirtyIncr();
+    appendWriteCommand(cmdlist);
+    sendSyncCommandToSlave(cmdlist);
+    if (flag() & SLAVE) {
+        std::string buffer;
+        appendCommand(buffer, cmdlist, false);
+        slaveOffsetIncr(buffer.size());
+    }
 }
 
 namespace Alice {

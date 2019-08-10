@@ -34,22 +34,24 @@ public:
     };
     enum Flag{
         // 从服务器中设置该标志的连接表示与主服务器相连
-        SLAVE = 0x01, // for slave
+        SLAVE = 0x001, // for slave
         // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件 
         // 从服务器设置该标志表示该连接处于接收同步文件的状态
-        SYNC_RDB_FILE = 0x02, // for master and slave
+        SYNC_RDB_FILE = 0x002, // for master and slave
         // 主服务器向设置SYNC_COMMAND标志的连接传播同步命令
         // 从服务器设置该标志表示该连接处于接收同步命令的状态
-        SYNC_COMMAND = 0x04, // for master and slave
+        SYNC_COMMAND = 0x004, // for master and slave
         // 从服务器处于等待接收主服务器的同步信息的状态
-        SYNC_WAIT = 0x08, // for slave
+        SYNC_WAIT = 0x008, // for slave
         // 将要进行完全重同步
-        SYNC_FULL = 0x10, // for slave
-        SYNC_OK = 0x20, // for slave
+        SYNC_FULL = 0x010, // for slave
+        SYNC_OK = 0x020, // for slave
         // 客户端正在执行事务
-        EXEC_MULTI = 0x40,
+        EXEC_MULTI = 0x040,
         // 事务的安全性被破坏
-        EXEC_MULTI_ERR = 0x80,
+        EXEC_MULTI_ERR = 0x080,
+        // 事务中有写操作
+        EXEC_MULTI_WRITE = 0x100,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _db(db),
@@ -239,13 +241,13 @@ public:
     void hgetAllCommand(Context& con);
 private:
     bool _strIsNumber(const String& s);
-    void _getTtl(Context& con, bool seconds);
-    void _setKeyExpire(Context& con, bool seconds);
-    void _strIdCr(Context& con, int64_t incr);
-    void _listPush(Context& con, bool leftPush);
-    void _listEndsPush(Context& con, bool frontPush);
-    void _listPop(Context& con, bool leftPop);
-    void _hashGetXX(Context& con, int getXX);
+    void _ttl(Context& con, bool seconds);
+    void _expire(Context& con, bool seconds);
+    void _incr(Context& con, int64_t incr);
+    void _lpush(Context& con, bool leftPush);
+    void _lpushx(Context& con, bool frontPush);
+    void _lpop(Context& con, bool leftPop);
+    void _hgetXX(Context& con, int getXX);
 
     HashMap _hashMap;
     CommandMap _commandMap;

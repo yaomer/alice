@@ -75,11 +75,6 @@ public:
     int dirty() const { return _dirty; }
     void dirtyIncr() { _dirty++; }
     void dirtyReset() { _dirty = 0; }
-    void setMasterAddr(Angel::InetAddr addr)
-    { 
-        if (_masterAddr) _masterAddr.reset();
-        _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); 
-    }
     void connectMasterServer();
     void slaveClientCloseCb(const Angel::TcpConnectionPtr& conn);
     void setSlaveToReadonly();
@@ -95,6 +90,7 @@ public:
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
     void delExpireKey(const Key& key);
     bool isExpiredKey(const Key& key);
+    void doWriteCommand(Context::CommandList& cmdlist);
     static void appendCommand(std::string& buffer, Context::CommandList& cmdlist,
             bool repl_set);
     void appendWriteCommand(Context::CommandList& cmdlist);
@@ -117,6 +113,11 @@ public:
     void watchKeyForClient(const Key& key, size_t id);
     void unwatchKeys() { _watchMap.clear(); }
     void touchWatchKey(const Key& key);
+    void setMasterAddr(Angel::InetAddr addr)
+    { 
+        if (_masterAddr) _masterAddr.reset();
+        _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); 
+    }
 
     static const size_t copy_backlog_buffer_size = 1024 * 1024;
 private:
