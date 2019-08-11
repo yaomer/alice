@@ -146,6 +146,11 @@ void Server::serverCron()
                 _dbServer.clearFlag(DBServer::PSYNC);
                 _dbServer.sendRdbfileToSlave();
             }
+            if (_dbServer.flag() & DBServer::PSYNC_DELAY) {
+                _dbServer.clearFlag(DBServer::PSYNC_DELAY);
+                _dbServer.setFlag(DBServer::PSYNC);
+                _dbServer.rdb()->saveBackground();
+            }
         }
     }
     if (_dbServer.aof()->childPid() != -1) {

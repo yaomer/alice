@@ -37,10 +37,16 @@ public:
     using ExpireMap = std::unordered_map<Key, int64_t>;
     using WatchMap = std::unordered_map<Key, std::vector<size_t>>; 
     enum FLAG {
+        // 开启aof持久化
         APPENDONLY = 0x01,
+        // 有rewriteaof请求被延迟
         REWRITEAOF_DELAY = 0x02,
+        // 有slave正在等待生成rdb快照
         PSYNC = 0x04,
+        // 标志该服务器是从服务器
         SLAVE = 0x08,
+        // 有psync请求被延迟
+        PSYNC_DELAY = 0x10,
     };
     DBServer() 
         : _db(this),

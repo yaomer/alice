@@ -362,14 +362,17 @@ void DB::psyncCommand(Context& con)
 sync:
         // 执行完整重同步
         con.setFlag(Context::SYNC_RDB_FILE);
-        _dbServer->setFlag(DBServer::PSYNC);
         con.append("+FULLRESYNC\r\n");
         con.append(_dbServer->selfRunId());
         con.append("\r\n");
         con.append(convert(_dbServer->masterOffset()));
         con.append("\r\n");
-        if (_dbServer->rdb()->childPid() != -1)
+        if (_dbServer->rdb()->childPid() != -1) {
+            if (!(_dbServer->flag() & DBServer::PSYNC))
+                _dbServer->setFlag(DBServer::PSYNC_DELAY);
             return;
+        }
+        _dbServer->setFlag(DBServer::PSYNC);
         _dbServer->rdb()->saveBackground();
     } else {
         if (cmdlist[1].compare(_dbServer->selfRunId()))
