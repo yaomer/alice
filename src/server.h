@@ -36,6 +36,7 @@ public:
     using Key = std::string;
     using ExpireMap = std::unordered_map<Key, int64_t>;
     using WatchMap = std::unordered_map<Key, std::vector<size_t>>; 
+    using PubsubChannels = std::unordered_map<Key, std::vector<size_t>>;
     enum FLAG {
         // 开启aof持久化
         APPENDONLY = 0x01,
@@ -115,10 +116,11 @@ public:
     void setMasterRunId(const char *s)
     { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
     void setHeartBeatTimer(const Angel::TcpConnectionPtr& conn);
-    WatchMap& watchMap() { return _watchMap; }
     void watchKeyForClient(const Key& key, size_t id);
     void unwatchKeys() { _watchMap.clear(); }
     void touchWatchKey(const Key& key);
+    void subChannel(const Key& key, size_t id);
+    size_t pubMessage(const std::string& msg, const std::string& channel,  size_t id);
     void setMasterAddr(Angel::InetAddr addr)
     { 
         if (_masterAddr) _masterAddr.reset();
@@ -163,8 +165,10 @@ private:
     int64_t _lastRecvHeartBeatTime;
     // 发送心跳包的定时器ID
     size_t _heartBeatTimerId;
-    // atch命令使用的监视表
+    // watch命令使用的监视表
     WatchMap _watchMap;
+    // 保存所有频道的订阅关系
+    PubsubChannels _pubsubChannels;
 };
 
 class Server {

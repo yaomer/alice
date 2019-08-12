@@ -14,14 +14,18 @@ namespace Alice {
 
 class Client {
 public:
-    enum {
+    enum State {
         NOENOUGH = 1,
         PARSEERR,
+    };
+    enum Flag {
+        PUBSUB = 0x01,
     };
     Client(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
         : _loop(loop),
         _client(loop, inetAddr, "Alice"),
-        _state(0)
+        _state(0),
+        _flag(0)
     {
         _client.setMessageCb(
                 std::bind(&Client::onMessage, this, _1, _2));
@@ -40,12 +44,14 @@ public:
     void parseResponse(Angel::Buffer& buf);
     void send();
     void start() { _client.start(); }
+    int flag() const { return _flag; }
 private:
     Angel::EventLoop *_loop;
     Angel::TcpClient _client;
     std::vector<std::string> _argv;
     std::string _message;
     int _state;
+    int _flag;
 };
 }
 

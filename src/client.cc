@@ -62,6 +62,8 @@ void Client::send()
         _message += "\r\n";
         _message += it;
         _message += "\r\n";
+        if (strcasecmp(it.c_str(), "SUBSCRIBE") == 0)
+            _flag |= PUBSUB;
     }
     _argv.clear();
     _client.conn()->send(_message);
@@ -192,6 +194,10 @@ int main(int argc, char *argv[])
             std::cout << "input error\n";
         }
         client.send();
+        if (client.flag() & Alice::Client::PUBSUB) {
+            while (true)
+                pause();
+        }
         line[len] = '\0';
         usleep(200000);
         linenoiseHistoryAdd(line);

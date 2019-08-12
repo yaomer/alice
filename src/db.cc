@@ -95,6 +95,8 @@ DB::DB(DBServer *dbServer)
         { "DISCARD",    { -1, IS_READ,  BIND(discardCommand) } },
         { "WATCH",      {  2, IS_READ,  BIND(watchCommand) } },
         { "UNWATCH",    { -1, IS_READ,  BIND(unwatchCommand) } },
+        { "PUBLISH",    { -3, IS_READ,  BIND(publishCommand) } },
+        { "SUBSCRIBE",  {  2, IS_READ,  BIND(subscribeCommand) } },
     };
 }
 
@@ -491,6 +493,30 @@ void DB::unwatchCommand(Context& con)
 {
     _dbServer->unwatchKeys();
     con.append(db_return_ok);
+}
+
+void DB::publishCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    size_t subClients = _dbServer->pubMessage(cmdlist[2], cmdlist[1], con.conn()->id());
+    appendReplyNumber(con, subClients);
+}
+
+void DB::subscribeCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    con.append("+Reading messages... (press Ctrl-C to quit)\r\n");
+    for (int i = 1; i < cmdlist.size(); i++) {
+        _dbServer->subChannel(cmdlist[i], con.conn()->id());
+        appendReplyMulti(con, 3);
+        con.append("$9\r\nsubscribe\r\n");
+        appendReplySingle(con, cmdlist[i]);
+        con.append("$");
+        con.append(convert(strlen(convert(i))));
+        con.append("\r\n");
+        con.append(convert(i));
+        con.append("\r\n");
+    }
 }
 
 //////////////////////////////////////////////////////////////////

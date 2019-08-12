@@ -526,6 +526,42 @@ void DBServer::touchWatchKey(const Key& key)
     }
 }
 
+void DBServer::subChannel(const Key& key, size_t id)
+{
+    auto channel = _pubsubChannels.find(key);
+    if (channel == _pubsubChannels.end()) {
+        std::vector<size_t> idlist = { id };
+        _pubsubChannels[key] = std::move(idlist);
+    } else {
+        channel->second.push_back(id);
+    }
+}
+
+size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, size_t id)
+{
+    auto idlist = _pubsubChannels.find(channel);
+    if (idlist == _pubsubChannels.end()) return 0;
+    std::string buffer;
+    size_t pubClients = 0;
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& id : idlist->second) {
+        auto conn = maps.find(id);
+        if (conn != maps.end()) {
+            buffer.append("*3\r\n$7\r\nmessage\r\n$");
+            buffer.append(convert(channel.size()));
+            buffer.append("\r\n" + channel + "\r\n$");
+            buffer.append(convert(msg.size()));
+            buffer.append("\r\n");
+            conn->second->send(buffer);
+            conn->second->send(msg);
+            conn->second->send("\r\n");
+            buffer.clear();
+            pubClients++;
+        }
+    }
+    return pubClients;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2) {

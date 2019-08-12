@@ -84,7 +84,9 @@ HintInfo hiTable[HTSIZE] = {
     { "EXEC",       4,  "" },
     { "DISCARD",    7,  "" },
     { "WATCH",      5,  " key [key ...]" },
-    { "UNWATCH",    6,  "" },
+    { "UNWATCH",    7,  "" },
+    { "PUBLISH",    7,  " channel message" },
+    { "SUBSCRIBE",  9,  " channel [channel ...]" },
     { "", 0, "" },
 };
 

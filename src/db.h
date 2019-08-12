@@ -183,6 +183,8 @@ public:
     void discardCommand(Context& con);
     void watchCommand(Context& con);
     void unwatchCommand(Context& con);
+    void publishCommand(Context& con);
+    void subscribeCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
