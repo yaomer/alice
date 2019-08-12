@@ -144,28 +144,35 @@ namespace Alice {
 #define getXXType(it, _type) \
     (std::any_cast<_type>((it)->second.value()))
 
-#define appendReplyMulti(con, size) \
-    do { \
-        (con).append("*"); \
-        (con).append(convert(size)); \
-        (con).append("\r\n"); \
-    } while (0)
+void DB::appendReplyMulti(Context& con, size_t size)
+{
+    con.append("*");
+    con.append(convert(size));
+    con.append("\r\n");
+}
 
-#define appendReplySingle(con, it) \
-    do { \
-        (con).append("$"); \
-        (con).append(convert((it).size())); \
-        (con).append("\r\n"); \
-        (con).append(it); \
-        (con).append("\r\n"); \
-    } while (0)
+void DB::appendReplySingleStr(Context& con, const std::string& s)
+{
+    con.append("$");
+    con.append(convert(s.size()));
+    con.append("\r\n" + s + "\r\n");
+}
 
-#define appendReplyNumber(con, size) \
-    do { \
-        (con).append(": "); \
-        (con).append(convert(size)); \
-        (con).append("\r\n"); \
-    } while (0)
+void DB::appendReplySingleLen(Context& con, size_t size)
+{
+    con.append("$");
+    con.append(convert(strlen(convert(size))));
+    con.append("\r\n");
+    con.append(convert(size));
+    con.append("\r\n");
+}
+
+void DB::appendReplyNumber(Context& con, int64_t number)
+{
+    con.append(": ");
+    con.append(convert(number));
+    con.append("\r\n");
+}
 
 //////////////////////////////////////////////////////////////////
 
@@ -286,7 +293,7 @@ void DB::keysCommand(Context& con)
     size_t size = con.message().size();
     for (auto& it : _hashMap) {
         con.db()->isExpiredKey(it.first);
-        appendReplySingle(con, it.first);
+        appendReplySingleStr(con, it.first);
     }
     if (size == con.message().size())
         con.assign(db_return_nil);
@@ -510,12 +517,8 @@ void DB::subscribeCommand(Context& con)
         _dbServer->subChannel(cmdlist[i], con.conn()->id());
         appendReplyMulti(con, 3);
         con.append("$9\r\nsubscribe\r\n");
-        appendReplySingle(con, cmdlist[i]);
-        con.append("$");
-        con.append(convert(strlen(convert(i))));
-        con.append("\r\n");
-        con.append(convert(i));
-        con.append("\r\n");
+        appendReplySingleStr(con, cmdlist[i]);
+        appendReplySingleLen(con, i);
     }
 }
 
@@ -644,7 +647,7 @@ void DB::getCommand(Context& con)
     }
     checkType(con, it, String);
     auto& value = getStringValue(it);
-    appendReplySingle(con, value);
+    appendReplySingleStr(con, value);
 }
 
 void DB::getSetCommand(Context& con)
@@ -661,7 +664,7 @@ void DB::getSetCommand(Context& con)
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
     _hashMap[cmdlist[1]] = cmdlist[2];
-    appendReplySingle(con, oldvalue);
+    appendReplySingleStr(con, oldvalue);
 }
 
 void DB::strlenCommand(Context& con)
@@ -725,7 +728,7 @@ void DB::mgetCommand(Context& con)
                 continue;
             }
             String& value = getStringValue(it);
-            appendReplySingle(con, value);
+            appendReplySingleStr(con, value);
         } else
             con.append(db_return_nil);
     }
@@ -882,10 +885,10 @@ void DB::_lpop(Context& con, bool leftPop)
         return;
     }
     if (leftPop) {
-        appendReplySingle(con, list.front());
+        appendReplySingleStr(con, list.front());
         list.pop_front();
     } else {
-        appendReplySingle(con, list.back());
+        appendReplySingleStr(con, list.back());
         list.pop_back();
     }
     _dbServer->touchWatchKey(cmdlist[1]);
@@ -917,7 +920,7 @@ void DB::rpoplpushCommand(Context& con)
         con.append(db_return_nil);
         return;
     }
-    appendReplySingle(con, srclist.back());
+    appendReplySingleStr(con, srclist.back());
     auto des = _hashMap.find(cmdlist[2]);
     if (des != _hashMap.end()) {
         checkType(con, des, List);
@@ -1015,7 +1018,7 @@ void DB::lindexCommand(Context& con)
     }
     for (auto& it : list)
         if (index-- == 0) {
-            appendReplySingle(con, it);
+            appendReplySingleStr(con, it);
             break;
         }
 }
@@ -1081,7 +1084,7 @@ void DB::lrangeCommand(Context& con)
         }
         if (i > stop)
             break;
-        appendReplySingle(con, it);
+        appendReplySingleStr(con, it);
         i++;
     }
 }
@@ -1209,7 +1212,7 @@ void DB::spopCommand(Context& con)
     for (auto it = set.cbegin(bucketNumber);
             it != set.cend(bucketNumber); it++)
         if (where-- == 0) {
-            appendReplySingle(con, *it);
+            appendReplySingleStr(con, *it);
             set.erase(set.find(*it));
             break;
         }
@@ -1243,7 +1246,7 @@ void DB::srandMemberCommand(Context& con)
     if (count >= static_cast<ssize_t>(set.size())) {
         appendReplyMulti(con, set.size());
         for (auto& it : set) {
-            appendReplySingle(con, it);
+            appendReplySingleStr(con, it);
         }
         return;
     }
@@ -1258,7 +1261,7 @@ void DB::srandMemberCommand(Context& con)
             for (auto it = set.cbegin(bucketNumber);
                     it != set.cend(bucketNumber); it++) {
                 if (where-- == 0) {
-                    appendReplySingle(con, *it);
+                    appendReplySingleStr(con, *it);
                     break;
                 }
             }
@@ -1284,7 +1287,7 @@ void DB::srandMemberCommand(Context& con)
         }
     }
     for (auto it : tset) {
-        appendReplySingle(con, it);
+        appendReplySingleStr(con, it);
     }
 }
 
@@ -1374,7 +1377,7 @@ void DB::smembersCommand(Context& con)
     Set& set = getSetValue(it);
     appendReplyMulti(con, set.size());
     for (auto& it : set) {
-        appendReplySingle(con, it);
+        appendReplySingleStr(con, it);
     }
 }
 
@@ -1419,7 +1422,7 @@ void DB::sinterCommand(Context& con)
     }
     appendReplyMulti(con, retSet.size());
     for (auto& it : retSet)
-        appendReplySingle(con, it);
+        appendReplySingleStr(con, it);
 }
 
 void DB::sinterStoreCommand(Context& con)
@@ -1496,7 +1499,7 @@ void DB::sunionCommand(Context& con)
     else {
         appendReplyMulti(con, retSet.size());
         for (auto& it : retSet)
-            appendReplySingle(con, it);
+            appendReplySingleStr(con, it);
     }
 }
 
@@ -1605,7 +1608,7 @@ void DB::hgetCommand(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        appendReplySingle(con, value->second);
+        appendReplySingleStr(con, value->second);
     } else
         con.append(db_return_nil);
 }
@@ -1767,7 +1770,7 @@ void DB::hmgetCommand(Context& con)
     for (auto i = 2; i < size; i++) {
         auto it = hash.find(cmdlist[i]);
         if (it != hash.end()) {
-            appendReplySingle(con, it->second);
+            appendReplySingleStr(con, it->second);
         } else {
             con.append(db_return_nil);
         }
@@ -1799,12 +1802,12 @@ void DB::_hgetXX(Context& con, int getXX)
         appendReplyMulti(con, hash.size());
     for (auto& it : hash) {
         if (getXX == GETKEYS) {
-            appendReplySingle(con, it.first);
+            appendReplySingleStr(con, it.first);
         } else if (getXX == GETVALUES) {
-            appendReplySingle(con, it.second);
+            appendReplySingleStr(con, it.second);
         } else if (getXX == GETALL) {
-            appendReplySingle(con, it.first);
-            appendReplySingle(con, it.second);
+            appendReplySingleStr(con, it.first);
+            appendReplySingleStr(con, it.second);
         }
     }
 }

@@ -241,6 +241,11 @@ public:
     void hkeysCommand(Context& con);
     void hvalsCommand(Context& con);
     void hgetAllCommand(Context& con);
+
+    static void appendReplyMulti(Context& con, size_t size);
+    static void appendReplySingleStr(Context& con, const std::string& s);
+    static void appendReplySingleLen(Context& con, size_t size);
+    static void appendReplyNumber(Context& con, int64_t number);
 private:
     bool _strIsNumber(const String& s);
     void _ttl(Context& con, bool seconds);
