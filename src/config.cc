@@ -1,13 +1,20 @@
 #include <stdio.h>
 #include <vector>
 #include <string>
-#include "server.h"
+#include "config.h"
 
 using namespace Alice;
 
-void Server::parseConf()
+namespace Alice {
+
+    using ConfParamList = std::vector<std::vector<std::string>>;
+    struct ServerConf g_server_conf;
+    struct SentinelConf g_sentinel_conf;
+}
+
+static void parseConf(ConfParamList& confParamList, const char *filename)
 {
-    FILE *fp = fopen("alice.conf", "r");
+    FILE *fp = fopen(filename, "r");
     char buf[1024];
     while (fgets(buf, sizeof(buf), fp)) {
         const char *s = buf;
@@ -21,7 +28,7 @@ next:
             p = std::find_if(s, es, isspace);
             if (p == es) continue;
             param.push_back(std::string(s, p - s));
-            _confParamList.push_back(std::move(param));
+            confParamList.push_back(std::move(param));
             continue;
         }
         param.push_back(std::string(s, p - s));
@@ -31,23 +38,77 @@ next:
     fclose(fp);
 }
 
-void Server::readConf()
+static void error(const char *s)
 {
-    parseConf();
-    for (auto& it : _confParamList) {
-        if (strncasecmp(it[0].c_str(), "save", 4) == 0) {
-            _dbServer.addSaveParam(atoi(it[1].c_str()), atoi(it[2].c_str()));
-        } else if (strncasecmp(it[0].c_str(), "appendonly", 10) == 0) {
-            if (strncasecmp(it[1].c_str(), "yes", 3) == 0)
-                _dbServer.setFlag(DBServer::APPENDONLY);
-        } else if (strncasecmp(it[0].c_str(), "appendfsync", 11) == 0) {
-            if (strncasecmp(it[1].c_str(), "always", 6) == 0)
-                _dbServer.aof()->setMode(Aof::ALWAYS);
-            else if (strncasecmp(it[1].c_str(), "everysec", 8) == 0)
-                _dbServer.aof()->setMode(Aof::EVERYSEC);
-            else if (strncasecmp(it[1].c_str(), "no", 2) == 0)
-                _dbServer.aof()->setMode(Aof::NO);
+    fprintf(stderr, "config error: %s\n", s);
+    abort();
+}
+
+static ssize_t humanSizeToBytes(const char *s)
+{
+    const char *es = s + strlen(s);
+    const char *p = std::find_if(s, es, [](char c){ return !isnumber(c); });
+    if (p == s || p == es) return -1;
+    ssize_t bytes = atoll(s);
+    if (strcasecmp(p, "GB") == 0)
+        bytes *= 1024 * 1024 * 1024;
+    else if (strcasecmp(p, "MB") == 0)
+        bytes *= 1024 * 1024;
+    else if (strcasecmp(p, "KB") == 0)
+        bytes *= 1024;
+    return bytes;
+}
+
+void Alice::readServerConf()
+{
+    ConfParamList paramlist;
+    parseConf(paramlist, "alice.conf");
+    for (auto& it : paramlist) {
+        if (strcasecmp(it[0].c_str(), "save") == 0) {
+            g_server_conf.save_params.push_back(
+                    SaveParam(atoi(it[1].c_str()), atoi(it[2].c_str())));
+        } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
+            if (strcasecmp(it[1].c_str(), "yes") == 0)
+                g_server_conf.enable_appendonly = true;
+            else if (strcasecmp(it[0].c_str(), "no"))
+                error("appendonly");
+        } else if (strcasecmp(it[0].c_str(), "appendfsync") == 0) {
+            if (strcasecmp(it[1].c_str(), "always") == 0)
+                g_server_conf.aof_mode = AOF_ALWAYS;
+            else if (strcasecmp(it[1].c_str(), "everysec") == 0)
+                g_server_conf.aof_mode = AOF_EVERYSEC;
+            else if (strcasecmp(it[1].c_str(), "no") == 0)
+                g_server_conf.aof_mode = AOF_NO;
+            else
+                error("appendfsync");
+        } else if (strcasecmp(it[0].c_str(), "repl-timeout") == 0) {
+            g_server_conf.repl_timeout = atoi(it[1].c_str()) * 1000;
+        } else if (strcasecmp(it[0].c_str(), "repl-ping-period") == 0) {
+            g_server_conf.repl_ping_preiod = atoi(it[1].c_str()) * 1000;
+        } else if (strcasecmp(it[0].c_str(), "repl-backlog-size") == 0) {
+            ssize_t size = humanSizeToBytes(it[1].c_str());
+            if (size < 0) error("repl-backlog-size");
+            g_server_conf.repl_backlog_size = size;
         }
     }
 }
 
+void Alice::readSentinelConf()
+{
+    ConfParamList paramlist;
+    parseConf(paramlist, "sentinel.conf");
+    for(auto& it : paramlist) {
+        if (strcasecmp(it[1].c_str(), "monitor") == 0) {
+            SentinelMaster master;
+            master.setName(it[2]);
+            master.setInetAddr(Angel::InetAddr(atoi(it[4].c_str()), it[3].c_str()));
+            master.setQuorum(atoi(it[5].c_str()));
+            g_sentinel_conf.masters[master.name()] = std::move(master);
+        } else if (strcasecmp(it[1].c_str(), "down-after-milliseconds") == 0) {
+            auto master = g_sentinel_conf.masters.find(it[2]);
+            if (master == g_sentinel_conf.masters.end())
+                error("down-after-milliseconds");
+            master->second.setDownAfterPeriod(atoll(it[3].c_str()));
+        }
+    }
+}

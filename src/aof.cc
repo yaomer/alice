@@ -5,12 +5,12 @@
 #include "aof.h"
 #include "db.h"
 #include "server.h"
+#include "config.h"
 
 using namespace Alice;
 
 Aof::Aof(DBServer *dbServer)
     : _dbServer(dbServer),
-    _mode(EVERYSEC),
     _childPid(-1),
     _lastSyncTime(0),
     _currentFilesize(0),
@@ -37,9 +37,9 @@ void Aof::appendAof(int64_t now)
     int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
     write(fd, _buffer.data(), _buffer.size());
     _buffer.clear();
-    if (mode() == ALWAYS) {
+    if (g_server_conf.aof_mode == AOF_ALWAYS) {
         fsync(fd);
-    } else if (mode() == EVERYSEC) {
+    } else if (g_server_conf.aof_mode == AOF_EVERYSEC) {
         if (syncInterval >= 1000) {
             fsync(fd);
             _lastSyncTime = now;

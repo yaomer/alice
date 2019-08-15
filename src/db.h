@@ -11,6 +11,8 @@
 #include <tuple>
 #include <any>
 
+#include "util.h"
+
 namespace Alice {
 
 class DBServer;
@@ -21,7 +23,6 @@ extern thread_local int64_t _lru_cache;
 enum CommandPerm {
     IS_READ = 0x01,
     IS_WRITE = 0x02,
-    IS_INTER = 0x04,
 };
 
 class Context {
@@ -52,6 +53,7 @@ public:
         EXEC_MULTI_ERR = 0x080,
         // 事务中有写操作
         EXEC_MULTI_WRITE = 0x100,
+        SYNC_RECV_PING = 0x200,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
         : _db(db),
@@ -66,6 +68,7 @@ public:
 
     DBServer *db() { return _db; }
     const Angel::TcpConnectionPtr& conn() { return _conn; }
+    Angel::InetAddr *slaveAddr() { return _slaveAddr.get(); }
     void addArg(const char *s, const char *es)
     { _commandList.push_back(std::string(s, es)); }
     CommandList& commandList() { return _commandList; }
@@ -85,6 +88,11 @@ public:
     int perm() const { return _perm; }
     void setPerm(int perm) { _perm |= perm; }
     void clearPerm(int perm) { _perm &= ~perm; }
+    void setSlaveAddr(Angel::InetAddr slaveAddr)
+    {
+        if (_slaveAddr) _slaveAddr.reset();
+        _slaveAddr.reset(new Angel::InetAddr(slaveAddr.inetAddr()));
+    }
 private:
     DBServer *_db;
     const Angel::TcpConnectionPtr _conn;
@@ -98,6 +106,8 @@ private:
     int _flag;
     // 能执行的命令的权限
     int _perm;
+    // 从服务器的inetAddr
+    std::shared_ptr<Angel::InetAddr> _slaveAddr;
 };
 
 class Command {
@@ -185,6 +195,7 @@ public:
     void unwatchCommand(Context& con);
     void publishCommand(Context& con);
     void subscribeCommand(Context& con);
+    void infoCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
@@ -260,8 +271,6 @@ private:
     CommandMap _commandMap;
     DBServer *_dbServer;
 };
-
-const char *convert(int64_t value);
 
 };
 

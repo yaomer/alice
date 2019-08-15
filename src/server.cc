@@ -4,13 +4,13 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <algorithm>
 #include <vector>
 #include <string>
-#include <random>
 #include "server.h"
+#include "sentinel.h"
 #include "db.h"
+#include "config.h"
 
 using namespace Alice;
 
@@ -131,6 +131,7 @@ namespace Alice {
     // 键的空转时间不需要十分精确
     thread_local int64_t _lru_cache;
     Alice::Server *g_server;
+    Alice::Sentinel *g_sentinel;
 }
 
 void Server::serverCron()
@@ -168,7 +169,7 @@ void Server::serverCron()
     }
 
     int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
-    for (auto& it : _dbServer.saveParams()) {
+    for (auto& it : g_server_conf.save_params) {
         if (saveInterval >= it.seconds() && _dbServer.dirty() >= it.changes()) {
             if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
                 _dbServer.rdb()->saveBackground();
@@ -202,7 +203,7 @@ void DBServer::setSlaveToReadonly()
     for (auto& it : maps) {
         if (it.second->getContext().has_value()) {
             auto& context = std::any_cast<Context&>(it.second->getContext());
-            if (!(context.perm() & IS_INTER))
+            if (!(context.flag() & Context::SYNC_WAIT))
                 context.clearPerm(IS_WRITE);
         }
     }
@@ -219,7 +220,11 @@ void DBServer::connectMasterServer()
     _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get(), "slave"));
     _client->notExitFromLoop();
     _client->setConnectionCb(
-            std::bind(&DBServer::sendSyncToMaster, this, _1));
+            std::bind(&DBServer::sendPingToMaster, this, _1));
+    _client->setConnectTimeoutCb([this]{
+            if (!this->_client->isConnected())
+                this->connectMasterServer();
+            });
     _client->setMessageCb(
             std::bind(&DBServer::recvSyncFromMaster, this, _1, _2));
     _client->setCloseCb(
@@ -232,12 +237,39 @@ void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
     g_server->loop()->cancelTimer(_heartBeatTimerId);
 }
 
-void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
+void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
 {
     Context context(this, conn);
-    context.setFlag(Context::SYNC_WAIT);
-    context.setPerm(IS_INTER);
+    context.setFlag(Context::SYNC_RECV_PING);
     conn->setContext(context);
+    conn->send("*1\r\n$4\r\nPING\r\n");
+    g_server->loop()->runAfter(g_server_conf.repl_timeout, [this, &context]{
+            if (context.flag() & Context::SYNC_RECV_PING)
+                this->connectMasterServer();
+            });
+}
+
+void DBServer::sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn)
+{
+    std::string buffer;
+    Angel::InetAddr *inetAddr = g_server->server().inetAddr();
+    buffer += "*5\r\n$8\r\nreplconf\r\n$4\r\nport\r\n$";
+    buffer += convert(strlen(convert(inetAddr->toIpPort())));
+    buffer += "\r\n";
+    buffer += convert(inetAddr->toIpPort());
+    buffer += "\r\n";
+    buffer += "$4\r\naddr\r\n$";
+    buffer += convert(strlen(inetAddr->toIpAddr()));
+    buffer += "\r\n";
+    buffer += inetAddr->toIpAddr();
+    buffer += "\r\n";
+    conn->send(buffer);
+}
+
+void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
+{
+    auto& context = std::any_cast<Context&>(conn->getContext());
+    context.setFlag(Context::SYNC_WAIT);
     if (!(_flag & SLAVE)) {
         // slave -> master: 第一次复制
         setFlag(SLAVE);
@@ -265,7 +297,16 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
     while (true) {
-        if (context.flag() & Context::SYNC_WAIT) {
+        if (context.flag() & Context::SYNC_RECV_PING) {
+            if (strncasecmp(buf.c_str(), "*1\r\n$4\r\nPONG\r\n", 14) == 0) {
+                buf.retrieve(14);
+                context.clearFlag(Context::SYNC_RECV_PING);
+                context.setFlag(Context::SYNC_WAIT);
+                sendInetAddrToMaster(conn);
+                sendSyncToMaster(conn);
+                break;
+            }
+        } else if (context.flag() & Context::SYNC_WAIT) {
             if (strncasecmp(buf.c_str(), "+FULLRESYNC\r\n", 13) == 0) {
                 char *s = buf.peek();
                 const char *ps = s;
@@ -355,7 +396,8 @@ void DBServer::sendRdbfileToSlave()
                 conn->second->send(convert(buf.readable()));
                 conn->second->send("\r\n\r\n");
                 conn->second->send(buf.peek(), buf.readable());
-                conn->second->send(rdb()->syncBuffer());
+                if (rdb()->syncBuffer().size() > 0)
+                    conn->second->send(rdb()->syncBuffer());
                 context.clearFlag(Context::SYNC_RDB_FILE);
                 context.setFlag(Context::SYNC_COMMAND);
             }
@@ -378,11 +420,6 @@ void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
                 conn->second->send(buffer);
         }
     }
-}
-
-void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
-{
-    conn->send("*1\r\n$4\r\nPING\r\n");
 }
 
 void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
@@ -421,7 +458,7 @@ void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
     std::string buffer;
     appendCommand(buffer, cmdlist, false);
     masterOffsetIncr(buffer.size());
-    size_t remainBytes = copy_backlog_buffer_size - _copyBacklogBuffer.size();
+    size_t remainBytes = g_server_conf.repl_backlog_size - _copyBacklogBuffer.size();
     if (remainBytes < buffer.size()) {
         size_t popsize = buffer.size() - remainBytes;
         _copyBacklogBuffer.erase(0, popsize);
@@ -482,21 +519,11 @@ void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
     }
 }
 
-void DBServer::setSelfRunId()
-{
-    struct timespec tsp;
-    clock_gettime(_CLOCK_REALTIME, &tsp);
-    std::uniform_int_distribution<size_t> u;
-    std::mt19937_64 e(tsp.tv_sec * 1000000000 + tsp.tv_nsec);
-    snprintf(_selfRunId, 17, "%lx", u(e));
-    snprintf(_selfRunId + 16, 17, "%lx", u(e));
-}
-
 void DBServer::setHeartBeatTimer(const Angel::TcpConnectionPtr& conn)
 {
-    _heartBeatTimerId = g_server->loop()->runEvery(1000, [this, conn]{
+    _heartBeatTimerId = g_server->loop()->runEvery(g_server_conf.repl_ping_preiod, [this, conn]{
             this->sendAckToMaster(conn);
-            this->sendPingToMaster(conn);
+            conn->send("*1\r\n$4\r\nPING\r\n");
             });
 }
 
@@ -565,16 +592,26 @@ size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, 
 int main(int argc, char *argv[])
 {
     if (argc != 2) {
-        fprintf(stderr, "usage: ./serv [port]\n");
+        fprintf(stderr, "usage: ./alice-server [[port] | [--sentinel]]\n");
         return 1;
+    }
+    Alice::readServerConf();
+    if (strcasecmp(argv[1], "--sentinel") == 0) {
+        Alice::readSentinelConf();
+        Angel::EventLoop loop;
+        Angel::InetAddr listenAddr(888);
+        Sentinel sentinel(&loop, listenAddr);
+        g_sentinel = &sentinel;
+        sentinel.start();
+        loop.run();
+        return 0;
     }
     Angel::EventLoop loop;
     Angel::InetAddr listenAddr(atoi(argv[1]));
     Alice::Server server(&loop, listenAddr);
     g_server = &server;
-    server.readConf();
     loop.runEvery(100, []{ g_server->serverCron(); });
-    if (server.dbServer().flag() & DBServer::APPENDONLY)
+    if (g_server_conf.enable_appendonly)
         server.dbServer().aof()->load();
     else
         server.dbServer().rdb()->load();

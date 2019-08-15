@@ -11,7 +11,6 @@ class DBServer;
 
 class Aof {
 public:
-    enum { ALWAYS, EVERYSEC, NO };
     using Pair = std::pair<DB::Key, Value>;
 
     static const size_t buffer_flush_size = 4096;
@@ -19,8 +18,6 @@ public:
     static const size_t rewrite_rate = 2;
 
     explicit Aof(DBServer *dbServer);
-    int mode() const { return _mode; }
-    void setMode(int mode) { _mode = mode; }
     void append(Context::CommandList& cmdlist);
     void appendRewriteBuffer(Context::CommandList& cmdlist);
     void appendAof(int64_t now);
@@ -44,7 +41,6 @@ private:
     DBServer *_dbServer;
     std::string _buffer;
     std::string _rewriteBuffer;
-    int _mode;
     pid_t _childPid;
     int64_t _lastSyncTime;
     size_t _currentFilesize;

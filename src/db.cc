@@ -10,6 +10,7 @@
 #include <tuple>
 #include "db.h"
 #include "server.h"
+#include "config.h"
 
 using namespace Alice;
 using std::placeholders::_1;
@@ -87,9 +88,9 @@ DB::DB(DBServer *dbServer)
         { "FLUSHDB",    { -1, IS_WRITE, BIND(flushdbCommand) } },
         { "SLAVEOF",    { -3, IS_READ,  BIND(slaveofCommand) } },
         { "PSYNC",      { -3, IS_READ,  BIND(psyncCommand) } },
-        { "REPLCONF",   { -3, IS_INTER, BIND(replconfCommand) } },
+        { "REPLCONF",   {  3, IS_READ,  BIND(replconfCommand) } },
         { "PING",       { -1, IS_READ,  BIND(pingCommand) } },
-        { "PONG",       { -1, IS_INTER, BIND(pongCommand) } },
+        { "PONG",       { -1, IS_READ,  BIND(pongCommand) } },
         { "MULTI",      { -1, IS_READ,  BIND(multiCommand) } },
         { "EXEC",       { -1, IS_READ,  BIND(execCommand) } },
         { "DISCARD",    { -1, IS_READ,  BIND(discardCommand) } },
@@ -97,18 +98,11 @@ DB::DB(DBServer *dbServer)
         { "UNWATCH",    { -1, IS_READ,  BIND(unwatchCommand) } },
         { "PUBLISH",    { -3, IS_READ,  BIND(publishCommand) } },
         { "SUBSCRIBE",  {  2, IS_READ,  BIND(subscribeCommand) } },
+        { "INFO",       { -1, IS_READ,  BIND(infoCommand) } },
     };
 }
 
 namespace Alice {
-
-    thread_local char convert_buf[32];
-
-    const char *convert(int64_t value)
-    {
-        snprintf(convert_buf, sizeof(convert_buf), "%lld", value);
-        return convert_buf;
-    }
 
     static const char *db_return_ok = "+OK\r\n";
     static const char *db_return_syntax_err = "-ERR syntax error\r\n";
@@ -363,10 +357,6 @@ void DB::slaveofCommand(Context& con)
 void DB::psyncCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    auto it = _dbServer->slaveIds().find(con.conn()->id());
-    if (it == _dbServer->slaveIds().end())
-        _dbServer->addSlaveId(con.conn()->id());
-    con.setPerm(IS_INTER);
     if (cmdlist[1].compare("?") == 0 && cmdlist[2].compare("-1") == 0) {
 sync:
         // 执行完整重同步
@@ -388,13 +378,13 @@ sync:
             goto sync;
         size_t offset = atoll(cmdlist[2].c_str());
         ssize_t lastoffset = _dbServer->masterOffset() - offset;
-        if (lastoffset < 0 || lastoffset > DBServer::copy_backlog_buffer_size)
+        if (lastoffset < 0 || lastoffset > g_server_conf.repl_backlog_size)
             goto sync;
         // 执行部分重同步
         con.setFlag(Context::SYNC_COMMAND);
         con.append("+CONTINUE\r\n");
         if (lastoffset > 0) {
-            size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
+            size_t start = g_server_conf.repl_backlog_size - lastoffset;
             con.append(std::string(
                         &_dbServer->copyBacklogBuffer()[start], lastoffset));
         }
@@ -404,16 +394,24 @@ sync:
 void DB::replconfCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    size_t offset = atoll(cmdlist[2].c_str());
-    ssize_t lastoffset = _dbServer->masterOffset() - offset;
-    if (lastoffset > 0) {
-        if (lastoffset > DBServer::copy_backlog_buffer_size) {
-            // TODO: 重新同步
-        } else {
-            // 重传丢失的命令
-            size_t start = DBServer::copy_backlog_buffer_size - lastoffset;
-            con.append(std::string(
-                        &_dbServer->copyBacklogBuffer()[start], lastoffset));
+    if (strcasecmp(cmdlist[1].c_str(), "port") == 0) {
+        auto it = _dbServer->slaveIds().find(con.conn()->id());
+        if (it == _dbServer->slaveIds().end())
+            _dbServer->addSlaveId(con.conn()->id());
+        con.setSlaveAddr(
+                Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[4].c_str()));
+    } else if (strcasecmp(cmdlist[1].c_str(), "ack") == 0) {
+        size_t offset = atoll(cmdlist[2].c_str());
+        ssize_t lastoffset = _dbServer->masterOffset() - offset;
+        if (lastoffset > 0) {
+            if (lastoffset > g_server_conf.repl_backlog_size) {
+                // TODO: 重新同步
+            } else {
+                // 重传丢失的命令
+                size_t start = g_server_conf.repl_backlog_size - lastoffset;
+                con.append(std::string(
+                            &_dbServer->copyBacklogBuffer()[start], lastoffset));
+            }
         }
     }
 }
@@ -430,7 +428,7 @@ void DB::pongCommand(Context& con)
         _dbServer->setLastRecvHeartBeatTime(now);
         return;
     }
-    if (now - _dbServer->lastRecvHeartBeatTime() > 8000) {
+    if (now - _dbServer->lastRecvHeartBeatTime() > g_server_conf.repl_timeout) {
         _dbServer->connectMasterServer();
     } else
         _dbServer->setLastRecvHeartBeatTime(now);
@@ -519,6 +517,44 @@ void DB::subscribeCommand(Context& con)
         con.append("$9\r\nsubscribe\r\n");
         appendReplySingleStr(con, cmdlist[i]);
         appendReplySingleLen(con, i);
+    }
+}
+
+void DB::infoCommand(Context& con)
+{
+    int i = 0;
+    con.append("+run_id:");
+    con.append(_dbServer->selfRunId());
+    con.append("\n");
+    con.append("role:");
+    if (_dbServer->flag() & DBServer::SLAVE) {
+        con.append("slave\r\n");
+        return;
+    } else
+        con.append("master\n");
+    con.append("connected_slaves:");
+    con.append(convert(_dbServer->slaveIds().size()));
+    if (_dbServer->slaveIds().empty()) {
+        con.append("\r\n");
+        return;
+    } else
+        con.append("\n");
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& id : _dbServer->slaveIds()) {
+        auto conn = maps.find(id);
+        if (conn != maps.end()) {
+            auto& context = std::any_cast<Context&>(conn->second->getContext());
+            con.append("slave");
+            con.append(convert(i));
+            con.append(":ip=");
+            con.append(context.slaveAddr()->toIpAddr());
+            con.append(",port=");
+            con.append(convert(context.slaveAddr()->toIpPort()));
+            con.append(",offset=");
+            con.append(convert(_dbServer->slaveOffset()));
+            con.append("\r\n");
+            i++;
+        }
     }
 }
 

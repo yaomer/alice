@@ -11,7 +11,9 @@ set (SERV_SRC_FILES
     ${PROJECT_SRC_DIR}/db.cc
     ${PROJECT_SRC_DIR}/rdb.cc
     ${PROJECT_SRC_DIR}/aof.cc
+    ${PROJECT_SRC_DIR}/sentinel.cc
     ${PROJECT_SRC_DIR}/config.cc
+    ${PROJECT_SRC_DIR}/util.cc
 )
 
 set (CLI_SRC_FILES
@@ -31,4 +33,4 @@ target_link_libraries(alice-server angel)
 add_executable(alice-cli ${CLI_SRC_FILES})
 target_link_libraries(alice-cli angel linenoise)
 
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR})
+set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SRC_DIR})
