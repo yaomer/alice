@@ -64,7 +64,11 @@ void Alice::readServerConf()
     ConfParamList paramlist;
     parseConf(paramlist, "alice.conf");
     for (auto& it : paramlist) {
-        if (strcasecmp(it[0].c_str(), "save") == 0) {
+        if (strcasecmp(it[0].c_str(), "port") == 0) {
+            g_server_conf.port = atoi(it[1].c_str());
+        } else if (strcasecmp(it[0].c_str(), "ip") == 0) {
+            g_server_conf.addr.assign(it[1]);
+        } else if (strcasecmp(it[0].c_str(), "save") == 0) {
             g_server_conf.save_params.push_back(
                     SaveParam(atoi(it[1].c_str()), atoi(it[2].c_str())));
         } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
@@ -99,7 +103,8 @@ void Alice::readSentinelConf()
     parseConf(paramlist, "sentinel.conf");
     for(auto& it : paramlist) {
         if (strcasecmp(it[1].c_str(), "monitor") == 0) {
-            SentinelMaster master;
+            SentinelInstance master;
+            master.setFlag(SentinelInstance::MASTER);
             master.setName(it[2]);
             master.setInetAddr(Angel::InetAddr(atoi(it[4].c_str()), it[3].c_str()));
             master.setQuorum(atoi(it[5].c_str()));

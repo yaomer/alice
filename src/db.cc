@@ -534,11 +534,7 @@ void DB::infoCommand(Context& con)
         con.append("master\n");
     con.append("connected_slaves:");
     con.append(convert(_dbServer->slaveIds().size()));
-    if (_dbServer->slaveIds().empty()) {
-        con.append("\r\n");
-        return;
-    } else
-        con.append("\n");
+    con.append("\n");
     auto& maps = g_server->server().connectionMaps();
     for (auto& id : _dbServer->slaveIds()) {
         auto conn = maps.find(id);
@@ -552,10 +548,11 @@ void DB::infoCommand(Context& con)
             con.append(convert(context.slaveAddr()->toIpPort()));
             con.append(",offset=");
             con.append(convert(_dbServer->slaveOffset()));
-            con.append("\r\n");
+            con.append("\n");
             i++;
         }
     }
+    con.append("xxx:yyy\r\n");
 }
 
 //////////////////////////////////////////////////////////////////

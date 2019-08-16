@@ -5,7 +5,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "sentinel_master.h"
+#include "sentinel_instance.h"
 
 namespace Alice {
 
@@ -34,7 +34,7 @@ struct ServerConf {
     // 服务器监听的端口
     int port = 1296;
     // 服务器的IP
-    const char *addr = "127.0.0.1";
+    std::string addr = "127.0.0.1";
     // 保存rdb持久化触发的条件
     std::vector<SaveParam> save_params;
     // 是否开启aof持久化
@@ -49,12 +49,10 @@ struct ServerConf {
     size_t repl_backlog_size = 1024 * 1024;
 };
 
-using MasterMap = std::unordered_map<std::string, SentinelMaster>;
-
 struct SentinelConf {
     int port = 12960;
     const char *addr = "127.0.0.1";
-    MasterMap masters;
+    SentinelInstance::SentinelInstanceMap masters;
 };
 
 extern struct ServerConf g_server_conf;

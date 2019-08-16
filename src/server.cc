@@ -218,7 +218,7 @@ void DBServer::connectMasterServer()
         _client.reset();
     }
     _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get(), "slave"));
-    _client->notExitFromLoop();
+    _client->notExitLoop();
     _client->setConnectionCb(
             std::bind(&DBServer::sendPingToMaster, this, _1));
     _client->setConnectTimeoutCb([this]{
@@ -591,12 +591,8 @@ size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, 
 
 int main(int argc, char *argv[])
 {
-    if (argc != 2) {
-        fprintf(stderr, "usage: ./alice-server [[port] | [--sentinel]]\n");
-        return 1;
-    }
     Alice::readServerConf();
-    if (strcasecmp(argv[1], "--sentinel") == 0) {
+    if (argv[1] && strcasecmp(argv[1], "--sentinel") == 0) {
         Alice::readSentinelConf();
         Angel::EventLoop loop;
         Angel::InetAddr listenAddr(888);
@@ -607,7 +603,7 @@ int main(int argc, char *argv[])
         return 0;
     }
     Angel::EventLoop loop;
-    Angel::InetAddr listenAddr(atoi(argv[1]));
+    Angel::InetAddr listenAddr(g_server_conf.port, g_server_conf.addr.c_str());
     Alice::Server server(&loop, listenAddr);
     g_server = &server;
     loop.runEvery(100, []{ g_server->serverCron(); });
