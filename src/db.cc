@@ -305,6 +305,7 @@ void DB::saveCommand(Context& con)
 
 void DB::bgSaveCommand(Context& con)
 {
+    // 有rdb或aof持久化在进行中，忽略此次请求
     if (_dbServer->aof()->childPid() != -1) {
         con.append("+Background append only file rewriting ...\r\n");
         return;
@@ -319,10 +320,13 @@ void DB::bgSaveCommand(Context& con)
 
 void DB::bgRewriteAofCommand(Context& con)
 {
+    // 有rdb持久化在进行中，延迟此次bgrewriteaof请求，即在rdb持久化完成后，
+    // 再进行一次aof持久化
     if (_dbServer->rdb()->childPid() != -1) {
         _dbServer->setFlag(DBServer::REWRITEAOF_DELAY);
         return;
     }
+    // 有aof持久化在进行中，忽略此次请求
     if (_dbServer->aof()->childPid() != -1) {
         return;
     }
@@ -367,6 +371,8 @@ sync:
         con.append(convert(_dbServer->masterOffset()));
         con.append("\r\n");
         if (_dbServer->rdb()->childPid() != -1) {
+            // 虽然服务器后台正在生成rdb快照，但没有从服务器在等待，即服务器并没有
+            // 记录此期间执行的写命令，所以之后仍然需要重新生成一次rdb快照
             if (!(_dbServer->flag() & DBServer::PSYNC))
                 _dbServer->setFlag(DBServer::PSYNC_DELAY);
             return;

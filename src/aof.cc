@@ -20,16 +20,19 @@ Aof::Aof(DBServer *dbServer)
     bzero(tmpfile, sizeof(tmpfile));
 }
 
+// 保存服务器执行的所有写命令
 void Aof::append(Context::CommandList& cmdlist)
 {
     DBServer::appendCommand(_buffer, cmdlist, true);
 }
 
+// 保存aof重写过程中执行的所有写命令
 void Aof::appendRewriteBuffer(Context::CommandList& cmdlist)
 {
     DBServer::appendCommand(_rewriteBuffer, cmdlist, true);
 }
 
+// 将缓冲区中的命令flush到文件中
 void Aof::appendAof(int64_t now)
 {
     if (_buffer.empty()) return;
@@ -131,12 +134,14 @@ void Aof::rewrite()
     rename(tmpfile, "appendonly.aof");
 }
 
+// 将aof重写缓冲区中的命令写到文件中
 void Aof::appendRewriteBufferToAof()
 {
     if (_rewriteBuffer.empty()) return;
     int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
     write(fd, _rewriteBuffer.data(), _rewriteBuffer.size());
     _rewriteBuffer.clear();
+    fsync(fd);
     close(fd);
 }
 
@@ -222,6 +227,8 @@ void Aof::rewriteHash(Pair pair)
     }
 }
 
+// aof重写过程中使用，将重写的命令先追加到缓冲区中，
+// 然后在合适的时候flush到文件中
 void Aof::append(const std::string& s)
 {
     _buffer.append(s);

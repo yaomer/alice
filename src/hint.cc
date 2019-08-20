@@ -81,6 +81,7 @@ HintInfo hiTable[HTSIZE] = {
     { "LASTSAVE",    8, 0, "" },
     { "FLUSHDB",     7, 0, "" },
     { "SLAVEOF",     7, 2, " host port" },
+    { "PING",        4, 0, "" },
     { "MULTI",       5, 0, "" },
     { "EXEC",        4, 0, "" },
     { "DISCARD",     7, 0, "" },

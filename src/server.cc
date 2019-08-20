@@ -68,20 +68,34 @@ void Server::executeCommand(Context& con)
         con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
         goto err;
     }
+    // PONG只能由主服务器向从服务器发送，设置了Context::SLAVE标志的
+    // Context才能接受该回复
+    if (!(con.flag() & Context::SLAVE)) {
+        if (cmdlist[0].compare("PONG") == 0) {
+            con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
+            goto err;
+        }
+    }
+    // 校验客户端是否有权限执行该命令
     if (!(con.perm() & it->second.perm())) {
         con.append("-ERR permission denied\r\n");
         goto err;
     }
+    // 校验命令参数是否合法
     arity = it->second.arity();
     if ((arity > 0 && cmdlist.size() < arity) || (arity < 0 && cmdlist.size() != -arity)) {
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
+    // 执行事务时，只有遇见MULTI，EXEC，WATCH，DISCARD命令时才会直接执行，
+    // 其他命令则加入事务队列
     if (con.flag() & Context::EXEC_MULTI) {
         if (cmdlist[0].compare("MULTI")
          && cmdlist[0].compare("EXEC")
          && cmdlist[0].compare("WATCH")
          && cmdlist[0].compare("DISCARD")) {
+            // 检查事务中是否有写命令，如果有写命令，并且该服务器是主服务器，
+            // 则进行必要的命令传播操作
             if (!(con.flag() & Context::EXEC_MULTI_WRITE) && (it->second.perm() & IS_WRITE))
                 con.setFlag(Context::EXEC_MULTI_WRITE);
             con.addMultiArg(cmdlist);
@@ -119,6 +133,7 @@ void DBServer::doWriteCommand(Context::CommandList& cmdlist)
     dirtyIncr();
     appendWriteCommand(cmdlist);
     sendSyncCommandToSlave(cmdlist);
+    // 更新从服务器的复制偏移量
     if (flag() & SLAVE) {
         std::string buffer;
         appendCommand(buffer, cmdlist, false);
@@ -139,6 +154,7 @@ void Server::serverCron()
     int64_t now = Angel::TimeStamp::now();
     _lru_cache = now;
 
+    // 服务器后台正在进行rdb持久化
     if (_dbServer.rdb()->childPid() != -1) {
         pid_t pid = waitpid(_dbServer.rdb()->childPid(), nullptr, WNOHANG);
         if (pid > 0) {
@@ -154,6 +170,7 @@ void Server::serverCron()
             }
         }
     }
+    // 服务器后台正在进行aof持久化
     if (_dbServer.aof()->childPid() != -1) {
         pid_t pid = waitpid(_dbServer.aof()->childPid(), nullptr, WNOHANG);
         if (pid > 0) {
@@ -168,6 +185,7 @@ void Server::serverCron()
         }
     }
 
+    // 是否需要进行rdb持久化
     int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
     for (auto& it : g_server_conf.save_params) {
         if (saveInterval >= it.seconds() && _dbServer.dirty() >= it.changes()) {
@@ -180,6 +198,7 @@ void Server::serverCron()
         }
     }
 
+    // 是否需要进行aof持久化
     if (_dbServer.aof()->rewriteIsOk()) {
         if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
             _dbServer.aof()->rewriteBackground();
@@ -187,6 +206,7 @@ void Server::serverCron()
         }
     }
 
+    // 删除所有的过期键
     for (auto& it : _dbServer.expireMap()) {
         if (it.second <= now) {
             _dbServer.db().delKey(it.first);
@@ -197,6 +217,7 @@ void Server::serverCron()
     _dbServer.aof()->appendAof(now);
 }
 
+// 将目前已连接的所有客户端设置为只读
 void DBServer::setSlaveToReadonly()
 {
     auto& maps = g_server->server().connectionMaps();
@@ -209,6 +230,7 @@ void DBServer::setSlaveToReadonly()
     }
 }
 
+// 从服务器创建向主服务器的连接
 void DBServer::connectMasterServer()
 {
     if (_client) {
@@ -232,11 +254,13 @@ void DBServer::connectMasterServer()
     _client->start();
 }
 
+// 在主从服务器之间的连接断开时，取消向主服务器发送心跳包的定时器
 void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
 {
     g_server->loop()->cancelTimer(_heartBeatTimerId);
 }
 
+// 从服务器向主服务器定时发送PING
 void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
 {
     Context context(this, conn);
@@ -249,6 +273,7 @@ void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
             });
 }
 
+// 从服务器向主服务器发送自己的ip和port
 void DBServer::sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn)
 {
     std::string buffer;
@@ -266,6 +291,7 @@ void DBServer::sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn)
     conn->send(buffer);
 }
 
+// 从服务器向主服务器发送PSYNC命令
 void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
@@ -341,6 +367,7 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
     }
 }
 
+// 从服务器接受来自主服务器的rdb快照
 void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
@@ -381,6 +408,7 @@ jump:
     context.setFlag(Context::SYNC_OK);
 }
 
+// 主服务器将生成的rdb快照发送给从服务器
 void DBServer::sendRdbfileToSlave()
 {
     int fd = open("dump.rdb", O_RDONLY);
@@ -407,6 +435,7 @@ void DBServer::sendRdbfileToSlave()
     close(fd);
 }
 
+// 主服务器将写命令传播给所有从服务器
 void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
 {
     std::string buffer;
@@ -422,6 +451,7 @@ void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
     }
 }
 
+// 从服务器定时向主服务器发送ACK
 void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
 {
     std::string buffer;
@@ -453,6 +483,7 @@ void DBServer::delExpireKey(const Key& key)
         _expireMap.erase(it);
 }
 
+// 主服务器将命令写入到复制积压缓冲区中
 void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
 {
     std::string buffer;
@@ -477,6 +508,7 @@ void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
         appendCopyBacklogBuffer(cmdlist);
 }
 
+// 将解析后的命令转换成redis协议形式的命令
 void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
         bool repl_set)
 {
@@ -595,7 +627,7 @@ int main(int argc, char *argv[])
     if (argv[1] && strcasecmp(argv[1], "--sentinel") == 0) {
         Alice::readSentinelConf();
         Angel::EventLoop loop;
-        Angel::InetAddr listenAddr(888);
+        Angel::InetAddr listenAddr(g_sentinel_conf.port, g_sentinel_conf.addr.c_str());
         Sentinel sentinel(&loop, listenAddr);
         g_sentinel = &sentinel;
         sentinel.start();
