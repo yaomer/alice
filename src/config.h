@@ -51,7 +51,7 @@ struct ServerConf {
 
 struct SentinelConf {
     int port = 12960;
-    const char *addr = "127.0.0.1";
+    std::string addr = "127.0.0.1";
     SentinelInstance::SentinelInstanceMap masters;
 };
 

@@ -34,7 +34,10 @@ public:
     const std::string& name() const { return _name; }
     void setName(const std::string& name) 
     { _name = std::move(name); }
+    void setRunId(const std::string& runId)
+    { memcpy(_runId, runId.data(), 32); _runId[32] = '\0'; }
     const char *runId() const { return _runId; }
+    void setConfigEpoch(uint64_t epoch) { _configEpoch = epoch; }
     uint64_t configEpoch() const { return _configEpoch; }
     Angel::InetAddr *inetAddr() const { return _inetAddr.get(); }
     int64_t downAfterPeriod() const { return _downAfterPeriod; }
@@ -42,9 +45,12 @@ public:
     int quorum() const { return _quorum; }
     void setQuorum(int quorum) { _quorum = quorum; }
     std::unique_ptr<Angel::TcpClient> *clients() { return _clients; }
+    SentinelInstanceMap& slaves() { return _slaves; }
+    SentinelInstanceMap& sentinels() { return _sentinels; }
     size_t offset() const { return _offset; }
     void setOffset(size_t offset) { _offset = offset; }
-    void creatConnection();
+    void creatCmdConnection();
+    void creatPubConnection();
     void closeConnection(const Angel::TcpConnectionPtr& conn);
     void subMaster(const Angel::TcpConnectionPtr& conn);
     void recvSubMessageFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
@@ -66,6 +72,7 @@ private:
     int _quorum;
     std::unique_ptr<Angel::TcpClient> _clients[2];
     SentinelInstanceMap _slaves;
+    SentinelInstanceMap _sentinels;
     size_t _offset;
 };
 }

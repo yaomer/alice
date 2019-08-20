@@ -102,7 +102,11 @@ void Alice::readSentinelConf()
     ConfParamList paramlist;
     parseConf(paramlist, "sentinel.conf");
     for(auto& it : paramlist) {
-        if (strcasecmp(it[1].c_str(), "monitor") == 0) {
+        if (strcasecmp(it[1].c_str(), "ip") == 0) {
+            g_sentinel_conf.addr = it[2];
+        } else if (strcasecmp(it[1].c_str(), "port") == 0) {
+            g_sentinel_conf.port = atoi(it[2].c_str());
+        } else if (strcasecmp(it[1].c_str(), "monitor") == 0) {
             SentinelInstance master;
             master.setFlag(SentinelInstance::MASTER);
             master.setName(it[2]);

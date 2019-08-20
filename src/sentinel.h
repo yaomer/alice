@@ -14,20 +14,18 @@ namespace Alice {
 
 class Sentinel {
 public:
-    explicit Sentinel(Angel::EventLoop *loop, Angel::InetAddr inetAddr)
-        : _loop(loop),
-        _server(loop, inetAddr),
-        _currentEpoch(0),
-        _masters(&g_sentinel_conf.masters)
-    {
-    }
+    explicit Sentinel(Angel::EventLoop *loop, Angel::InetAddr inetAddr);
     void init();
     uint64_t currentEpoch() const { return _currentEpoch; }
     SentinelInstance::SentinelInstanceMap& masters() { return *_masters; }
+    void sendPingToMasters();
     void sendInfoToMasters();
     void sendPubMessageToMasters();
+    void updateSentinels(const char *s, const char *es);
     Angel::EventLoop *loop() { return _loop; }
     Alice::Server& server() { return _server; }
+    void infoCommand(Context& con);
+    void sentinelCommand(Context& con);
     void start() 
     {  
         _server.start();

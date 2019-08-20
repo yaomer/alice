@@ -3,15 +3,32 @@
 
 using namespace Alice;
 
+Sentinel::Sentinel(Angel::EventLoop *loop, Angel::InetAddr inetAddr)
+    : _loop(loop),
+    _server(loop, inetAddr),
+    _currentEpoch(0),
+    _masters(&g_sentinel_conf.masters)
+{
+    auto& db = _server.dbServer().db();
+    db.commandMap() = {
+        { "PING",       { -1, IS_READ, std::bind(&DB::pingCommand, &db, _1) } },
+        { "INFO",       { -3, IS_READ, std::bind(&Sentinel::infoCommand, this, _1) } },
+        { "SENTINEL",   { -3, IS_READ, std::bind(&Sentinel::sentinelCommand, this, _1) } },
+    };
+}
+
 void Sentinel::init()
 {
-    for (auto& it : *_masters)
-        it.second.creatConnection();
+    for (auto& it : *_masters) {
+        it.second.creatCmdConnection();
+        it.second.creatPubConnection();
+    }
+    _loop->runEvery(1000, [this]{ this->sendPingToMasters(); });
     _loop->runEvery(1000 * 2, [this]{ this->sendPubMessageToMasters(); });
     _loop->runEvery(1000 * 10, [this]{ this->sendInfoToMasters(); });
 }
 
-void SentinelInstance::creatConnection()
+void SentinelInstance::creatCmdConnection()
 {
     _clients[0].reset(
             new Angel::TcpClient(g_sentinel->loop(), *inetAddr(), "command"));
@@ -19,21 +36,59 @@ void SentinelInstance::creatConnection()
             std::bind(&SentinelInstance::recvReplyFromMaster, this, _1, _2));
     _clients[0]->setCloseCb(
             std::bind(&SentinelInstance::closeConnection, this, _1));
+    _clients[0]->notExitLoop();
+    _clients[0]->start();
+}
+
+void SentinelInstance::creatPubConnection()
+{
     _clients[1].reset(
             new Angel::TcpClient(g_sentinel->loop(), *inetAddr(), "pubsub"));
     _clients[1]->setConnectionCb(
             std::bind(&SentinelInstance::subMaster, this, _1));
     _clients[1]->setMessageCb(
             std::bind(&SentinelInstance::recvSubMessageFromMaster, this, _1, _2));
-    _clients[0]->notExitLoop();
     _clients[1]->notExitLoop();
-    _clients[0]->start();
     _clients[1]->start();
 }
 
 void SentinelInstance::closeConnection(const Angel::TcpConnectionPtr& conn)
 {
     this->setFlag(CLOSED);
+}
+
+void Sentinel::sendPingToMasters()
+{
+    for (auto& master : masters()) {
+        if (master.second.flag() & SentinelInstance::CLOSED) {
+            masters().erase(master.second.name());
+            continue;
+        }
+        auto& client = master.second.clients()[0];
+        if (client->isConnected()) {
+            client->conn()->send("*1\r\n$4\r\nPING\r\n");
+        }
+        for (auto& slave : master.second.slaves()) {
+            if (slave.second.flag() & SentinelInstance::CLOSED) {
+                master.second.slaves().erase(slave.first);
+                continue;
+            }
+            auto& client = slave.second.clients()[0];
+            if (client->isConnected()) {
+                client->conn()->send("*1\r\n$4\r\nPING\r\n");
+            }
+        }
+        for (auto& sentinel : master.second.sentinels()) {
+            if (sentinel.second.flag() & SentinelInstance::CLOSED) {
+                master.second.sentinels().erase(sentinel.first);
+                continue;
+            }
+            auto& client = sentinel.second.clients()[0];
+            if (client->isConnected()) {
+                client->conn()->send("*1\r\n$4\r\nPING\r\n");
+            }
+        }
+    }
 }
 
 void Sentinel::sendPubMessageToMasters()
@@ -46,6 +101,16 @@ void Sentinel::sendPubMessageToMasters()
         auto& client = master.second.clients()[0];
         if (client->isConnected()) {
             master.second.pubMessage(client->conn());
+        }
+        for (auto& slave : master.second.slaves()) {
+            if (slave.second.flag() & SentinelInstance::CLOSED) {
+                master.second.slaves().erase(slave.first);
+                continue;
+            }
+            auto& client = slave.second.clients()[0];
+            if (client->isConnected()) {
+                client->conn()->send("*1\r\n$4\r\nPING\r\n");
+            }
         }
     }
 }
@@ -60,6 +125,16 @@ void Sentinel::sendInfoToMasters()
         auto& client = master.second.clients()[0];
         if (client->isConnected()) {
             client->conn()->send("*1\r\n$4\r\nINFO\r\n");
+        }
+        for (auto& slave : master.second.slaves()) {
+            if (slave.second.flag() & SentinelInstance::CLOSED) {
+                master.second.slaves().erase(slave.first);
+                continue;
+            }
+            auto& client = slave.second.clients()[0];
+            if (client->isConnected()) {
+                client->conn()->send("*1\r\n$4\r\nPING\r\n");
+            }
         }
     }
 }
@@ -81,7 +156,7 @@ void SentinelInstance::pubMessage(const Angel::TcpConnectionPtr& conn)
     buffer += ",";
     buffer += inetAddr()->toIpAddr();
     buffer += ",";
-    buffer += inetAddr()->toIpPort();
+    buffer += convert(inetAddr()->toIpPort());
     buffer += ",";
     buffer += convert(configEpoch());
     message += convert(buffer.size());
@@ -97,10 +172,8 @@ void SentinelInstance::recvReplyFromMaster(const Angel::TcpConnectionPtr& conn,
 {
     while (buf.readable() >= 2) {
         int crlf = buf.findCrlf();
-        const char *s = buf.peek();
-        const char *es = s + crlf + 2;
         if (crlf >= 0) {
-            parseInfoReply(s, es);
+            parseInfoReply(buf.peek(), buf.peek() + crlf + 2);
             buf.retrieve(crlf + 2);
         } else
             break;
@@ -142,6 +215,8 @@ void SentinelInstance::parseInfoReply(const char *s, const char *es)
                         slave.setName(slaveName);
                         slave.setInetAddr(Angel::InetAddr(port, ip.c_str()));
                         slave.setOffset(offset);
+                        slave.creatCmdConnection();
+                        slave.creatPubConnection();
                         _slaves[slaveName] = std::move(slave);
                     } else {
                         it->second.setOffset(offset);
@@ -175,8 +250,60 @@ void SentinelInstance::recvSubMessageFromMaster(const Angel::TcpConnectionPtr& c
             Server::parseRequest(context, buf);
             if (context.state() == Context::PARSING)
                 break;
-            for (auto& it : context.commandList())
-                std::cout << it << "\n";
+            auto& message = context.commandList()[2];
+            g_sentinel->updateSentinels(message.data(), message.data() + message.size());
+            buf.retrieve(crlf + 2);
         }
     }
+}
+
+void Sentinel::updateSentinels(const char *s, const char *es)
+{
+    std::string s_name, s_ip, s_port, s_runid, s_epoch;
+    std::string m_name, m_ip, m_port, m_epoch;
+    int i = 0;
+    while (1) {
+        const char *p = std::find(s, es, ',');
+        if (p == es) break;
+        switch (i++) {
+        case 0: s_ip.assign(s, p - s); break;
+        case 1: s_port.assign(s, p - s); break;
+        case 2: s_runid.assign(s, p - s); break;
+        case 3: s_epoch.assign(s, p - s); break;
+        case 4: m_name.assign(s, p - s); break;
+        case 5: m_ip.assign(s, p - s); break;
+        case 6: m_port.assign(s, p - s); break;
+        case 7: m_epoch.assign(s, p - s); break;
+        }
+        s = p + 1;
+    }
+    if (s_runid.compare(_server.dbServer().selfRunId()) == 0)
+        return;
+    s_name = s_ip + ":" + s_port;
+    auto master = masters().find(m_name);
+    if (master == masters().end()) return;
+    auto it = master->second.sentinels().find(s_name);
+    if (it == master->second.sentinels().end()) {
+        std::cout << "have a new sentinel " << s_name << "\n";
+        SentinelInstance sentinel;
+        sentinel.setFlag(SentinelInstance::SENTINEL);
+        sentinel.setName(s_name);
+        sentinel.setInetAddr(Angel::InetAddr(atoi(s_port.c_str()), s_ip.c_str()));
+        sentinel.setRunId(s_runid);
+        sentinel.setConfigEpoch(atoll(s_epoch.c_str()));
+        sentinel.creatCmdConnection();
+        master->second.sentinels()[s_name] = std::move(sentinel);
+    } else {
+        it->second.setConfigEpoch(atoll(s_epoch.c_str()));
+    }
+}
+
+void Sentinel::infoCommand(Context& con)
+{
+
+}
+
+void Sentinel::sentinelCommand(Context& con)
+{
+
 }
