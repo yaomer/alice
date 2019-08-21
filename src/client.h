@@ -16,7 +16,7 @@ class Client {
 public:
     enum State {
         NOENOUGH = 1,
-        PARSEERR,
+        PROTOCOLERR,
     };
     enum Flag {
         PUBSUB = 0x01,
@@ -35,7 +35,12 @@ public:
     {
         while (buf.readable() > 0) {
             parseResponse(buf);
-            if (_state == NOENOUGH || _state == PARSEERR) {
+            if (_state == NOENOUGH) {
+                _state = 0;
+                break;
+            }
+            if (_state == PROTOCOLERR) {
+                std::cout << "PROTOCOLERR\n";
                 _state = 0;
                 break;
             }

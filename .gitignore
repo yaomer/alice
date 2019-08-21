@@ -4,3 +4,6 @@ serv
 cli
 dump.rdb
 appendonly.aof
+alice-server
+alice-cli
+libalice.a

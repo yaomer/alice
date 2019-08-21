@@ -60,8 +60,7 @@ void AliceContext::recvResponse()
     Angel::Buffer buf;
 wait:
     buf.readFd(_fd);
-    const char *s = buf.peek();
-    const char *es = buf.peek() + buf.readable();
+    char *s = buf.peek();
     switch (s[0]) {
     case '+':
     case '-': {
@@ -78,93 +77,56 @@ wait:
     }
     case '$': {
         const char *ps = s;
-        const char *next = std::find(s, es, '\r');
-        if (next == es) goto wait;
-        s += 1;
-        size_t len = atoi(s);
-        if (len == 0) {
-            _err = PROTOCOL_ERR;
-            return;
-        }
-        s = next + 2;
-        next = std::find(s, es, '\r');
-        if (next == es) goto wait;
-        if (next - s != len) {
-            _err = PROTOCOL_ERR;
-            return;
-        }
+        int i = buf.findStr(s, "\r\n");
+        if (i < 0) goto wait;
+        size_t len = atoi(s + 1);
+        if (len == 0) goto protocolerr;
+        s += i + 2;
+        i = buf.findStr(s, "\r\n");
+        if (i < 0) goto wait;
+        if (i != len) goto protocolerr;
         _reply.push_back(std::string(s, len));
-        buf.retrieve(next + 2 - ps);
+        buf.retrieve(s + i + 2 - ps);
         break;
     }
     case '*': {
-        const char *ps = s;
-        const char *next = std::find(s, es, '\r');
-        if (next == es) goto wait;
-        if (next[1] != '\n') {
-            _err = PROTOCOL_ERR;
-            return;
-        }
-        s += 1;
-        size_t len = atoi(s);
-        if (len == 0) {
-            _reply.push_back(std::string("(nil)"));
-            buf.retrieve(next + 2 - ps);
-            return;
-        }
-        s = next + 2;
-        int i = 1;
+        char *ps = s;
+        int i = buf.findStr(s, "\r\n");
+        if (i < 0) goto wait;
+        size_t len = atoi(s + 1);
+        if (len == 0) goto protocolerr;
+        s += i + 2;
+        int j = 1;
         while (len > 0) {
-            if (s[0] != '$' && s[0] != '+') {
-                _err = PROTOCOL_ERR;
-                return;
-            };
-            next = std::find(s, es, '\r');
-            if (next == es) {
-                buf.readFd(_fd);
-            }
-            if (s[0] == '+') {
-                s += 1;
-                _reply.push_back(std::string(s, next - s));
-                s = next + 2;
-                len--;
-                i++;
-                continue;
-            }
-            s += 1;
-            size_t l = atoi(s);
-            if (l == 0) {
-                _err = PROTOCOL_ERR;
-                return;
-            };
-            s = next + 2;
-            next = std::find(s, es, '\r');
-            if (next == es) {
-                buf.readFd(_fd);
-            }
-            if (next - s != l) {
-                _err = PROTOCOL_ERR;
-                return;
-            }
+            i = buf.findStr(s, "\r\n");
+            if (i < 0) buf.readFd(_fd);
+            if (s[0] != '$') goto protocolerr;
+            size_t l = atoi(s + 1);
+            if (l == 0) goto protocolerr;
+            s += i + 2;
+            i = buf.findStr(s, "\r\n");
+            if (i < 0) buf.readFd(_fd);
+            if (i != l) goto protocolerr;
             _reply.push_back(std::string(s, l));
-            s = next + 2;
+            s += i + 2;
             len--;
-            i++;
+            j++;
         }
         if (len == 0) {
-            buf.retrieve(next + 2 - ps);
+            buf.retrieve(s - ps);
         }
         break;
     }
     case ':': {
-        const char *next = std::find(s, es, '\r');
-        s += 1;
-        if (next == es) goto wait;
-        _reply.push_back(std::string(s, next - s));
-        buf.retrieve(next + 2 - (s - 1));
+        int i = buf.findStr(s, "\r\n");
+        if (i < 0) goto wait;
+        _reply.push_back(std::string(s + 1, i - 1));
+        buf.retrieve(i + 2);
         break;
     }
     }
+protocolerr:
+    _err = PROTOCOL_ERR;
 }
 
 void AliceContext::connect(const char *ip, int port)

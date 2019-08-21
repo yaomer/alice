@@ -31,8 +31,7 @@ void Client::send()
 
 void Client::parseResponse(Angel::Buffer& buf)
 {
-    const char *s = buf.peek();
-    const char *es = buf.peek() + buf.readable();
+    char *s = buf.peek();
     std::string answer;
     switch (s[0]) {
     case '+':
@@ -47,84 +46,67 @@ void Client::parseResponse(Angel::Buffer& buf)
     }
     case '$': {
         const char *ps = s;
-        const char *next = std::find(s, es, '\r');
-        if (next == es) goto noenough;
-        s += 1;
-        size_t len = atoi(s);
-        if (len == 0) goto noenough;
-        s = next + 2;
-        next = std::find(s, es, '\r');
-        if (next == es) goto noenough;
-        if (next - s != len) goto noenough;
+        int i = buf.findStr(s, "\r\n");
+        if (i < 0) goto noenough;
+        size_t len = atoi(s + 1);
+        if (len == 0) goto protocolerr;
+        s += i + 2;
+        i = buf.findStr(s, "\r\n");
+        if (i < 0) goto noenough;
+        if (i != len) goto protocolerr;
         answer.assign(s, len);
-        buf.retrieve(next + 2 - ps);
+        buf.retrieve(s + i + 2 - ps);
         std::cout << "\"" << answer << "\"\n";
         break;
     }
     case '*': {
         const char *ps = s;
-        const char *next = std::find(s, es, '\r');
-        if (next == es) goto noenough;
-        if (next[1] != '\n') goto noenough;
-        s += 1;
-        size_t len = atoi(s);
-        if (len == 0) {
-            answer.assign("(nil)");
-            std::cout << answer << "\n";
-            buf.retrieve(next + 2 - ps);
-            goto noenough;
-        }
-        s = next + 2;
-        int i = 1;
+        int i = buf.findStr(s, "\r\n");
+        if (i < 0) goto noenough;
+        size_t len = atoi(s + 1);
+        if (len == 0) goto protocolerr;
+        s += i + 2;
+        int j = 1;
         while (len > 0) {
-            if (s[0] != '$' && s[0] != '+') break;
-            next = std::find(s, es, '\r');
-            if (next == es) goto noenough;
-            if (s[0] == '+') {
-                s += 1;
-                answer.append(convert(i));
-                answer.append(") ");
-                answer.append(std::string(s, next - s));
-                answer.append("\n");
-                s = next + 2;
-                len--;
-                i++;
-                continue;
-            }
-            s += 1;
-            size_t l = atoi(s);
-            if (l == 0) goto noenough;
-            s = next + 2;
-            next = std::find(s, es, '\r');
-            if (next == es) goto noenough;
-            if (next - s != l) goto noenough;
-            answer.append(convert(i));
+            i = buf.findStr(s, "\r\n");
+            if (i < 0) goto noenough;
+            if (s[0] != '$') goto protocolerr;
+            size_t l = atoi(s + 1);
+            if (l == 0) goto protocolerr;
+            s += i + 2;
+            i = buf.findStr(s, "\r\n");
+            if (i < 0) goto noenough;
+            if (i != l) goto protocolerr;
+            answer.append(convert(j));
             answer.append(") \"");
             answer.append(std::string(s, l));
             answer.append("\"\n");
-            s = next + 2;
+            s += i + 2;
             len--;
-            i++;
+            j++;
         }
         if (len == 0) {
             std::cout << answer;
-            buf.retrieve(next + 2 - ps);
+            buf.retrieve(s - ps);
         }
         break;
     }
     case ':': {
-        const char *next = std::find(s, es, '\r');
-        s += 1;
-        if (next == es) goto noenough;
-        answer.assign(s, next - s);
+        int i = buf.findStr(s, "\r\n");
+        if (i < 0) goto noenough;
+        answer.assign(s + 1, i - 1);
         std::cout << "(integer)" << answer << "\n";
-        buf.retrieve(next + 2 - (s - 1));
+        buf.retrieve(i + 2);
         break;
     }
     }
     return;
 noenough:
     _state = NOENOUGH;
+    return;
+protocolerr:
+    _state = PROTOCOLERR;
+    return;
 }
 
 void completion(const char *buf, linenoiseCompletions *lc);

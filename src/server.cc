@@ -337,11 +337,11 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
                 char *s = buf.peek();
                 const char *ps = s;
                 s += 13;
-                int crlf = buf.findStr(s, "\r\n", 2);
+                int crlf = buf.findStr(s, "\r\n");
                 if (crlf < 0) return;
                 setMasterRunId(s);
                 s += crlf + 2;
-                crlf = buf.findStr(s, "\r\n", 2);
+                crlf = buf.findStr(s, "\r\n");
                 if (crlf < 0) return;
                 _slaveOffset = atoll(s);
                 s += crlf + 2;
@@ -372,7 +372,7 @@ void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel:
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
     if (_syncRdbFilesize == 0) {
-        int crlf = buf.findStr("\r\n\r\n", 4);
+        int crlf = buf.findStr("\r\n\r\n");
         if (crlf <= 0) goto jump;
         _syncRdbFilesize = atoll(buf.peek());
         buf.retrieve(crlf + 4);
