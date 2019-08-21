@@ -74,7 +74,7 @@ void Alice::readServerConf()
         } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
             if (strcasecmp(it[1].c_str(), "yes") == 0)
                 g_server_conf.enable_appendonly = true;
-            else if (strcasecmp(it[0].c_str(), "no"))
+            else if (strcasecmp(it[1].c_str(), "no"))
                 error("appendonly");
         } else if (strcasecmp(it[0].c_str(), "appendfsync") == 0) {
             if (strcasecmp(it[1].c_str(), "always") == 0)

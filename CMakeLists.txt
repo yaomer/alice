@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 2.8)
 
-project (Angel)
+project (Alice)
 
 set (CMAKE_CXX_FLAGS "-std=c++17 -Wall -O2")
 
@@ -19,6 +19,12 @@ set (SERV_SRC_FILES
 set (CLI_SRC_FILES
     ${PROJECT_SRC_DIR}/client.cc
     ${PROJECT_SRC_DIR}/hint.cc
+    ${PROJECT_SRC_DIR}/util.cc
+)
+
+set (ALICE_FILES
+    ${PROJECT_SRC_DIR}/alice.cc
+    ${PROJECT_SRC_DIR}/util.cc
 )
 
 add_library(angel STATIC IMPORTED)
@@ -33,4 +39,8 @@ target_link_libraries(alice-server angel)
 add_executable(alice-cli ${CLI_SRC_FILES})
 target_link_libraries(alice-cli angel linenoise)
 
+add_library(alice STATIC ${ALICE_FILES})
+target_link_libraries(alice angel)
+
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SRC_DIR})
+set(LIBRARY_OUTPUT_PATH ${PROJECT_SRC_DIR})

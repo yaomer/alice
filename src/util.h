@@ -5,6 +5,7 @@ namespace Alice {
 
 void setSelfRunId(char *buf);
 const char *convert(int64_t value);
+int parseLine(std::vector<std::string>& argv, const char *line, const char *linep);
 
 }
 

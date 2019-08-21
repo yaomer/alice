@@ -21,6 +21,7 @@ public:
     enum Flag {
         PUBSUB = 0x01,
     };
+    using Arglist = std::vector<std::string>;
     Client(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
         : _loop(loop),
         _client(loop, inetAddr, "Alice"),
@@ -40,15 +41,15 @@ public:
             }
         }
     }
-    int parseLine(const char *line, const char *linep);
     void parseResponse(Angel::Buffer& buf);
     void send();
     void start() { _client.start(); }
     int flag() const { return _flag; }
+    Arglist& argv() { return _argv; }
 private:
     Angel::EventLoop *_loop;
     Angel::TcpClient _client;
-    std::vector<std::string> _argv;
+    Arglist _argv;
     std::string _message;
     int _state;
     int _flag;

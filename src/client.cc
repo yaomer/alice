@@ -4,50 +4,9 @@
 #include <unistd.h>
 #include <map>
 #include "client.h"
+#include "util.h"
 
 using namespace Alice;
-
-int Client::parseLine(const char *line, const char *linep)
-{
-    const char *start;
-    do {
-        line = std::find_if(line, linep, [](char c){ return !isspace(c); });
-        if (line == linep) break;
-        if (*line == '\"') {
-            start = ++line;
-search:
-            line = std::find(line, linep, '\"');
-            if (line == linep) goto err;
-            if (line[-1] == '\\') {
-                line++;
-                goto search;
-            }
-            if (!isspace(line[1])) goto err;
-            _argv.push_back(std::string(start, line - start));
-            line++;
-        } else {
-            start = line;
-            line = std::find_if(line, linep, [](char c){ return isspace(c); });
-            if (line == linep) goto err;
-            _argv.push_back(std::string(start, line - start));
-        }
-    } while (1);
-    return 0;
-err:
-    _argv.clear();
-    return -1;
-}
-
-namespace Alice {
-
-    thread_local char convert_buf[32];
-
-    const char *convert(int64_t value)
-    {
-        snprintf(convert_buf, sizeof(convert_buf), "%lld", value);
-        return convert_buf;
-    }
-}
 
 void Client::send()
 {
@@ -189,7 +148,7 @@ int main(int argc, char *argv[])
     while ((line = linenoise("Alice>> "))) {
         size_t len = strlen(line);
         line[len] = '\n';
-        int ret = client.parseLine(line, line + len + 1);
+        int ret = parseLine(client.argv(), line, line + len + 1);
         if (ret < 0) {
             std::cout << "input error\n";
         }
