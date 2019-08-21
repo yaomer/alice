@@ -52,7 +52,6 @@ void AliceContext::executor(const char *fmt, ...)
     sendRequest();
     recvResponse();
     va_end(ap);
-    return 0;
 }
 
 void AliceContext::recvResponse()
@@ -121,7 +120,9 @@ wait:
                 return;
             };
             next = std::find(s, es, '\r');
-            if (next == es) goto wait;
+            if (next == es) {
+                buf.readFd(_fd);
+            }
             if (s[0] == '+') {
                 s += 1;
                 _reply.push_back(std::string(s, next - s));
@@ -138,7 +139,9 @@ wait:
             };
             s = next + 2;
             next = std::find(s, es, '\r');
-            if (next == es) goto wait;
+            if (next == es) {
+                buf.readFd(_fd);
+            }
             if (next - s != l) {
                 _err = PROTOCOL_ERR;
                 return;
