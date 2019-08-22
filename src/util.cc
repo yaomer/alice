@@ -25,6 +25,7 @@ const char *convert(int64_t value)
     return convert_buf;
 }
 
+// 分割一个以\n结尾的字符串，将结果保存在argv中
 int parseLine(std::vector<std::string>& argv, const char *line, const char *linep)
 {
     const char *start;

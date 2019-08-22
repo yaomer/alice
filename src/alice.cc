@@ -17,11 +17,9 @@ using namespace Alice;
 
 void AliceContext::sendRequest()
 {
-    size_t n = _argv.size();
-    if (n == 0) return;
     std::string message;
     message += "*";
-    message += convert(n);
+    message += convert(_argv.size());
     message += "\r\n";
     for (auto& it : _argv) {
         message += "$";
@@ -42,16 +40,21 @@ void AliceContext::sendRequest()
 
 void AliceContext::executor(const char *fmt, ...)
 {
-    va_list ap;
+    va_list ap, ap1;
     va_start(ap, fmt);
-    char buf[1024];
-    vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
-    size_t len = strlen(buf);
+    va_copy(ap1, ap);
+    // 获取可变参数表的长度
+    int len = vsnprintf(nullptr, 0, fmt, ap1);
+    va_end(ap1);
+    // 获取格式化后的参数
+    std::string buf(len + 1, 0);
+    vsnprintf(&buf[0], buf.size(), fmt, ap);
+    va_end(ap);
     buf[len] = '\n';
-    parseLine(_argv, buf, buf + len + 1);
+    parseLine(_argv, &buf[0], &buf[0] + len + 1);
+    if (_argv.empty()) return;
     sendRequest();
     recvResponse();
-    va_end(ap);
 }
 
 void AliceContext::recvResponse()
