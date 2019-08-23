@@ -80,6 +80,7 @@ HintInfo hiTable[HTSIZE] = {
     { "BGREWRITEAOF",12,0, "" },
     { "LASTSAVE",    8, 0, "" },
     { "FLUSHDB",     7, 0, "" },
+    { "FLUSHALL",    8, 0, "" },
     { "SLAVEOF",     7, 2, " host port" },
     { "PING",        4, 0, "" },
     { "MULTI",       5, 0, "" },
@@ -90,6 +91,8 @@ HintInfo hiTable[HTSIZE] = {
     { "PUBLISH",     7, 2, " channel message" },
     { "SUBSCRIBE",   9, 2, " channel [channel ...]" },
     { "INFO",        4, 0, "" },
+    { "SELECT",      6, 1, " index" },
+    { "DBSIZE",      6, 0, "" },
     { "", 0, 0, "" },
 };
 

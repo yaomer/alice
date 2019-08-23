@@ -31,6 +31,7 @@ private:
     void append(const std::string& s);
     void flush();
     void rewrite();
+    void rewriteSelectDb(int dbnum);
     void rewriteExpire(const DB::Key& key, int64_t milliseconds);
     void rewriteString(Pair pair);
     void rewriteList(Pair pair);

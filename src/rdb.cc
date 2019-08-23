@@ -16,6 +16,7 @@ using namespace Alice;
 namespace Alice {
 
     static unsigned char magic[5] = { 0x41, 0x4c, 0x49, 0x43, 0x45 };
+    static unsigned char select_db = 0xfe;
     static unsigned char eof = 0xff;
     static unsigned char string_type = 0;
     static unsigned char list_type = 1;
@@ -41,28 +42,37 @@ void Rdb::save()
     _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
     append(magic, 5);
     int64_t now = Angel::TimeStamp::now();
-    auto& map = _dbServer->db().hashMap();
-    for (auto& it : map) {
-        auto expire = _dbServer->expireMap().find(it.first);
-        if (expire != _dbServer->expireMap().end()) {
-            if (expire->second <= now) {
-                _dbServer->delExpireKey(it.first);
-                _dbServer->db().delKey(it.first);
-                continue;
-            } else {
-                saveLen(expire_key);
-                int64_t timeval = expire->second;
-                append(&timeval, 8);
-            }
+    int index = 0;
+    for (auto& db : _dbServer->dbs()) {
+        if (db->hashMap().empty()) {
+            index++;
+            continue;
         }
-        if (isXXType(it, DB::String)) {
-            saveString(it);
-        } else if (isXXType(it, DB::List)) {
-            saveList(it);
-        } else if (isXXType(it, DB::Set)) {
-            saveSet(it);
-        } else
-            saveHash(it);
+        saveLen(select_db);
+        saveLen(index);
+        for (auto& it : db->hashMap()) {
+            auto expire = db->expireMap().find(it.first);
+            if (expire != db->expireMap().end()) {
+                if (expire->second <= now) {
+                    db->delExpireKey(it.first);
+                    db->delKey(it.first);
+                    continue;
+                } else {
+                    saveLen(expire_key);
+                    int64_t timeval = expire->second;
+                    append(&timeval, 8);
+                }
+            }
+            if (isXXType(it, DB::String)) {
+                saveString(it);
+            } else if (isXXType(it, DB::List)) {
+                saveList(it);
+            } else if (isXXType(it, DB::Set)) {
+                saveSet(it);
+            } else
+                saveHash(it);
+        }
+        index++;
     }
     saveLen(eof);
     if (_buffer.size() > 0) flush();
@@ -202,9 +212,15 @@ void Rdb::load()
     uint64_t typelen;
     int64_t timeval = 0;
     while (true) {
-        loadLen(buf, &typelen);
+        size_t len = loadLen(buf, &typelen);
         if (typelen == eof)
             break;
+        if (typelen == select_db) {
+            buf += len;
+            buf += loadLen(buf, &typelen);
+            _curDb = _dbServer->selectDb(typelen);
+            continue;
+        }
         if (buf[0] == expire_key) {
             timeval = *reinterpret_cast<int64_t*>(buf+1);
             buf += 9;
@@ -222,7 +238,7 @@ void Rdb::load()
     close(fd);
 }
 
-char *Rdb::loadString(char *ptr, int64_t *timevalptr)
+char *Rdb::loadString(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -233,17 +249,16 @@ char *Rdb::loadString(char *ptr, int64_t *timevalptr)
     char val[vallen];
     memcpy(val, ptr, vallen);
     ptr += vallen;
-    auto& map = _dbServer->db().hashMap();
     std::string strKey(key, keylen);
-    map[strKey] = std::string(val, vallen);
-    if (*timevalptr > 0) {
-        _dbServer->expireMap()[strKey] = *timevalptr;
-        *timevalptr = 0;
+    _curDb->hashMap()[strKey] = std::string(val, vallen);
+    if (*tvptr > 0) {
+        _curDb->expireMap()[strKey] = *tvptr;
+        *tvptr = 0;
     }
     return ptr;
 }
 
-char *Rdb::loadList(char *ptr, int64_t *timevalptr)
+char *Rdb::loadList(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -260,17 +275,16 @@ char *Rdb::loadList(char *ptr, int64_t *timevalptr)
         ptr += vallen;
         list.push_back(std::string(val, vallen));
     }
-    auto& map = _dbServer->db().hashMap();
     std::string listKey(key, keylen);
-    map[listKey] = std::move(list);
-    if (*timevalptr > 0) {
-        _dbServer->expireMap()[listKey] = *timevalptr;
-        *timevalptr = 0;
+    _curDb->hashMap()[listKey] = std::move(list);
+    if (*tvptr > 0) {
+        _curDb->expireMap()[listKey] = *tvptr;
+        *tvptr = 0;
     }
     return ptr;
 }
 
-char *Rdb::loadSet(char *ptr, int64_t *timevalptr)
+char *Rdb::loadSet(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -287,17 +301,16 @@ char *Rdb::loadSet(char *ptr, int64_t *timevalptr)
         ptr += vallen;
         set.insert(std::string(val, vallen));
     }
-    auto& map = _dbServer->db().hashMap();
     std::string setKey(key, keylen);
-    map[setKey] = std::move(set);
-    if (*timevalptr > 0) {
-        _dbServer->expireMap()[setKey] = *timevalptr;
-        *timevalptr = 0;
+    _curDb->hashMap()[setKey] = std::move(set);
+    if (*tvptr > 0) {
+        _curDb->expireMap()[setKey] = *tvptr;
+        *tvptr = 0;
     }
     return ptr;
 }
 
-char *Rdb::loadHash(char *ptr, int64_t *timevalptr)
+char *Rdb::loadHash(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
@@ -319,12 +332,11 @@ char *Rdb::loadHash(char *ptr, int64_t *timevalptr)
         ptr += vallen;
         hash[std::string(field, fieldlen)] = std::string(val, vallen);
     }
-    auto& map = _dbServer->db().hashMap();
     std::string hashKey(key, keylen);
-    map[hashKey] = std::move(hash);
-    if (*timevalptr > 0) {
-        _dbServer->expireMap()[hashKey] = *timevalptr;
-        *timevalptr = 0;
+    _curDb->hashMap()[hashKey] = std::move(hash);
+    if (*tvptr > 0) {
+        _curDb->expireMap()[hashKey] = *tvptr;
+        *tvptr = 0;
     }
     return ptr;
 }

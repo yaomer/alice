@@ -159,17 +159,25 @@ public:
     using List = std::list<std::string>;
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
+    using ExpireMap = std::unordered_map<Key, int64_t>;
+    using WatchMap = std::unordered_map<Key, std::vector<size_t>>; 
     explicit DB(DBServer *);
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
-    void delKey(const Key& key)
-    {
-        auto it = _hashMap.find(key);
-        if (it != _hashMap.end())
-            _hashMap.erase(key);
-    }
+    void delKey(const Key& key) { _hashMap.erase(key); }
     CommandMap& commandMap() { return _commandMap; }
 
+    ExpireMap& expireMap() { return _expireMap; }
+    void addExpireKey(const Key& key, int64_t expire)
+    { _expireMap[key] = expire + Angel::TimeStamp::now(); }
+    void delExpireKey(const Key& key) { _expireMap.erase(key); }
+    bool isExpiredKey(const Key& key);
+
+    void watchKeyForClient(const Key& key, size_t id);
+    void unwatchKeys() { _watchMap.clear(); }
+    void touchWatchKey(const Key& key);
+
+    void selectCommand(Context& con);
     void existsCommand(Context& con);
     void typeCommand(Context& con);
     void ttlCommand(Context& con);
@@ -183,6 +191,7 @@ public:
     void bgRewriteAofCommand(Context& con);
     void lastSaveCommand(Context& con);
     void flushdbCommand(Context& con);
+    void flushAllCommand(Context& con);
     void slaveofCommand(Context& con);
     void psyncCommand(Context& con);
     void replconfCommand(Context& con);
@@ -196,6 +205,7 @@ public:
     void publishCommand(Context& con);
     void subscribeCommand(Context& con);
     void infoCommand(Context& con);
+    void dbsizeCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
@@ -270,6 +280,8 @@ private:
     HashMap _hashMap;
     CommandMap _commandMap;
     DBServer *_dbServer;
+    ExpireMap _expireMap;
+    WatchMap _watchMap;
 };
 
 };

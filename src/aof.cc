@@ -57,7 +57,11 @@ void Aof::load()
     Context pseudoClient(_dbServer, nullptr);
     Angel::Buffer buf;
     FILE *fp = fopen("appendonly.aof", "r");
-    if (fp == nullptr) return;
+    if (!fp || getFilesize(fileno(fp)) == 0) {
+        rewriteSelectDb(0);
+        if (fp) fclose(fp);
+        return;
+    }
     char *line = nullptr;
     size_t len = 0;
     ssize_t n;
@@ -71,16 +75,19 @@ void Aof::load()
             continue;
         if (pseudoClient.state() == Context::SUCCEED) {
             auto& cmdlist = pseudoClient.commandList();
-            auto it = _dbServer->db().commandMap().find(cmdlist[0]);
-            if (strncasecmp(cmdlist[0].c_str(), "PEXPIRE", 7) == 0) {
-                _dbServer->expireMap()[cmdlist[1]] = atoll(cmdlist[2].c_str());
-            } else
+            auto it = _dbServer->db()->commandMap().find(cmdlist[0]);
+            if (strcasecmp(cmdlist[0].c_str(), "PEXPIRE") == 0)
+                _dbServer->db()->expireMap()[cmdlist[1]] = atoll(cmdlist[2].c_str());
+            else if (strcasecmp(cmdlist[0].c_str(), "SET") == 0)
+                _dbServer->db()->hashMap()[cmdlist[1]] = cmdlist[2];
+            else
                 it->second._commandCb(pseudoClient);
             cmdlist.clear();
             pseudoClient.setState(Context::PARSING);
         }
         pseudoClient.message().clear();
     }
+    _dbServer->switchDb(0);
     fclose(fp);
 }
 
@@ -106,27 +113,35 @@ void Aof::rewrite()
     _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
     _lastRewriteFilesize = getFilesize(_fd);
     _buffer.clear();
-    auto& db = _dbServer->db().hashMap();
     int64_t now = Angel::TimeStamp::now();
-    for (auto& it : db) {
-        auto expire = _dbServer->expireMap().find(it.first);
-        if (expire != _dbServer->expireMap().end()) {
-            if (expire->second <= now) {
-                _dbServer->delExpireKey(it.first);
-                _dbServer->db().delKey(it.first);
-                continue;
-            } else {
-                rewriteExpire(it.first, expire->second);
-            }
+    int index = 0;
+    for (auto& db : _dbServer->dbs()) {
+        if (db->hashMap().empty()) {
+            index++;
+            continue;
         }
-        if (isXXType(it, DB::String))
-            rewriteString(it);
-        else if (isXXType(it, DB::List))
-            rewriteList(it);
-        else if (isXXType(it, DB::Set))
-            rewriteSet(it);
-        else
-            rewriteHash(it);
+        rewriteSelectDb(index);
+        for (auto& it : db->hashMap()) {
+            auto expire = db->expireMap().find(it.first);
+            if (expire != db->expireMap().end()) {
+                if (expire->second <= now) {
+                    db->delExpireKey(it.first);
+                    db->delKey(it.first);
+                    continue;
+                } else {
+                    rewriteExpire(it.first, expire->second);
+                }
+            }
+            if (isXXType(it, DB::String))
+                rewriteString(it);
+            else if (isXXType(it, DB::List))
+                rewriteList(it);
+            else if (isXXType(it, DB::Set))
+                rewriteSet(it);
+            else
+                rewriteHash(it);
+            index++;
+        }
     }
     if (_buffer.size() > 0) flush();
     fsync(_fd);
@@ -143,6 +158,15 @@ void Aof::appendRewriteBufferToAof()
     _rewriteBuffer.clear();
     fsync(fd);
     close(fd);
+}
+
+void Aof::rewriteSelectDb(int dbnum)
+{
+    append("*2\r\n$6\r\nSELECT\r\n$");
+    append(convert(strlen(convert(dbnum))));
+    append("\r\n");
+    append(convert(dbnum));
+    append("\r\n");
 }
 
 void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)

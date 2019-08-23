@@ -63,8 +63,8 @@ void Server::executeCommand(Context& con)
     int arity;
     auto& cmdlist = con.commandList();
     std::transform(cmdlist[0].begin(), cmdlist[0].end(), cmdlist[0].begin(), ::toupper);
-    auto it = _dbServer.db().commandMap().find(cmdlist[0]);
-    if (it == _dbServer.db().commandMap().end()) {
+    auto it = _dbServer.db()->commandMap().find(cmdlist[0]);
+    if (it == _dbServer.db()->commandMap().end()) {
         con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
         goto err;
     }
@@ -207,10 +207,12 @@ void Server::serverCron()
     }
 
     // 删除所有的过期键
-    for (auto& it : _dbServer.expireMap()) {
-        if (it.second <= now) {
-            _dbServer.db().delKey(it.first);
-            _dbServer.delExpireKey(it.first);
+    for (auto& db : _dbServer.dbs()) {
+        for (auto& it : db->expireMap()) {
+            if (it.second <= now) {
+                db->delKey(it.first);
+                db->delExpireKey(it.first);
+            }
         }
     }
 
@@ -397,7 +399,7 @@ next:
         close(_syncFd);
         _syncFd = -1;
         rename(_tmpfile, "dump.rdb");
-        db().hashMap().clear();
+        db()->hashMap().clear();
         rdb()->load();
         context.clearFlag(Context::SYNC_FULL);
         context.setFlag(Context::SLAVE | Context::SYNC_COMMAND);
@@ -463,26 +465,6 @@ void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
     conn->send(buffer);
 }
 
-bool DBServer::isExpiredKey(const Key& key)
-{
-    auto it = _expireMap.find(key);
-    if (it == _expireMap.end()) return false;
-    int64_t now = Angel::TimeStamp::now();
-    if (it->second > now) return false;
-    delExpireKey(key);
-    _db.delKey(key);
-    Context::CommandList cmdlist = { "DEL", key };
-    appendWriteCommand(cmdlist);
-    return true;
-}
-
-void DBServer::delExpireKey(const Key& key)
-{
-    auto it = _expireMap.find(key);
-    if (it != _expireMap.end())
-        _expireMap.erase(it);
-}
-
 // 主服务器将命令写入到复制积压缓冲区中
 void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
 {
@@ -499,7 +481,8 @@ void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
 
 void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
 {
-    aof()->append(cmdlist);
+    if (g_server_conf.enable_appendonly)
+        aof()->append(cmdlist);
     if (aof()->childPid() != -1)
         aof()->appendRewriteBuffer(cmdlist);
     if (flag() & DBServer::PSYNC)
@@ -557,32 +540,6 @@ void DBServer::setHeartBeatTimer(const Angel::TcpConnectionPtr& conn)
             this->sendAckToMaster(conn);
             conn->send("*1\r\n$4\r\nPING\r\n");
             });
-}
-
-void DBServer::watchKeyForClient(const Key& key, size_t id)
-{
-    auto it = _watchMap.find(key);
-    if (it == _watchMap.end()) {
-        std::vector<size_t> clist = { id };
-        _watchMap[key] = std::move(clist);
-    } else {
-        it->second.push_back(id);
-    }
-}
-
-void DBServer::touchWatchKey(const Key& key)
-{
-    auto clist = _watchMap.find(key);
-    if (clist == _watchMap.end())
-        return;
-    auto& maps = g_server->server().connectionMaps();
-    for (auto& id : clist->second) {
-        auto conn = maps.find(id);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            context.setFlag(Context::EXEC_MULTI_ERR);
-        }
-    }
 }
 
 void DBServer::subChannel(const Key& key, size_t id)

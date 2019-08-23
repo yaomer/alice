@@ -23,9 +23,8 @@ namespace Alice {
 
 class DBServer {
 public:
+    using DBS = std::vector<std::unique_ptr<DB>>;
     using Key = std::string;
-    using ExpireMap = std::unordered_map<Key, int64_t>;
-    using WatchMap = std::unordered_map<Key, std::vector<size_t>>; 
     using PubsubChannels = std::unordered_map<Key, std::vector<size_t>>;
     enum FLAG {
         // 有rewriteaof请求被延迟
@@ -38,7 +37,7 @@ public:
         PSYNC_DELAY = 0x10,
     };
     DBServer() 
-        : _db(this),
+        : _curSelectDb(0),
         _rdb(new Rdb(this)),
         _aof(new Aof(this)),
         _flag(0),
@@ -51,12 +50,19 @@ public:
         _lastRecvHeartBeatTime(0),
         _heartBeatTimerId(0)
     { 
+        for (int i = 0; i < g_server_conf.databases; i++) {
+            std::unique_ptr<DB> db(new DB(this));
+            _dbs.push_back(std::move(db));
+        }
         _copyBacklogBuffer.reserve(g_server_conf.repl_backlog_size);
         setSelfRunId(_selfRunId);
         bzero(_masterRunId, sizeof(_masterRunId));
         bzero(_tmpfile, sizeof(_tmpfile));
     }
-    DB& db() { return _db; }
+    DBS& dbs() { return _dbs; }
+    void switchDb(int dbnum) { _curSelectDb = dbnum; }
+    DB *db() { return _dbs[_curSelectDb].get(); }
+    DB *selectDb(int dbnum) { return _dbs[dbnum].get(); }
     Rdb *rdb() { return _rdb.get(); }
     Aof *aof() { return _aof.get(); }
     int flag() { return _flag; }
@@ -78,11 +84,6 @@ public:
     void sendRdbfileToSlave();
     void sendSyncCommandToSlave(Context::CommandList& cmdlist);
     void sendAckToMaster(const Angel::TcpConnectionPtr& conn);
-    ExpireMap& expireMap() { return _expireMap; }
-    void addExpireKey(const Key& key, int64_t expire)
-    { _expireMap[key] = expire + Angel::TimeStamp::now(); }
-    void delExpireKey(const Key& key);
-    bool isExpiredKey(const Key& key);
     void doWriteCommand(Context::CommandList& cmdlist);
     static void appendCommand(std::string& buffer, Context::CommandList& cmdlist,
             bool repl_set);
@@ -102,9 +103,6 @@ public:
     void setMasterRunId(const char *s)
     { memcpy(_masterRunId, s, 32); _masterRunId[32] = '\0'; }
     void setHeartBeatTimer(const Angel::TcpConnectionPtr& conn);
-    void watchKeyForClient(const Key& key, size_t id);
-    void unwatchKeys() { _watchMap.clear(); }
-    void touchWatchKey(const Key& key);
     void subChannel(const Key& key, size_t id);
     size_t pubMessage(const std::string& msg, const std::string& channel,  size_t id);
     void setMasterAddr(Angel::InetAddr addr)
@@ -113,9 +111,9 @@ public:
         _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); 
     }
 private:
-
-    DB _db;
-    ExpireMap _expireMap;
+    DBS _dbs;
+    // 当前选择的数据库号码
+    int _curSelectDb;
     std::unique_ptr<Rdb> _rdb;
     std::unique_ptr<Aof> _aof;
     int _flag;
@@ -147,8 +145,6 @@ private:
     int64_t _lastRecvHeartBeatTime;
     // 发送心跳包的定时器ID
     size_t _heartBeatTimerId;
-    // watch命令使用的监视表
-    WatchMap _watchMap;
     // 保存所有频道的订阅关系
     PubsubChannels _pubsubChannels;
 };

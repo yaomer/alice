@@ -9,12 +9,12 @@ Sentinel::Sentinel(Angel::EventLoop *loop, Angel::InetAddr inetAddr)
     _currentEpoch(0),
     _masters(&g_sentinel_conf.masters)
 {
-    auto& db = _server.dbServer().db();
+    /* auto& db = _server.dbServer().db();
     db.commandMap() = {
         { "PING",       { -1, IS_READ, std::bind(&DB::pingCommand, &db, _1) } },
         { "INFO",       { -3, IS_READ, std::bind(&Sentinel::infoCommand, this, _1) } },
         { "SENTINEL",   { -3, IS_READ, std::bind(&Sentinel::sentinelCommand, this, _1) } },
-    };
+    }; */
 }
 
 void Sentinel::init()

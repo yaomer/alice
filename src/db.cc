@@ -86,6 +86,7 @@ DB::DB(DBServer *dbServer)
         { "BGREWRITEAOF",{-1, IS_READ,  BIND(bgRewriteAofCommand) } },
         { "LASTSAVE",   { -1, IS_READ,  BIND(lastSaveCommand) } },
         { "FLUSHDB",    { -1, IS_WRITE, BIND(flushdbCommand) } },
+        { "FLUSHALL",   { -1, IS_WRITE, BIND(flushAllCommand) } },
         { "SLAVEOF",    { -3, IS_READ,  BIND(slaveofCommand) } },
         { "PSYNC",      { -3, IS_READ,  BIND(psyncCommand) } },
         { "REPLCONF",   {  3, IS_READ,  BIND(replconfCommand) } },
@@ -99,6 +100,8 @@ DB::DB(DBServer *dbServer)
         { "PUBLISH",    { -3, IS_READ,  BIND(publishCommand) } },
         { "SUBSCRIBE",  {  2, IS_READ,  BIND(subscribeCommand) } },
         { "INFO",       { -1, IS_READ,  BIND(infoCommand) } },
+        { "SELECT",     { -2, IS_WRITE, BIND(selectCommand) } },
+        { "DBSIZE",     { -1, IS_READ,  BIND(dbsizeCommand) } },
     };
 }
 
@@ -170,10 +173,26 @@ void DB::appendReplyNumber(Context& con, int64_t number)
 
 //////////////////////////////////////////////////////////////////
 
+void DB::selectCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    if (!_strIsNumber(cmdlist[1])) {
+        con.append("-ERR invalid DB index\r\n");
+        return;
+    }
+    int dbnum = atoi(cmdlist[1].c_str());
+    if (dbnum < 0 || dbnum >= g_server_conf.databases) {
+        con.append("-ERR DB index is out of range\r\n");
+        return;
+    }
+    con.db()->switchDb(dbnum);
+    con.append(db_return_ok);
+}
+
 void DB::existsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         con.append(db_return_integer_1);
@@ -206,8 +225,8 @@ void DB::_ttl(Context& con, bool seconds)
         con.append(db_return_integer__2);
         return;
     }
-    auto expire = con.db()->expireMap().find(cmdlist[1]);
-    if (expire == con.db()->expireMap().end()) {
+    auto expire = _expireMap.find(cmdlist[1]);
+    if (expire == _expireMap.end()) {
         con.append(db_return_integer__1);
         return;
     }
@@ -236,10 +255,9 @@ void DB::_expire(Context& con, bool seconds)
             con.append(db_return_interger_err);
             return;
         }
-        int64_t expire = atol(cmdlist[2].c_str());
-        if (seconds)
-            expire *= 1000;
-        con.db()->addExpireKey(cmdlist[1], expire);
+        int64_t expire = atoll(cmdlist[2].c_str());
+        if (seconds) expire *= 1000;
+        addExpireKey(cmdlist[1], expire);
         con.append(db_return_integer_1);
     } else {
         con.append(db_return_integer_0);
@@ -264,8 +282,8 @@ void DB::delCommand(Context& con)
     for (auto i = 1; i < size; i++) {
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
-            con.db()->delExpireKey(cmdlist[1]);
-            _hashMap.erase(it);
+            delExpireKey(cmdlist[1]);
+            delKey(cmdlist[1]);
             retval++;
         }
     }
@@ -286,7 +304,7 @@ void DB::keysCommand(Context& con)
     appendReplyMulti(con, _hashMap.size());
     size_t size = con.message().size();
     for (auto& it : _hashMap) {
-        con.db()->isExpiredKey(it.first);
+        isExpiredKey(it.first);
         appendReplySingleStr(con, it.first);
     }
     if (size == con.message().size())
@@ -343,6 +361,13 @@ void DB::lastSaveCommand(Context& con)
 void DB::flushdbCommand(Context& con)
 {
     _hashMap.clear();
+    con.append(db_return_ok);
+}
+
+void DB::flushAllCommand(Context& con)
+{
+    for (auto& db : _dbServer->dbs())
+        db->hashMap().clear();
     con.append(db_return_ok);
 }
 
@@ -457,7 +482,7 @@ void DB::execCommand(Context& con)
     if (con.flag() & Context::EXEC_MULTI_WRITE)
         _dbServer->doWriteCommand(tlist);
     for (auto& cmdlist : con.transactionList()) {
-        auto command = _dbServer->db().commandMap().find(cmdlist[0]);
+        auto command = _commandMap.find(cmdlist[0]);
         con.commandList().swap(cmdlist);
         command->second._commandCb(con);
         if (con.flag() & Context::EXEC_MULTI_WRITE)
@@ -468,7 +493,7 @@ void DB::execCommand(Context& con)
         _dbServer->doWriteCommand(tlist);
         con.clearFlag(Context::EXEC_MULTI_WRITE);
     }
-    _dbServer->unwatchKeys();
+    unwatchKeys();
 end:
     con.transactionList().clear();
     con.clearFlag(Context::EXEC_MULTI);
@@ -477,7 +502,7 @@ end:
 void DB::discardCommand(Context& con)
 {
     con.transactionList().clear();
-    _dbServer->unwatchKeys();
+    unwatchKeys();
     con.clearFlag(Context::EXEC_MULTI);
     if (con.flag() & Context::EXEC_MULTI_ERR)
         con.clearFlag(Context::EXEC_MULTI_ERR);
@@ -490,10 +515,10 @@ void DB::watchCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     for (int i = 1; i < cmdlist.size(); i++) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
-            _dbServer->watchKeyForClient(cmdlist[i], con.conn()->id());
+            watchKeyForClient(cmdlist[i], con.conn()->id());
         }
     }
     con.append(db_return_ok);
@@ -502,7 +527,7 @@ void DB::watchCommand(Context& con)
 
 void DB::unwatchCommand(Context& con)
 {
-    _dbServer->unwatchKeys();
+    unwatchKeys();
     con.append(db_return_ok);
 }
 
@@ -561,6 +586,11 @@ void DB::infoCommand(Context& con)
     con.append("xxx:yyy\r\n");
 }
 
+void DB::dbsizeCommand(Context& con)
+{
+    appendReplyNumber(con, _hashMap.size());
+}
+
 //////////////////////////////////////////////////////////////////
 // String Keys Operation
 //////////////////////////////////////////////////////////////////
@@ -571,11 +601,10 @@ void DB::setCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t expire;
-    con.db()->isExpiredKey(cmdlist[1]);
     if (cmdlist.size() == 3) {
-        con.db()->delExpireKey(cmdlist[1]);
+        delExpireKey(cmdlist[1]);
         _hashMap[cmdlist[1]] = cmdlist[2];
-        _dbServer->touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[1]);
         con.append(db_return_ok);
         return;
     }
@@ -584,7 +613,7 @@ void DB::setCommand(Context& con)
         if (strcasecmp(cmdlist[3].c_str(), "XX") == 0) {
             auto it = _hashMap.find(cmdlist[1]);
             if (it != _hashMap.end()) {
-                con.db()->delExpireKey(cmdlist[1]);
+                delExpireKey(cmdlist[1]);
                 _hashMap[cmdlist[1]] = cmdlist[2];
                 con.append(db_return_ok);
             } else
@@ -592,7 +621,7 @@ void DB::setCommand(Context& con)
         } else if (strcasecmp(cmdlist[3].c_str(), "NX") == 0) {
             auto it = _hashMap.find(cmdlist[1]);
             if (it == _hashMap.end()) {
-                con.db()->delExpireKey(cmdlist[1]);
+                delExpireKey(cmdlist[1]);
                 _hashMap[cmdlist[1]] = cmdlist[2];
                 con.append(db_return_ok);
             } else
@@ -607,12 +636,12 @@ void DB::setCommand(Context& con)
                 con.append(db_return_interger_err);
                 return;
             }
-            con.db()->delExpireKey(cmdlist[1]);
+            delExpireKey(cmdlist[1]);
             _hashMap[cmdlist[1]] = cmdlist[2];
             expire = atoll(cmdlist[4].c_str());
             if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
                 expire *= 1000;
-            con.db()->addExpireKey(cmdlist[1], expire);
+            addExpireKey(cmdlist[1], expire);
             con.append(db_return_ok);
         } else
             goto syntax_err;
@@ -627,7 +656,7 @@ void DB::setCommand(Context& con)
             if (strcasecmp(cmdlist[5].c_str(), "XX") == 0) {
                 auto it = _hashMap.find(cmdlist[1]);
                 if (it != _hashMap.end()) {
-                    con.db()->delExpireKey(cmdlist[1]);
+                    delExpireKey(cmdlist[1]);
                     _hashMap[cmdlist[1]] = cmdlist[2];
                 } else {
                     con.append(db_return_nil);
@@ -636,7 +665,7 @@ void DB::setCommand(Context& con)
             } else if (strcasecmp(cmdlist[5].c_str(), "NX") == 0) {
                 auto it = _hashMap.find(cmdlist[1]);
                 if (it == _hashMap.end()) {
-                    con.db()->delExpireKey(cmdlist[1]);
+                    delExpireKey(cmdlist[1]);
                     _hashMap[cmdlist[1]] = cmdlist[2];
                 } else {
                     con.append(db_return_nil);
@@ -647,7 +676,7 @@ void DB::setCommand(Context& con)
             expire = atoll(cmdlist[4].c_str());
             if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
                 expire *= 1000;
-            con.db()->addExpireKey(cmdlist[1], expire);
+            addExpireKey(cmdlist[1], expire);
             con.append(db_return_ok);
         } else
             goto syntax_err;
@@ -655,7 +684,7 @@ void DB::setCommand(Context& con)
     default:
         goto syntax_err;
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     return;
 syntax_err:
     con.append(db_return_syntax_err);
@@ -670,7 +699,7 @@ void DB::setnxCommand(Context& con)
         con.append(db_return_integer_0);
     } else {
         _hashMap[cmdlist[1]] = cmdlist[2];
-        _dbServer->touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_1);
     }
 }
@@ -678,7 +707,7 @@ void DB::setnxCommand(Context& con)
 void DB::getCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -692,8 +721,8 @@ void DB::getCommand(Context& con)
 void DB::getSetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    _dbServer->touchWatchKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
@@ -709,7 +738,7 @@ void DB::getSetCommand(Context& con)
 void DB::strlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -723,8 +752,8 @@ void DB::strlenCommand(Context& con)
 void DB::appendCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    _dbServer->touchWatchKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         _hashMap[cmdlist[1]] = cmdlist[2];
@@ -746,9 +775,9 @@ void DB::msetCommand(Context& con)
         return;
     }
     for (auto i = 1; i < size; i += 2) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         _hashMap[cmdlist[i]] = cmdlist[i + 1];
-        _dbServer->touchWatchKey(cmdlist[i]);
+        touchWatchKey(cmdlist[i]);
     }
     con.append(db_return_ok);
 }
@@ -759,7 +788,7 @@ void DB::mgetCommand(Context& con)
     size_t size = cmdlist.size();
     appendReplyMulti(con, size - 1);
     for (auto i = 1; i < size; i++) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             if (!isXXType(it, String)) {
@@ -788,7 +817,7 @@ bool DB::_strIsNumber(const String& s)
 void DB::_incr(Context& con, int64_t incr)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, String);
@@ -806,7 +835,7 @@ void DB::_incr(Context& con, int64_t incr)
         _hashMap[cmdlist[1]] = String(convert(incr));
         appendReplyNumber(con, incr);
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
 }
 
 void DB::incrCommand(Context& con)
@@ -843,7 +872,7 @@ void DB::_lpush(Context& con, bool leftPush)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, List);
@@ -866,7 +895,7 @@ void DB::_lpush(Context& con, bool leftPush)
         _hashMap[cmdlist[1]] = list;
         appendReplyNumber(con, list.size());
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
 }
 
 void DB::lpushCommand(Context& con)
@@ -882,7 +911,7 @@ void DB::rpushCommand(Context& con)
 void DB::_lpushx(Context& con, bool frontPush)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -894,7 +923,7 @@ void DB::_lpushx(Context& con, bool frontPush)
         list.push_front(cmdlist[2]);
     else
         list.push_back(cmdlist[2]);
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, list.size());
 }
 
@@ -911,7 +940,7 @@ void DB::rpushxCommand(Context& con)
 void DB::_lpop(Context& con, bool leftPop)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -930,7 +959,7 @@ void DB::_lpop(Context& con, bool leftPop)
         appendReplySingleStr(con, list.back());
         list.pop_back();
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
 }
 
 void DB::lpopCommand(Context& con)
@@ -946,8 +975,8 @@ void DB::rpopCommand(Context& con)
 void DB::rpoplpushCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    con.db()->isExpiredKey(cmdlist[2]);
+    isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[2]);
     auto src = _hashMap.find(cmdlist[1]);
     if (src == _hashMap.end()) {
         con.append(db_return_nil);
@@ -965,11 +994,11 @@ void DB::rpoplpushCommand(Context& con)
         checkType(con, des, List);
         List& deslist = getListValue(des);
         deslist.push_front(std::move(srclist.back()));
-        _dbServer->touchWatchKey(cmdlist[1]);
-        _dbServer->touchWatchKey(cmdlist[2]);
+        touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[2]);
     } else {
         srclist.push_front(std::move(srclist.back()));
-        _dbServer->touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[1]);
     }
     srclist.pop_back();
 }
@@ -977,7 +1006,7 @@ void DB::rpoplpushCommand(Context& con)
 void DB::lremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     int count = atoi(cmdlist[2].c_str());
     String& value = cmdlist[3];
     auto it = _hashMap.find(cmdlist[1]);
@@ -1018,14 +1047,14 @@ void DB::lremCommand(Context& con)
             }
         }
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
 
 void DB::llenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1039,7 +1068,7 @@ void DB::llenCommand(Context& con)
 void DB::lindexCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1065,7 +1094,7 @@ void DB::lindexCommand(Context& con)
 void DB::lsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_no_such_key);
@@ -1086,14 +1115,14 @@ void DB::lsetCommand(Context& con)
             it.assign(cmdlist[3]);
             break;
         }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     con.append(db_return_ok);
 }
 
 void DB::lrangeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1131,7 +1160,7 @@ void DB::lrangeCommand(Context& con)
 void DB::ltrimCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_ok);
@@ -1165,7 +1194,7 @@ void DB::ltrimCommand(Context& con)
         } else
             i++;
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     con.append(db_return_ok);
 }
 
@@ -1178,7 +1207,7 @@ void DB::ltrimCommand(Context& con)
 void DB::saddCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     size_t members = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
@@ -1199,13 +1228,13 @@ void DB::saddCommand(Context& con)
         _hashMap[cmdlist[1]] = std::move(set);
         appendReplyNumber(con, members - 2);
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
 }
 
 void DB::sisMemberCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, Set);
@@ -1233,7 +1262,7 @@ static std::tuple<size_t, size_t> getRandBucketNumber(DB::Set& set)
 void DB::spopCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1255,13 +1284,13 @@ void DB::spopCommand(Context& con)
             set.erase(set.find(*it));
             break;
         }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
 }
 
 void DB::srandMemberCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     int count = 0;
     if (cmdlist.size() > 2) {
         count = atoi(cmdlist[2].c_str());
@@ -1333,7 +1362,7 @@ void DB::srandMemberCommand(Context& con)
 void DB::sremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
@@ -1350,15 +1379,15 @@ void DB::sremCommand(Context& con)
             retval++;
         }
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
 
 void DB::smoveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    con.db()->isExpiredKey(cmdlist[2]);
+    isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[2]);
     auto src = _hashMap.find(cmdlist[1]);
     if (src == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1384,15 +1413,15 @@ void DB::smoveCommand(Context& con)
         set.insert(cmdlist[3]);
         _hashMap[cmdlist[2]] = std::move(set);
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
-    _dbServer->touchWatchKey(cmdlist[2]);
+    touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[2]);
     con.append(db_return_integer_1);
 }
 
 void DB::scardCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1406,7 +1435,7 @@ void DB::scardCommand(Context& con)
 void DB::smembersCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1426,7 +1455,7 @@ void DB::sinterCommand(Context& con)
     size_t size = cmdlist.size();
     size_t minSet = 0, minSetIndex = 0;
     for (auto i = 1; i < size; i++) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it == _hashMap.end()) {
             con.append(db_return_nil);
@@ -1467,11 +1496,11 @@ void DB::sinterCommand(Context& con)
 void DB::sinterStoreCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     size_t size = cmdlist.size();
     size_t minSet = 0, minSetIndex = 0;
     for (auto i = 2; i < size; i++) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it == _hashMap.end()) {
             con.append(db_return_integer_0);
@@ -1522,7 +1551,7 @@ void DB::sunionCommand(Context& con)
     size_t size = cmdlist.size();
     Set retSet;
     for (auto i = 1; i < size; i++) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             checkType(con, it, Set);
@@ -1548,7 +1577,7 @@ void DB::sunionStoreCommand(Context& con)
     size_t size = cmdlist.size();
     Set retSet;
     for (auto i = 2; i < size; i++) {
-        con.db()->isExpiredKey(cmdlist[i]);
+        isExpiredKey(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             checkType(con, it, Set);
@@ -1590,8 +1619,8 @@ void DB::sdiffStoreCommand(Context& con)
 void DB::hsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
-    _dbServer->touchWatchKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;
@@ -1613,13 +1642,13 @@ void DB::hsetCommand(Context& con)
 void DB::hsetnxCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;
         hash[cmdlist[2]] = cmdlist[3];
         _hashMap[cmdlist[1]] = std::move(hash);
-        _dbServer->touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_1);
         return;
     }
@@ -1629,7 +1658,7 @@ void DB::hsetnxCommand(Context& con)
         con.append(db_return_integer_0);
     } else {
         hash[cmdlist[2]] = cmdlist[3];
-        _dbServer->touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_1);
     }
 }
@@ -1637,7 +1666,7 @@ void DB::hsetnxCommand(Context& con)
 void DB::hgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1655,7 +1684,7 @@ void DB::hgetCommand(Context& con)
 void DB::hexistsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1673,7 +1702,7 @@ void DB::hexistsCommand(Context& con)
 void DB::hdelCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1690,14 +1719,14 @@ void DB::hdelCommand(Context& con)
             retval++;
         }
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
 
 void DB::hlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, Hash);
@@ -1711,7 +1740,7 @@ void DB::hlenCommand(Context& con)
 void DB::hstrlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1730,7 +1759,7 @@ void DB::hstrlenCommand(Context& con)
 void DB::hincrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     if (!_strIsNumber(cmdlist[3])) {
         con.append(db_return_interger_err);
         return;
@@ -1741,7 +1770,7 @@ void DB::hincrbyCommand(Context& con)
         Hash hash;
         hash[cmdlist[2]] = cmdlist[3];
         _hashMap[cmdlist[1]] = std::move(hash);
-        _dbServer->touchWatchKey(cmdlist[1]);
+        touchWatchKey(cmdlist[1]);
         con.append(db_return_integer_0);
         return;
     }
@@ -1761,19 +1790,19 @@ void DB::hincrbyCommand(Context& con)
         hash[cmdlist[2]] = String(convert(incr));
         appendReplyNumber(con, incr);
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
 }
 
 void DB::hmsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     size_t size = cmdlist.size();
     if (size % 2 != 0) {
         con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
         return;
     }
-    _dbServer->touchWatchKey(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;
@@ -1795,7 +1824,7 @@ void DB::hmsetCommand(Context& con)
 void DB::hmgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
     appendReplyMulti(con, size - 2);
@@ -1823,7 +1852,7 @@ void DB::hmgetCommand(Context& con)
 void DB::_hgetXX(Context& con, int getXX)
 {
     auto& cmdlist = con.commandList();
-    con.db()->isExpiredKey(cmdlist[1]);
+    isExpiredKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1869,3 +1898,42 @@ void DB::hgetAllCommand(Context& con)
 #undef GETKEYS
 #undef GETVALUES
 #undef GETALL
+
+bool DB::isExpiredKey(const Key& key)
+{
+    auto it = _expireMap.find(key);
+    if (it == _expireMap.end()) return false;
+    int64_t now = Angel::TimeStamp::now();
+    if (it->second > now) return false;
+    delExpireKey(key);
+    delKey(key);
+    Context::CommandList cmdlist = { "DEL", key };
+    _dbServer->appendWriteCommand(cmdlist);
+    return true;
+}
+
+void DB::watchKeyForClient(const Key& key, size_t id)
+{
+    auto it = _watchMap.find(key);
+    if (it == _watchMap.end()) {
+        std::vector<size_t> clist = { id };
+        _watchMap[key] = std::move(clist);
+    } else {
+        it->second.push_back(id);
+    }
+}
+
+void DB::touchWatchKey(const Key& key)
+{
+    auto clist = _watchMap.find(key);
+    if (clist == _watchMap.end())
+        return;
+    auto& maps = g_server->server().connectionMaps();
+    for (auto& id : clist->second) {
+        auto conn = maps.find(id);
+        if (conn != maps.end()) {
+            auto& context = std::any_cast<Context&>(conn->second->getContext());
+            context.setFlag(Context::EXEC_MULTI_ERR);
+        }
+    }
+}

@@ -35,6 +35,8 @@ struct ServerConf {
     int port = 1296;
     // 服务器的IP
     std::string addr = "127.0.0.1";
+    // 创建的数据库数目
+    int databases = 16;
     // 保存rdb持久化触发的条件
     std::vector<SaveParam> save_params;
     // 是否开启aof持久化

@@ -16,6 +16,7 @@ public:
     explicit Rdb(DBServer *dbServer) 
         : _dbServer(dbServer),
         _childPid(-1),
+        _curDb(nullptr),
         _fd(-1) 
     { 
        
@@ -34,10 +35,10 @@ private:
     void saveHash(Pair pair);
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);
-    char *loadString(char *ptr, int64_t *timevalptr);
-    char *loadList(char *ptr, int64_t *timevalptr);
-    char *loadSet(char *ptr, int64_t *timevalptr);
-    char *loadHash(char *ptr, int64_t *timevalptr);
+    char *loadString(char *ptr, int64_t *tvptr);
+    char *loadList(char *ptr, int64_t *tvptr);
+    char *loadSet(char *ptr, int64_t *tvptr);
+    char *loadHash(char *ptr, int64_t *tvptr);
     void append(const std::string& data);
     void append(const void *data, size_t len);
     void flush();
@@ -46,6 +47,7 @@ private:
     pid_t _childPid;
     std::string _buffer;
     std::string _syncBuffer;
+    DB *_curDb;
     int _fd;
 };
 }

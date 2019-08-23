@@ -68,6 +68,8 @@ void Alice::readServerConf()
             g_server_conf.port = atoi(it[1].c_str());
         } else if (strcasecmp(it[0].c_str(), "ip") == 0) {
             g_server_conf.addr.assign(it[1]);
+        } else if (strcasecmp(it[0].c_str(), "databases") == 0) {
+            g_server_conf.databases = atoi(it[1].c_str());
         } else if (strcasecmp(it[0].c_str(), "save") == 0) {
             g_server_conf.save_params.push_back(
                     SaveParam(atoi(it[1].c_str()), atoi(it[2].c_str())));
