@@ -2,6 +2,7 @@
 #include <random>
 #include <vector>
 #include <string>
+#include <time.h>
 
 #include "util.h"
 
@@ -56,4 +57,5 @@ err:
     argv.clear();
     return -1;
 }
+
 }

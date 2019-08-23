@@ -171,7 +171,7 @@ public:
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::TimeStamp::now(); }
     void delExpireKey(const Key& key) { _expireMap.erase(key); }
-    bool isExpiredKey(const Key& key);
+    void expireIfNeeded(const Key& key);
 
     void watchKeyForClient(const Key& key, size_t id);
     void unwatchKeys() { _watchMap.clear(); }

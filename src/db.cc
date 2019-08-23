@@ -6,10 +6,10 @@
 #include <vector>
 #include <list>
 #include <functional>
-#include <random>
 #include <tuple>
 #include "db.h"
 #include "server.h"
+#include "util.h"
 #include "config.h"
 
 using namespace Alice;
@@ -192,7 +192,7 @@ void DB::selectCommand(Context& con)
 void DB::existsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         con.append(db_return_integer_1);
@@ -304,7 +304,7 @@ void DB::keysCommand(Context& con)
     appendReplyMulti(con, _hashMap.size());
     size_t size = con.message().size();
     for (auto& it : _hashMap) {
-        isExpiredKey(it.first);
+        expireIfNeeded(it.first);
         appendReplySingleStr(con, it.first);
     }
     if (size == con.message().size())
@@ -515,7 +515,7 @@ void DB::watchCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     for (int i = 1; i < cmdlist.size(); i++) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             watchKeyForClient(cmdlist[i], con.conn()->id());
@@ -707,7 +707,7 @@ void DB::setnxCommand(Context& con)
 void DB::getCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -721,7 +721,7 @@ void DB::getCommand(Context& con)
 void DB::getSetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
@@ -738,7 +738,7 @@ void DB::getSetCommand(Context& con)
 void DB::strlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -752,7 +752,7 @@ void DB::strlenCommand(Context& con)
 void DB::appendCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
@@ -775,7 +775,7 @@ void DB::msetCommand(Context& con)
         return;
     }
     for (auto i = 1; i < size; i += 2) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         _hashMap[cmdlist[i]] = cmdlist[i + 1];
         touchWatchKey(cmdlist[i]);
     }
@@ -788,7 +788,7 @@ void DB::mgetCommand(Context& con)
     size_t size = cmdlist.size();
     appendReplyMulti(con, size - 1);
     for (auto i = 1; i < size; i++) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             if (!isXXType(it, String)) {
@@ -817,7 +817,7 @@ bool DB::_strIsNumber(const String& s)
 void DB::_incr(Context& con, int64_t incr)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, String);
@@ -872,7 +872,7 @@ void DB::_lpush(Context& con, bool leftPush)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, List);
@@ -911,7 +911,7 @@ void DB::rpushCommand(Context& con)
 void DB::_lpushx(Context& con, bool frontPush)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -940,7 +940,7 @@ void DB::rpushxCommand(Context& con)
 void DB::_lpop(Context& con, bool leftPop)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -975,8 +975,8 @@ void DB::rpopCommand(Context& con)
 void DB::rpoplpushCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
-    isExpiredKey(cmdlist[2]);
+    expireIfNeeded(cmdlist[1]);
+    expireIfNeeded(cmdlist[2]);
     auto src = _hashMap.find(cmdlist[1]);
     if (src == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1006,7 +1006,7 @@ void DB::rpoplpushCommand(Context& con)
 void DB::lremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     int count = atoi(cmdlist[2].c_str());
     String& value = cmdlist[3];
     auto it = _hashMap.find(cmdlist[1]);
@@ -1054,7 +1054,7 @@ void DB::lremCommand(Context& con)
 void DB::llenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1068,7 +1068,7 @@ void DB::llenCommand(Context& con)
 void DB::lindexCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1094,7 +1094,7 @@ void DB::lindexCommand(Context& con)
 void DB::lsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_no_such_key);
@@ -1122,7 +1122,7 @@ void DB::lsetCommand(Context& con)
 void DB::lrangeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1160,7 +1160,7 @@ void DB::lrangeCommand(Context& con)
 void DB::ltrimCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_ok);
@@ -1207,7 +1207,7 @@ void DB::ltrimCommand(Context& con)
 void DB::saddCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     size_t members = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
@@ -1234,7 +1234,7 @@ void DB::saddCommand(Context& con)
 void DB::sisMemberCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, Set);
@@ -1247,22 +1247,10 @@ void DB::sisMemberCommand(Context& con)
         con.append(db_return_integer_0);
 }
 
-static std::tuple<size_t, size_t> getRandBucketNumber(DB::Set& set)
-{
-    size_t bucketNumber;
-    std::uniform_int_distribution<size_t> u(0, set.bucket_count() - 1);
-    std::default_random_engine e(clock());
-    do {
-        bucketNumber = u(e);
-    } while (set.bucket_size(bucketNumber) == 0);
-    std::uniform_int_distribution<size_t> _u(0, set.bucket_size(bucketNumber) - 1);
-    return std::make_tuple(bucketNumber, _u(e));
-}
-
 void DB::spopCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1290,7 +1278,7 @@ void DB::spopCommand(Context& con)
 void DB::srandMemberCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     int count = 0;
     if (cmdlist.size() > 2) {
         count = atoi(cmdlist[2].c_str());
@@ -1362,7 +1350,7 @@ void DB::srandMemberCommand(Context& con)
 void DB::sremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
@@ -1386,8 +1374,8 @@ void DB::sremCommand(Context& con)
 void DB::smoveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
-    isExpiredKey(cmdlist[2]);
+    expireIfNeeded(cmdlist[1]);
+    expireIfNeeded(cmdlist[2]);
     auto src = _hashMap.find(cmdlist[1]);
     if (src == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1421,7 +1409,7 @@ void DB::smoveCommand(Context& con)
 void DB::scardCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1435,7 +1423,7 @@ void DB::scardCommand(Context& con)
 void DB::smembersCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1455,7 +1443,7 @@ void DB::sinterCommand(Context& con)
     size_t size = cmdlist.size();
     size_t minSet = 0, minSetIndex = 0;
     for (auto i = 1; i < size; i++) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it == _hashMap.end()) {
             con.append(db_return_nil);
@@ -1496,11 +1484,11 @@ void DB::sinterCommand(Context& con)
 void DB::sinterStoreCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
     size_t minSet = 0, minSetIndex = 0;
     for (auto i = 2; i < size; i++) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it == _hashMap.end()) {
             con.append(db_return_integer_0);
@@ -1551,7 +1539,7 @@ void DB::sunionCommand(Context& con)
     size_t size = cmdlist.size();
     Set retSet;
     for (auto i = 1; i < size; i++) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             checkType(con, it, Set);
@@ -1577,7 +1565,7 @@ void DB::sunionStoreCommand(Context& con)
     size_t size = cmdlist.size();
     Set retSet;
     for (auto i = 2; i < size; i++) {
-        isExpiredKey(cmdlist[i]);
+        expireIfNeeded(cmdlist[i]);
         auto it = _hashMap.find(cmdlist[i]);
         if (it != _hashMap.end()) {
             checkType(con, it, Set);
@@ -1619,7 +1607,7 @@ void DB::sdiffStoreCommand(Context& con)
 void DB::hsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
@@ -1642,7 +1630,7 @@ void DB::hsetCommand(Context& con)
 void DB::hsetnxCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;
@@ -1666,7 +1654,7 @@ void DB::hsetnxCommand(Context& con)
 void DB::hgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1684,7 +1672,7 @@ void DB::hgetCommand(Context& con)
 void DB::hexistsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1702,7 +1690,7 @@ void DB::hexistsCommand(Context& con)
 void DB::hdelCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1726,7 +1714,7 @@ void DB::hdelCommand(Context& con)
 void DB::hlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
         checkType(con, it, Hash);
@@ -1740,7 +1728,7 @@ void DB::hlenCommand(Context& con)
 void DB::hstrlenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_integer_0);
@@ -1759,7 +1747,7 @@ void DB::hstrlenCommand(Context& con)
 void DB::hincrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     if (!_strIsNumber(cmdlist[3])) {
         con.append(db_return_interger_err);
         return;
@@ -1796,7 +1784,7 @@ void DB::hincrbyCommand(Context& con)
 void DB::hmsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
     if (size % 2 != 0) {
         con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
@@ -1824,7 +1812,7 @@ void DB::hmsetCommand(Context& con)
 void DB::hmgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = _hashMap.find(cmdlist[1]);
     appendReplyMulti(con, size - 2);
@@ -1852,7 +1840,7 @@ void DB::hmgetCommand(Context& con)
 void DB::_hgetXX(Context& con, int getXX)
 {
     auto& cmdlist = con.commandList();
-    isExpiredKey(cmdlist[1]);
+    expireIfNeeded(cmdlist[1]);
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         con.append(db_return_nil);
@@ -1899,17 +1887,16 @@ void DB::hgetAllCommand(Context& con)
 #undef GETVALUES
 #undef GETALL
 
-bool DB::isExpiredKey(const Key& key)
+void DB::expireIfNeeded(const Key& key)
 {
     auto it = _expireMap.find(key);
-    if (it == _expireMap.end()) return false;
-    int64_t now = Angel::TimeStamp::now();
-    if (it->second > now) return false;
+    if (it == _expireMap.end()) return;
+    int64_t now = _lru_cache;
+    if (it->second > now) return;
     delExpireKey(key);
     delKey(key);
     Context::CommandList cmdlist = { "DEL", key };
     _dbServer->appendWriteCommand(cmdlist);
-    return true;
 }
 
 void DB::watchKeyForClient(const Key& key, size_t id)

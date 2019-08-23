@@ -37,7 +37,7 @@ public:
         PSYNC_DELAY = 0x10,
     };
     DBServer() 
-        : _curSelectDb(0),
+        : _curDbnum(0),
         _rdb(new Rdb(this)),
         _aof(new Aof(this)),
         _flag(0),
@@ -48,7 +48,8 @@ public:
         _syncRdbFilesize(0),
         _syncFd(-1),
         _lastRecvHeartBeatTime(0),
-        _heartBeatTimerId(0)
+        _heartBeatTimerId(0),
+        _curCheckDb(0)
     { 
         for (int i = 0; i < g_server_conf.databases; i++) {
             std::unique_ptr<DB> db(new DB(this));
@@ -60,8 +61,8 @@ public:
         bzero(_tmpfile, sizeof(_tmpfile));
     }
     DBS& dbs() { return _dbs; }
-    void switchDb(int dbnum) { _curSelectDb = dbnum; }
-    DB *db() { return _dbs[_curSelectDb].get(); }
+    void switchDb(int dbnum) { _curDbnum = dbnum; }
+    DB *db() { return _dbs[_curDbnum].get(); }
     DB *selectDb(int dbnum) { return _dbs[dbnum].get(); }
     Rdb *rdb() { return _rdb.get(); }
     Aof *aof() { return _aof.get(); }
@@ -105,6 +106,7 @@ public:
     void setHeartBeatTimer(const Angel::TcpConnectionPtr& conn);
     void subChannel(const Key& key, size_t id);
     size_t pubMessage(const std::string& msg, const std::string& channel,  size_t id);
+    void checkExpireCycle(int64_t now);
     void setMasterAddr(Angel::InetAddr addr)
     { 
         if (_masterAddr) _masterAddr.reset();
@@ -113,7 +115,7 @@ public:
 private:
     DBS _dbs;
     // 当前选择的数据库号码
-    int _curSelectDb;
+    int _curDbnum;
     std::unique_ptr<Rdb> _rdb;
     std::unique_ptr<Aof> _aof;
     int _flag;
@@ -147,6 +149,8 @@ private:
     size_t _heartBeatTimerId;
     // 保存所有频道的订阅关系
     PubsubChannels _pubsubChannels;
+    // 记录过期键删除进度
+    int _curCheckDb;
 };
 
 class Server {

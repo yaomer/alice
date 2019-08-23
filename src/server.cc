@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <tuple>
 #include "server.h"
 #include "sentinel.h"
 #include "db.h"
+#include "util.h"
 #include "config.h"
 
 using namespace Alice;
@@ -206,17 +208,38 @@ void Server::serverCron()
         }
     }
 
-    // 删除所有的过期键
-    for (auto& db : _dbServer.dbs()) {
-        for (auto& it : db->expireMap()) {
-            if (it.second <= now) {
-                db->delKey(it.first);
-                db->delExpireKey(it.first);
+    _dbServer.checkExpireCycle(now);
+
+    _dbServer.aof()->appendAof(now);
+}
+
+void DBServer::checkExpireCycle(int64_t now)
+{
+    int dbnums = g_server_conf.expire_check_dbnums;
+    int keys = g_server_conf.expire_check_keys;
+    if (dbs().size() < dbnums) dbnums = dbs().size();
+    for (int i = 0; i < dbnums; i++) {
+        if (_curCheckDb == dbs().size())
+            _curCheckDb = 0;
+        DB *db = selectDb(_curCheckDb);
+        _curCheckDb++;
+        for (int j = 0; j < keys; j++) {
+            if (db->expireMap().empty()) break;
+            auto bucket = getRandBucketNumber(db->expireMap());
+            size_t bucketNumber = std::get<0>(bucket);
+            size_t where = std::get<1>(bucket);
+            for (auto it = db->expireMap().cbegin(bucketNumber);
+                    it != db->expireMap().cend(bucketNumber); it++) {
+                if (where-- == 0) {
+                    if (it->second <= now) {
+                        db->delKey(it->first);
+                        db->delExpireKey(it->first);
+                    }
+                    break;
+                }
             }
         }
     }
-
-    _dbServer.aof()->appendAof(now);
 }
 
 // 将目前已连接的所有客户端设置为只读

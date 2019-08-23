@@ -49,6 +49,10 @@ struct ServerConf {
     int repl_ping_preiod = 10 * 1000;
     // 复制积压缓冲区的大小
     size_t repl_backlog_size = 1024 * 1024;
+    // 每次定期删除过期键时检查的数据库个数
+    int expire_check_dbnums = 16;
+    // 每个数据库检查的键数
+    int expire_check_keys = 20;
 };
 
 struct SentinelConf {
