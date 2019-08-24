@@ -1169,7 +1169,6 @@ void DB::lrangeCommand(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    size_t end = list.size() - 1;
     int start = str2l(cmdlist[2].c_str());
     if (str2numberErr()) {
         con.append(db_return_interger_err);
@@ -1180,13 +1179,25 @@ void DB::lrangeCommand(Context& con)
         con.append(db_return_interger_err);
         return;
     }
-    if (start < 0)
-        start += end + 1;
-    if (stop < 0)
-        stop += end + 1;
-    if (stop > static_cast<ssize_t>(end))
-        stop = end;
-    if (start > static_cast<ssize_t>(end)){
+    int upperbound = list.size() - 1;
+    int lowerbound = -list.size();
+    if (start > upperbound || stop < lowerbound) {
+        con.append(db_return_nil);
+        return;
+    }
+    if (start < 0 && start >= lowerbound) {
+        start += upperbound + 1;
+    }
+    if (stop < 0 && stop >= lowerbound) {
+        stop += upperbound + 1;
+    }
+    if (start < lowerbound) {
+        start = 0;
+    }
+    if (stop > upperbound) {
+        stop = upperbound;
+    }
+    if (start > stop) {
         con.append(db_return_nil);
         return;
     }
@@ -2011,7 +2022,6 @@ void DB::zscoreCommand(Context& con)
         appendReplyDouble(con, e->second);
     } else
         con.append(db_return_nil);
-    touchWatchKey(cmdlist[1]);
 }
 
 void DB::zincrbyCommand(Context& con)
