@@ -45,9 +45,9 @@ thread_local bool str2numerr;
         errno = 0; \
         char *eptr = nullptr; \
         switch (opt) { \
-        case STR2LONG: val = strtol(ptr, &eptr, 10); \
-        case STR2LLONG: val = strtoll(ptr, &eptr, 10); \
-        case STR2DOUBLE: val = strtod(ptr, &eptr); \
+        case STR2LONG: val = strtol(ptr, &eptr, 10); break; \
+        case STR2LLONG: val = strtoll(ptr, &eptr, 10); break; \
+        case STR2DOUBLE: val = strtod(ptr, &eptr); break; \
         } \
         if (errno == ERANGE || eptr == ptr) { \
             str2numerr = true; \
