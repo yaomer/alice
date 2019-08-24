@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <tuple>
 
 #include "sentinel_instance.h"
 
@@ -11,20 +12,6 @@ namespace Alice {
 
 void readServerConf();
 void readSentinelConf();
-
-class SaveParam {
-public:
-    SaveParam(time_t seconds, int changes)
-        : _seconds(seconds),
-        _changes(changes)
-    {
-    }
-    time_t seconds() const { return _seconds; }
-    int changes() const { return _changes; }
-private:
-    time_t _seconds;
-    int _changes;
-};
 
 #define AOF_ALWAYS 1
 #define AOF_EVERYSEC 2
@@ -38,7 +25,7 @@ struct ServerConf {
     // 创建的数据库数目
     int databases = 16;
     // 保存rdb持久化触发的条件
-    std::vector<SaveParam> save_params;
+    std::vector<std::tuple<time_t, int>> save_params;
     // 是否开启aof持久化
     bool enable_appendonly = false;
     // aof持久化的模式

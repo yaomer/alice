@@ -37,6 +37,7 @@ private:
     void rewriteList(Pair pair);
     void rewriteSet(Pair pair);
     void rewriteHash(Pair pair);
+    void rewriteZset(Pair pair);
     size_t getFilesize(int fd);
 
     DBServer *_dbServer;

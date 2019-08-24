@@ -72,7 +72,7 @@ void Alice::readServerConf()
             g_server_conf.databases = atoi(it[1].c_str());
         } else if (strcasecmp(it[0].c_str(), "save") == 0) {
             g_server_conf.save_params.push_back(
-                    SaveParam(atoi(it[1].c_str()), atoi(it[2].c_str())));
+                    std::make_tuple(atol(it[1].c_str()), atol(it[2].c_str())));
         } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
             if (strcasecmp(it[1].c_str(), "yes") == 0)
                 g_server_conf.enable_appendonly = true;

@@ -138,8 +138,10 @@ void Aof::rewrite()
                 rewriteList(it);
             else if (isXXType(it, DB::Set))
                 rewriteSet(it);
-            else
+            else if (isXXType(it, DB::Hash))
                 rewriteHash(it);
+            else
+                rewriteZset(it);
             index++;
         }
     }
@@ -248,6 +250,29 @@ void Aof::rewriteHash(Pair pair)
         append(convert(it.second.size()));
         append("\r\n");
         append(it.second + "\r\n");
+    }
+}
+
+void Aof::rewriteZset(Pair pair)
+{
+    auto& tuple = getXXType(pair, DB::Zset&);
+    DB::_Zset& zset = std::get<0>(tuple);
+    if (zset.empty()) return;
+    append("*");
+    append(convert(zset.size() * 2 + 2));
+    append("\r\n$4\r\nZADD\r\n$");
+    append(convert(pair.first.size()));
+    append("\r\n");
+    append(pair.first + "\r\n");
+    for (auto& it : zset) {
+        append("$");
+        append(convert(strlen(convert2f(std::get<0>(it)))));
+        append("\r\n");
+        append(convert2f(std::get<0>(it)));
+        append("\r\n$");
+        append(convert(std::get<1>(it).size()));
+        append("\r\n");
+        append(std::get<1>(it) + "\r\n");
     }
 }
 

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -7,6 +8,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <string>
+#include <tuple>
 #include "rdb.h"
 #include "db.h"
 #include "server.h"
@@ -22,7 +24,8 @@ namespace Alice {
     static unsigned char list_type = 1;
     static unsigned char set_type = 2;
     static unsigned char hash_type = 3;
-    static unsigned char expire_key = 4;
+    static unsigned char zset_type = 4;
+    static unsigned char expire_key = 5;
     static unsigned char rdb_6bit_len = 0;
     static unsigned char rdb_14bit_len = 1;
     static unsigned char rdb_32bit_len = 0x80;
@@ -69,8 +72,10 @@ void Rdb::save()
                 saveList(it);
             } else if (isXXType(it, DB::Set)) {
                 saveSet(it);
-            } else
+            } else if (isXXType(it, DB::Hash)) {
                 saveHash(it);
+            } else
+                saveZset(it);
         }
         index++;
     }
@@ -197,6 +202,22 @@ void Rdb::saveHash(Pair pair)
     }
 }
 
+void Rdb::saveZset(Pair pair)
+{
+    saveLen(zset_type);
+    saveLen(pair.first.size());
+    append(pair.first);
+    auto& tuple = getXXType(pair, DB::Zset&);
+    DB::_Zset& zset = std::get<0>(tuple);
+    saveLen(zset.size());
+    for (auto& it : zset) {
+        saveLen(strlen(convert2f(std::get<0>(it))));
+        append(convert2f(std::get<0>(it)));
+        saveLen(std::get<1>(it).size());
+        append(std::get<1>(it));
+    }
+}
+
 void Rdb::load()
 {
     int fd = open("dump.rdb", O_RDONLY);
@@ -230,9 +251,10 @@ void Rdb::load()
             buf = loadList(buf + 1, &timeval);
         } else if (buf[0] == set_type) {
             buf = loadSet(buf + 1, &timeval);
-        } else {
+        } else if (buf[0] == hash_type) {
             buf = loadHash(buf + 1, &timeval);
-        }
+        } else
+            buf = loadZset(buf + 1, &timeval);
     }
     munmap(start, size);
     close(fd);
@@ -336,6 +358,41 @@ char *Rdb::loadHash(char *ptr, int64_t *tvptr)
     _curDb->hashMap()[hashKey] = std::move(hash);
     if (*tvptr > 0) {
         _curDb->expireMap()[hashKey] = *tvptr;
+        *tvptr = 0;
+    }
+    return ptr;
+}
+
+char *Rdb::loadZset(char *ptr, int64_t *tvptr)
+{
+    uint64_t keylen, vallen;
+    ptr += loadLen(ptr, &keylen);
+    char key[keylen];
+    memcpy(key, ptr, keylen);
+    ptr += keylen;
+    uint64_t zsetlen;
+    ptr += loadLen(ptr, &zsetlen);
+    DB::_Zset zset;
+    DB::_Zmap zmap;
+    uint64_t slen;
+    while (zsetlen-- > 0) {
+        ptr += loadLen(ptr, &slen);
+        char score[slen];
+        memcpy(score, ptr, slen);
+        ptr += slen;
+        ptr += loadLen(ptr, &vallen);
+        char val[vallen];
+        memcpy(val, ptr, vallen);
+        ptr += vallen;
+        std::string scorestr(score, slen);
+        std::string valstr(val, vallen);
+        zset.insert(std::make_tuple(atof(scorestr.c_str()), valstr));
+        zmap[valstr] = std::move(atof(scorestr.c_str()));
+    }
+    std::string zsetKey(key, keylen);
+    _curDb->hashMap()[zsetKey] = std::make_tuple(zset, zmap);
+    if (*tvptr > 0) {
+        _curDb->expireMap()[zsetKey] = *tvptr;
         *tvptr = 0;
     }
     return ptr;

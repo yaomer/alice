@@ -190,7 +190,7 @@ void Server::serverCron()
     // 是否需要进行rdb持久化
     int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
     for (auto& it : g_server_conf.save_params) {
-        if (saveInterval >= it.seconds() && _dbServer.dirty() >= it.changes()) {
+        if (saveInterval >= std::get<0>(it) && _dbServer.dirty() >= std::get<1>(it)) {
             if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
                 _dbServer.rdb()->saveBackground();
                 _dbServer.setLastSaveTime(now);

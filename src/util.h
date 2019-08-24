@@ -10,6 +10,7 @@ namespace Alice {
 
 void setSelfRunId(char *buf);
 const char *convert(int64_t value);
+const char *convert2f(double value);
 int parseLine(std::vector<std::string>& argv, const char *line, const char *linep);
 // Hash可以是unordered_map或unorderd_set
 // getRandBucketNumber()从Hash中挑选出一个随机元素，并返回这个元素
