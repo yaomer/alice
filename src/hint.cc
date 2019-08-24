@@ -67,6 +67,8 @@ HintInfo hiTable[HTSIZE] = {
     { "HMGET",       5, 3, " key field [field ...]" },
     { "HKEYS",       5, 1, " key" },
     { "HVALS",       5, 1, " key" },
+    { "ZADD",        4, 4, " key score member [score member ...]" },
+    { "ZSCORE",      6, 2, " key member" },
     { "EXISTS",      6, 1, " key" },
     { "TYPE",        4, 1, " key" },
     { "TTL",         3, 1, " key" },

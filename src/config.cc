@@ -66,10 +66,14 @@ void Alice::readServerConf()
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "port") == 0) {
             g_server_conf.port = atoi(it[1].c_str());
+            if (g_server_conf.port <= 0 || g_server_conf.port > 65536)
+                error("port");
         } else if (strcasecmp(it[0].c_str(), "ip") == 0) {
             g_server_conf.addr.assign(it[1]);
         } else if (strcasecmp(it[0].c_str(), "databases") == 0) {
             g_server_conf.databases = atoi(it[1].c_str());
+            if (g_server_conf.databases <= 0)
+                error("databases");
         } else if (strcasecmp(it[0].c_str(), "save") == 0) {
             g_server_conf.save_params.push_back(
                     std::make_tuple(atol(it[1].c_str()), atol(it[2].c_str())));
@@ -88,9 +92,15 @@ void Alice::readServerConf()
             else
                 error("appendfsync");
         } else if (strcasecmp(it[0].c_str(), "repl-timeout") == 0) {
-            g_server_conf.repl_timeout = atoi(it[1].c_str()) * 1000;
+            g_server_conf.repl_timeout = atoi(it[1].c_str());
+            if (g_server_conf.repl_timeout <= 0)
+                error("repl-timeout");
+            g_server_conf.repl_timeout *= 1000;
         } else if (strcasecmp(it[0].c_str(), "repl-ping-period") == 0) {
-            g_server_conf.repl_ping_preiod = atoi(it[1].c_str()) * 1000;
+            g_server_conf.repl_ping_preiod = atoi(it[1].c_str());
+            if (g_server_conf.repl_ping_preiod <= 0)
+                error("repl-timeout");
+            g_server_conf.repl_ping_preiod *= 1000;
         } else if (strcasecmp(it[0].c_str(), "repl-backlog-size") == 0) {
             ssize_t size = humanSizeToBytes(it[1].c_str());
             if (size < 0) error("repl-backlog-size");
@@ -108,6 +118,8 @@ void Alice::readSentinelConf()
             g_sentinel_conf.addr = it[2];
         } else if (strcasecmp(it[1].c_str(), "port") == 0) {
             g_sentinel_conf.port = atoi(it[2].c_str());
+            if (g_sentinel_conf.port <= 0 || g_sentinel_conf.port > 65536)
+                error("port");
         } else if (strcasecmp(it[1].c_str(), "monitor") == 0) {
             SentinelInstance master;
             master.setFlag(SentinelInstance::MASTER);

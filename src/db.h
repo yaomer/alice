@@ -8,6 +8,7 @@
 #include <list>
 #include <vector>
 #include <unordered_set>
+#include <set>
 #include <tuple>
 #include <any>
 
@@ -27,7 +28,7 @@ enum CommandPerm {
 
 class Context {
 public:
-    enum ParseState { 
+    enum ParseState {
         PARSING,        // 正在解析命令请求
         PROTOCOLERR,    // 协议错误
         SUCCEED,        // 解析完成
@@ -36,7 +37,7 @@ public:
     enum Flag{
         // 从服务器中设置该标志的连接表示与主服务器相连
         SLAVE = 0x001, // for slave
-        // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件 
+        // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件
         // 从服务器设置该标志表示该连接处于接收同步文件的状态
         SYNC_RDB_FILE = 0x002, // for master and slave
         // 主服务器向设置SYNC_COMMAND标志的连接传播同步命令
@@ -55,13 +56,13 @@ public:
         EXEC_MULTI_WRITE = 0x100,
         SYNC_RECV_PING = 0x200,
     };
-    explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn) 
+    explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn)
         : _db(db),
         _conn(conn),
         _state(PARSING),
         _flag(0),
         _perm(IS_READ | IS_WRITE)
-    {  
+    {
     }
     using CommandList = std::vector<std::string>;
     using TransactionList = std::vector<CommandList>;
@@ -149,6 +150,15 @@ private:
     int64_t _lru;
 };
 
+class _ZsetCompare {
+public:
+    bool operator()(const std::tuple<double, std::string>& lhs,
+                    const std::tuple<double, std::string>& rhs) const
+    {
+        return std::get<0>(lhs) < std::get<0>(rhs);
+    }
+};
+
 class DB {
 public:
     using Key = std::string;
@@ -159,8 +169,12 @@ public:
     using List = std::list<std::string>;
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
+    using _Zset = std::set<std::tuple<double, std::string>, _ZsetCompare>;
+    // 根据一个member可以在常数时间找到其score
+    using _Zmap = std::unordered_map<std::string, double>;
+    using Zset = std::tuple<_Zset, _Zmap>;
     using ExpireMap = std::unordered_map<Key, int64_t>;
-    using WatchMap = std::unordered_map<Key, std::vector<size_t>>; 
+    using WatchMap = std::unordered_map<Key, std::vector<size_t>>;
     explicit DB(DBServer *);
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
@@ -262,11 +276,16 @@ public:
     void hkeysCommand(Context& con);
     void hvalsCommand(Context& con);
     void hgetAllCommand(Context& con);
+    // Zset Keys Operation
+    void zaddCommand(Context& con);
+    void zscoreCommand(Context& con);
+    void zincrbyCommand(Context& con);
 
     static void appendReplyMulti(Context& con, size_t size);
     static void appendReplySingleStr(Context& con, const std::string& s);
     static void appendReplySingleLen(Context& con, size_t size);
     static void appendReplyNumber(Context& con, int64_t number);
+    static void appendReplyDouble(Context& con, double number);
 private:
     bool _strIsNumber(const String& s);
     void _ttl(Context& con, bool seconds);

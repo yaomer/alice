@@ -1,8 +1,9 @@
 #include <time.h>
+#include <stdlib.h>
+#include <errno.h>
 #include <random>
 #include <vector>
 #include <string>
-#include <time.h>
 
 #include "util.h"
 
@@ -30,6 +31,54 @@ const char *convert2f(double value)
 {
     snprintf(convert_buf, sizeof(convert_buf), "%g", value);
     return convert_buf;
+}
+
+thread_local bool str2numerr;
+
+#define STR2LONG 1
+#define STR2LLONG 2
+#define STR2DOUBLE 3
+
+#define str2number(ptr, val, opt) \
+    do { \
+        str2numerr = false; \
+        errno = 0; \
+        char *eptr = nullptr; \
+        switch (opt) { \
+        case STR2LONG: val = strtol(ptr, &eptr, 10); \
+        case STR2LLONG: val = strtoll(ptr, &eptr, 10); \
+        case STR2DOUBLE: val = strtod(ptr, &eptr); \
+        } \
+        if (errno == ERANGE || eptr == ptr) { \
+            str2numerr = true; \
+            val = 0; \
+        } \
+    } while (0)
+
+bool str2numberErr()
+{
+    return str2numerr;
+}
+
+long str2l(const char *nptr)
+{
+    long lval;
+    str2number(nptr, lval, STR2LONG);
+    return lval;
+}
+
+long long str2ll(const char *nptr)
+{
+    long llval;
+    str2number(nptr, llval, STR2LLONG);
+    return llval;
+}
+
+double str2f(const char *nptr)
+{
+    double dval;
+    str2number(nptr, dval, STR2DOUBLE);
+    return dval;
 }
 
 // 分割一个以\n结尾的字符串，将结果保存在argv中

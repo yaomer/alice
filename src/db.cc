@@ -73,6 +73,8 @@ DB::DB(DBServer *dbServer)
         { "HKEYS",      { -2, IS_READ,  BIND(hkeysCommand) } },
         { "HVALS",      { -2, IS_READ,  BIND(hvalsCommand) } },
         { "HGETALL",    { -2, IS_READ,  BIND(hgetAllCommand) } },
+        { "ZADD",       {  4, IS_WRITE, BIND(zaddCommand) } },
+        { "ZSCORE",     { -3, IS_READ,  BIND(zscoreCommand) } },
         { "EXISTS",     { -2, IS_READ,  BIND(existsCommand) } },
         { "TYPE",       { -2, IS_READ,  BIND(typeCommand) } },
         { "TTL",        { -2, IS_READ,  BIND(ttlCommand) } },
@@ -122,7 +124,9 @@ namespace Alice {
     static const char *db_return_out_of_range = "-ERR index out of range\r\n";
     static const char *db_return_string_type = "+string\r\n";
     static const char *db_return_list_type = "+list\r\n";
+    static const char *db_return_hash_type = "+hash\r\n";
     static const char *db_return_set_type = "+set\r\n";
+    static const char *db_return_zset_type = "+zset\r\n";
     static const char *db_return_none_type = "+none\r\n";
     static const char *db_return_unknown_option = "-ERR unknown option\r\n";
 }
@@ -171,16 +175,25 @@ void DB::appendReplyNumber(Context& con, int64_t number)
     con.append("\r\n");
 }
 
+void DB::appendReplyDouble(Context& con, double number)
+{
+    con.append("$");
+    con.append(convert(strlen(convert2f(number))));
+    con.append("\r\n");
+    con.append(convert(number));
+    con.append("\r\n");
+}
+
 //////////////////////////////////////////////////////////////////
 
 void DB::selectCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (!_strIsNumber(cmdlist[1])) {
+    int dbnum = str2l(cmdlist[1].c_str());
+    if (str2numberErr()) {
         con.append("-ERR invalid DB index\r\n");
         return;
     }
-    int dbnum = atoi(cmdlist[1].c_str());
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
         con.append("-ERR DB index is out of range\r\n");
         return;
@@ -209,12 +222,17 @@ void DB::typeCommand(Context& con)
         con.append(db_return_none_type);
         return;
     }
+    expireIfNeeded(cmdlist[1]);
     if (isXXType(it, String))
         con.append(db_return_string_type);
     else if (isXXType(it, List))
         con.append(db_return_list_type);
     else if (isXXType(it, Set))
         con.append(db_return_set_type);
+    else if (isXXType(it, Zset))
+        con.append(db_return_zset_type);
+    else if (isXXType(it, Hash))
+        con.append(db_return_hash_type);
 }
 
 void DB::_ttl(Context& con, bool seconds)
@@ -251,11 +269,11 @@ void DB::_expire(Context& con, bool seconds)
     auto& cmdlist = con.commandList();
     auto it = _hashMap.find(cmdlist[1]);
     if (it != _hashMap.end()) {
-        if (!_strIsNumber(cmdlist[2])) {
+        int64_t expire = str2ll(cmdlist[2].c_str());
+        if (str2numberErr()) {
             con.append(db_return_interger_err);
             return;
         }
-        int64_t expire = atoll(cmdlist[2].c_str());
         if (seconds) expire *= 1000;
         addExpireKey(cmdlist[1], expire);
         con.append(db_return_integer_1);
@@ -374,13 +392,14 @@ void DB::flushAllCommand(Context& con)
 void DB::slaveofCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (_strIsNumber(cmdlist[2])) {
-        _dbServer->setMasterAddr(
-                Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[1].c_str()));
+    int port = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+    } else {
+        _dbServer->setMasterAddr(Angel::InetAddr(port, cmdlist[1].c_str()));
         _dbServer->connectMasterServer();
         con.append(db_return_ok);
-    } else
-        con.append(db_return_interger_err);
+    }
 }
 
 void DB::psyncCommand(Context& con)
@@ -632,13 +651,13 @@ void DB::setCommand(Context& con)
     case 5: // SET key value [EX seconds|PX milliseconds]
         if (strcasecmp(cmdlist[3].c_str(), "EX") == 0
          || strcasecmp(cmdlist[3].c_str(), "PX") == 0) {
-            if (!_strIsNumber(cmdlist[4])) {
+            expire = str2ll(cmdlist[4].c_str());
+            if (str2numberErr()) {
                 con.append(db_return_interger_err);
                 return;
             }
             delExpireKey(cmdlist[1]);
             _hashMap[cmdlist[1]] = cmdlist[2];
-            expire = atoll(cmdlist[4].c_str());
             if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
                 expire *= 1000;
             addExpireKey(cmdlist[1], expire);
@@ -649,7 +668,8 @@ void DB::setCommand(Context& con)
     case 6: // SET key value [EX seconds|PX milliseconds] [NX|XX]
         if (strcasecmp(cmdlist[3].c_str(), "EX") == 0
          || strcasecmp(cmdlist[3].c_str(), "PX") == 0) {
-            if (!_strIsNumber(cmdlist[4])) {
+            expire = str2ll(cmdlist[4].c_str());
+            if (str2numberErr()) {
                 con.append(db_return_interger_err);
                 return;
             }
@@ -673,7 +693,6 @@ void DB::setCommand(Context& con)
                 }
             } else
                 goto syntax_err;
-            expire = atoll(cmdlist[4].c_str());
             if (strcasecmp(cmdlist[3].c_str(), "EX") == 0)
                 expire *= 1000;
             addExpireKey(cmdlist[1], expire);
@@ -822,8 +841,8 @@ void DB::_incr(Context& con, int64_t incr)
     if (it != _hashMap.end()) {
         checkType(con, it, String);
         String& value = getStringValue(it);
-        if (_strIsNumber(value)) {
-            int64_t number = atoll(value.c_str());
+        int64_t number = str2ll(value.c_str());
+        if (!str2numberErr()) {
             number += incr;
             _hashMap[cmdlist[1]] = String(convert(number));
             appendReplyNumber(con, number);
@@ -846,7 +865,11 @@ void DB::incrCommand(Context& con)
 void DB::incrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    int64_t incr = atol(cmdlist[2].c_str());
+    int64_t incr = str2ll(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
     _incr(con, incr);
 }
 
@@ -858,8 +881,12 @@ void DB::decrCommand(Context& con)
 void DB::decrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    int64_t decr = -atol(cmdlist[2].c_str());
-    _incr(con, decr);
+    int64_t decr = str2ll(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
+    _incr(con, -decr);
 }
 
 //////////////////////////////////////////////////////////////////
@@ -1007,7 +1034,11 @@ void DB::lremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
-    int count = atoi(cmdlist[2].c_str());
+    int count = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
     String& value = cmdlist[3];
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
@@ -1076,7 +1107,11 @@ void DB::lindexCommand(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    int index = atoi(cmdlist[2].c_str());
+    int index = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
     size_t size = list.size();
     if (index < 0)
         index += size;
@@ -1102,7 +1137,11 @@ void DB::lsetCommand(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    int index = atoi(cmdlist[2].c_str());
+    int index = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
     size_t size = list.size();
     if (index < 0)
         index += size;
@@ -1131,8 +1170,16 @@ void DB::lrangeCommand(Context& con)
     checkType(con, it, List);
     List& list = getListValue(it);
     size_t end = list.size() - 1;
-    int start = atoi(cmdlist[2].c_str());
-    int stop = atoi(cmdlist[3].c_str());
+    int start = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
+    int stop = str2l(cmdlist[3].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
     if (start < 0)
         start += end + 1;
     if (stop < 0)
@@ -1168,8 +1215,16 @@ void DB::ltrimCommand(Context& con)
     }
     checkType(con, it, List);
     List& list = getListValue(it);
-    int start = atoi(cmdlist[2].c_str());
-    int stop = atoi(cmdlist[3].c_str());
+    int start = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
+    int stop = str2l(cmdlist[3].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
     size_t size = list.size();
     if (start < 0)
         start += size;
@@ -1281,7 +1336,11 @@ void DB::srandMemberCommand(Context& con)
     expireIfNeeded(cmdlist[1]);
     int count = 0;
     if (cmdlist.size() > 2) {
-        count = atoi(cmdlist[2].c_str());
+        count = str2l(cmdlist[2].c_str());
+        if (str2numberErr()) {
+            con.append(db_return_interger_err);
+            return;
+        }
         if (count == 0) {
             con.append(db_return_nil);
             return;
@@ -1748,11 +1807,11 @@ void DB::hincrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
-    if (!_strIsNumber(cmdlist[3])) {
+    int64_t incr = str2ll(cmdlist[3].c_str());
+    if (str2numberErr()) {
         con.append(db_return_interger_err);
         return;
     }
-    int64_t incr = atoll(cmdlist[3].c_str());
     auto it = _hashMap.find(cmdlist[1]);
     if (it == _hashMap.end()) {
         Hash hash;
@@ -1766,11 +1825,11 @@ void DB::hincrbyCommand(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        if (!_strIsNumber(value->second)) {
+        int64_t i64 = str2ll(value->second.c_str());
+        if (str2numberErr()) {
             con.append(db_return_interger_err);
             return;
         }
-        int64_t i64 = atoll(value->second.c_str());
         i64 += incr;
         value->second.assign(convert(i64));
         appendReplyNumber(con, i64);
@@ -1886,6 +1945,79 @@ void DB::hgetAllCommand(Context& con)
 #undef GETKEYS
 #undef GETVALUES
 #undef GETALL
+
+//////////////////////////////////////////////////////////////////
+// Zset Keys Operation
+//////////////////////////////////////////////////////////////////
+
+#define getZsetValue(it) getXXType(it, Zset&)
+
+void DB::zaddCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    if (cmdlist.size() % 2 != 0) {
+        con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
+        return;
+    }
+    touchWatchKey(cmdlist[1]);
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        _Zset zset;
+        _Zmap zmap;
+        for (int i = 2; i < cmdlist.size(); i += 2) {
+            double score = atof(cmdlist[i].c_str());
+            zset.insert(std::make_tuple(score, cmdlist[i+1]));
+            zmap[cmdlist[i+1]] = score;
+        }
+        _hashMap[cmdlist[1]] = std::make_tuple(zset, zmap);
+        appendReplyNumber(con, (cmdlist.size() - 2) / 2);
+        return;
+    }
+    expireIfNeeded(cmdlist[1]);
+    checkType(con, it, Zset);
+    auto& tuple = getZsetValue(it);
+    _Zset& zset = std::get<0>(tuple);
+    _Zmap& zmap = std::get<1>(tuple);
+    int retval = 0;
+    for (int i = 2; i < cmdlist.size(); i += 2) {
+        double score = atof(cmdlist[i].c_str());
+        auto tuple = std::make_tuple(score, cmdlist[i+1]);
+        auto e = zmap.find(cmdlist[i+1]);
+        if (e != zmap.end()) {
+            zmap.erase(cmdlist[i+1]);
+            zset.erase(std::make_tuple(e->second, cmdlist[i+1]));
+        } else
+            retval++;
+        zmap[cmdlist[i+1]] = score;
+        zset.insert(tuple);
+    }
+    appendReplyNumber(con, retval);
+}
+
+void DB::zscoreCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    auto it = _hashMap.find(cmdlist[1]);
+    if (it == _hashMap.end()) {
+        con.append(db_return_nil);
+        return;
+    }
+    expireIfNeeded(cmdlist[1]);
+    checkType(con, it, Zset);
+    auto& tuple = getZsetValue(it);
+    _Zmap zmap = std::get<1>(tuple);
+    auto e = zmap.find(cmdlist[2]);
+    if (e != zmap.end()) {
+        appendReplyDouble(con, e->second);
+    } else
+        con.append(db_return_nil);
+    touchWatchKey(cmdlist[1]);
+}
+
+void DB::zincrbyCommand(Context& con)
+{
+
+}
 
 void DB::expireIfNeeded(const Key& key)
 {
