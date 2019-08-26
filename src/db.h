@@ -155,7 +155,16 @@ public:
     bool operator()(const std::tuple<double, std::string>& lhs,
                     const std::tuple<double, std::string>& rhs) const
     {
-        return std::get<0>(lhs) < std::get<0>(rhs);
+        double lf = std::get<0>(lhs);
+        double rf = std::get<0>(rhs);
+        if (lf < rf) {
+            return true;
+        } else if (lf == rf) {
+            if (std::get<1>(lhs).size() > 0
+             && std::get<1>(lhs).compare(std::get<1>(rhs)) < 0)
+                return true;
+        }
+        return false;
     }
 };
 
@@ -169,7 +178,7 @@ public:
     using List = std::list<std::string>;
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
-    using _Zset = std::set<std::tuple<double, std::string>, _ZsetCompare>;
+    using _Zset = std::multiset<std::tuple<double, std::string>, _ZsetCompare>;
     // 根据一个member可以在常数时间找到其score
     using _Zmap = std::unordered_map<std::string, double>;
     using Zset = std::tuple<_Zset, _Zmap>;
@@ -280,21 +289,45 @@ public:
     void zaddCommand(Context& con);
     void zscoreCommand(Context& con);
     void zincrbyCommand(Context& con);
+    void zcardCommand(Context& con);
+    void zcountCommand(Context& con);
+    void zrangeCommand(Context& con);
+    void zrevRangeCommand(Context& con);
+    void zrankCommand(Context& con);
+    void zrevRankCommand(Context& con);
+    void zrangeByScoreCommand(Context& con);
+    void zrevRangeByScoreCommand(Context& con);
+    void zremCommand(Context& con);
+    void zremRangeByRankCommand(Context& con);
+    void zremRangeByScoreCommand(Context& con);
 
     static void appendReplyMulti(Context& con, size_t size);
     static void appendReplySingleStr(Context& con, const std::string& s);
     static void appendReplySingleLen(Context& con, size_t size);
+    static void appendReplySingleDouble(Context& con, double number);
     static void appendReplyNumber(Context& con, int64_t number);
-    static void appendReplyDouble(Context& con, double number);
 private:
-    bool _strIsNumber(const String& s);
     void _ttl(Context& con, bool seconds);
     void _expire(Context& con, bool seconds);
     void _incr(Context& con, int64_t incr);
-    void _lpush(Context& con, bool leftPush);
-    void _lpushx(Context& con, bool frontPush);
-    void _lpop(Context& con, bool leftPop);
+    void _lpush(Context& con, bool left);
+    void _lpushx(Context& con, bool front);
+    void _lpop(Context& con, bool left);
     void _hgetXX(Context& con, int getXX);
+    void _zrange(Context& con, bool reverse);
+    void _zrank(Context& con, bool reverse);
+    void _zrangeByScore(Context& con, bool reverse);
+    bool _setxx(Context& con, const String& key, const String& value);
+    bool _setnx(Context& con, const String& key, const String& value);
+    void _zrangeByScoreWithLimit(Context& con, _Zset::iterator lowerbound,
+            _Zset::iterator upperbound, const String& ostr, const String& cstr,
+            bool withscores, bool reverse);
+    void _zrangefor(Context& con, _Zset::iterator first, _Zset::iterator last,
+            int count, bool withscores, bool reverse);
+    bool _checkRange(Context& con, int *start, int *stop,
+            int lowerbound, int upperbound);
+    void _zrangeCheckScore(bool *minopen, bool *maxopen, int *lower, int *upper,
+            const String& min, const String& max);
 
     HashMap _hashMap;
     CommandMap _commandMap;

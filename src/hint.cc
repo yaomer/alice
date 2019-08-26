@@ -14,9 +14,12 @@ typedef struct {
 
 #define HTSIZE 1024
 
+// 在hiTable中，若cmdstr1是cmdstr2的前缀，则cmdstr2必须
+// 放在cmdstr1前面（这是hints()实现导致的缺陷，但我暂时并不想去修复它)
+// e.g: SETNX必须放在SET前面，否则将无法提示SETNX
 HintInfo hiTable[HTSIZE] = {
-    { "SETNX",       5, 2, " key value" },
     { "SET",         3, 3, " key value [EX seconds|PX milliseconds] [NX|XX]" },
+    { "SETNX",       5, 2, " key value" },
     { "GETSET",      6, 2, " key value" },
     { "GET",         3, 1, " key" },
     { "APPEND",      6, 2, " key value" },
@@ -69,6 +72,18 @@ HintInfo hiTable[HTSIZE] = {
     { "HVALS",       5, 1, " key" },
     { "ZADD",        4, 4, " key score member [score member ...]" },
     { "ZSCORE",      6, 2, " key member" },
+    { "ZINCRBY",     7, 3, " key increment member" },
+    { "ZCARD",       5, 1, " key" },
+    { "ZCOUNT",      6, 3, " key min max" },
+    { "ZRANGEBYSCORE",      13, 4, " key min max [WITHSCORES] [LIMIT offset count]" },
+    { "ZREVRANGEBYSCORE",   16, 4, " key min max [WITHSCORES] [LIMIT offset count]" },
+    { "ZREMRANGEBYRANK",    15, 3, " key start stop" },
+    { "ZREMRANGEBYSCORE",   16, 3, " key min max" },
+    { "ZRANGE",      6, 4, " key start stop [WITHSCORES]" },
+    { "ZREVRANGE",   9, 4, " key start stop [WITHSCORES]" },
+    { "ZRANK",       5, 2, " key member" },
+    { "ZREVRANK",    8, 2, " key member" },
+    { "ZREM",        4, 2, " key member [member ...]" },
     { "EXISTS",      6, 1, " key" },
     { "TYPE",        4, 1, " key" },
     { "TTL",         3, 1, " key" },
