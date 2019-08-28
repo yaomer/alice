@@ -110,6 +110,8 @@ HintInfo hiTable[HTSIZE] = {
     { "INFO",        4, 0, "" },
     { "SELECT",      6, 1, " index" },
     { "DBSIZE",      6, 0, "" },
+    { "SORT",        4, 2, " key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern ...]]"
+                           " [ASC|DESC] [ALPHA] [STORE destination]" },
     { "", 0, 0, "" },
 };
 

@@ -105,6 +105,14 @@ void Alice::readServerConf()
             ssize_t size = humanSizeToBytes(it[1].c_str());
             if (size < 0) error("repl-backlog-size");
             g_server_conf.repl_backlog_size = size;
+        } else if (strcasecmp(it[0].c_str(), "expire-check-dbnums") == 0) {
+            g_server_conf.expire_check_dbnums = atoi(it[1].c_str());
+            if (g_server_conf.expire_check_dbnums <= 0)
+                error("expire-check-dbnums");
+        } else if (strcasecmp(it[0].c_str(), "expire-check-keys") == 0) {
+            g_server_conf.expire_check_keys = atoi(it[1].c_str());
+            if (g_server_conf.expire_check_keys <= 0)
+                error("expire-check-keys");
         }
     }
 }

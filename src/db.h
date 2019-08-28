@@ -229,6 +229,7 @@ public:
     void subscribeCommand(Context& con);
     void infoCommand(Context& con);
     void dbsizeCommand(Context& con);
+    void sortCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
@@ -307,27 +308,41 @@ public:
     static void appendReplySingleDouble(Context& con, double number);
     static void appendReplyNumber(Context& con, int64_t number);
 private:
-    void _ttl(Context& con, bool seconds);
-    void _expire(Context& con, bool seconds);
+    Iterator find(const Key& key) { return _hashMap.find(key); }
+    bool isFound(Iterator it) { return it != _hashMap.end(); }
+    template <typename T>
+    void insert(const Key& key, const T& value)
+    {
+        auto it = _hashMap.emplace(key, value);
+        if (!it.second) _hashMap.insert(std::make_pair(key, value));
+    }
+
+    void _ttl(Context& con, int option);
+    void _expire(Context& con, int option);
     void _incr(Context& con, int64_t incr);
-    void _lpush(Context& con, bool left);
-    void _lpushx(Context& con, bool front);
-    void _lpop(Context& con, bool left);
+    void _lpush(Context& con, int option);
+    void _lpushx(Context& con, int option);
+    void _lpop(Context& con, int option);
     void _hgetXX(Context& con, int getXX);
     void _zrange(Context& con, bool reverse);
     void _zrank(Context& con, bool reverse);
     void _zrangeByScore(Context& con, bool reverse);
-    bool _setxx(Context& con, const String& key, const String& value);
-    bool _setnx(Context& con, const String& key, const String& value);
     void _zrangeByScoreWithLimit(Context& con, _Zset::iterator lowerbound,
-            _Zset::iterator upperbound, const String& ostr, const String& cstr,
+            _Zset::iterator upperbound, int offset, int count,
             bool withscores, bool reverse);
+    void _zrangeByScoreCheckLimit(unsigned *cmdops, int *lower, int *upper,
+            const String& min, const String& max);
     void _zrangefor(Context& con, _Zset::iterator first, _Zset::iterator last,
             int count, bool withscores, bool reverse);
     bool _checkRange(Context& con, int *start, int *stop,
             int lowerbound, int upperbound);
-    void _zrangeCheckScore(bool *minopen, bool *maxopen, int *lower, int *upper,
-            const String& min, const String& max);
+    void _sort(Context& con, const String& key, unsigned cmdops, const String& by,
+            const String& des, int offset, int count,
+            const std::vector<String>& get);
+    void _sortAppendString(Context& con, std::vector<String>& strings,
+            int offset, int count);
+    void _sortAppendDouble(Context& con, std::vector<double>& numbers,
+            int offset, int count);
 
     HashMap _hashMap;
     CommandMap _commandMap;

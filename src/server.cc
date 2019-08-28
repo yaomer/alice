@@ -223,6 +223,8 @@ void DBServer::checkExpireCycle(int64_t now)
             _curCheckDb = 0;
         DB *db = selectDb(_curCheckDb);
         _curCheckDb++;
+        if (keys > db->expireMap().size())
+            keys = db->expireMap().size();
         for (int j = 0; j < keys; j++) {
             if (db->expireMap().empty()) break;
             auto bucket = getRandBucketNumber(db->expireMap());
