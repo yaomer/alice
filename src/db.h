@@ -314,7 +314,7 @@ private:
     void insert(const Key& key, const T& value)
     {
         auto it = _hashMap.emplace(key, value);
-        if (!it.second) _hashMap.insert(std::make_pair(key, value));
+        if (!it.second) _hashMap[key] = std::move(value);
     }
 
     void _ttl(Context& con, int option);
