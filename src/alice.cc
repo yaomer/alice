@@ -82,8 +82,13 @@ wait:
         const char *ps = s;
         int i = buf.findStr(s, "\r\n");
         if (i < 0) goto wait;
-        size_t len = atoi(s + 1);
-        if (len == 0) goto protocolerr;
+        int len = atoi(s + 1);
+        if (len != -1 && len <= 0) goto protocolerr;
+        if (len == -1) {
+            _reply.push_back(std::string("(nil)"));
+            buf.retrieve(i + 2);
+            break;
+        }
         s += i + 2;
         i = buf.findStr(s, "\r\n");
         if (i < 0) goto wait;
@@ -99,13 +104,18 @@ wait:
         size_t len = atoi(s + 1);
         if (len == 0) goto protocolerr;
         s += i + 2;
-        int j = 1;
         while (len > 0) {
             i = buf.findStr(s, "\r\n");
             if (i < 0) buf.readFd(_fd);
             if (s[0] != '$') goto protocolerr;
-            size_t l = atoi(s + 1);
-            if (l == 0) goto protocolerr;
+            int l = atoi(s + 1);
+            if (l != -1 && l <= 0) goto protocolerr;
+            if (l == -1) {
+                _reply.push_back(std::string("(nil)"));
+                s += i + 2;
+                len--;
+                continue;
+            }
             s += i + 2;
             i = buf.findStr(s, "\r\n");
             if (i < 0) buf.readFd(_fd);
@@ -113,7 +123,6 @@ wait:
             _reply.push_back(std::string(s, l));
             s += i + 2;
             len--;
-            j++;
         }
         if (len == 0) {
             buf.retrieve(s - ps);

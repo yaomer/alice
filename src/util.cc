@@ -49,7 +49,7 @@ thread_local bool str2numerr;
         case STR2LLONG: val = strtoll(ptr, &eptr, 10); break; \
         case STR2DOUBLE: val = strtod(ptr, &eptr); break; \
         } \
-        if (errno == ERANGE || eptr == ptr) { \
+        if (errno == ERANGE || eptr == ptr || *eptr != '\0') { \
             str2numerr = true; \
             val = 0; \
         } \

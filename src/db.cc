@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <list>
+#include <deque>
 #include <functional>
 #include <tuple>
 #include <algorithm>
@@ -124,7 +125,7 @@ DB::DB(DBServer *dbServer)
 namespace Alice {
 
     static const char *db_return_ok = "+OK\r\n";
-    static const char *db_return_nil = "+(nil)\r\n";
+    static const char *db_return_nil = "$-1\r\n";
     static const char *db_return_integer_0 = ": 0\r\n";
     static const char *db_return_integer_1 = ": 1\r\n";
     static const char *db_return_type_err = "-WRONGTYPE Operation"
@@ -951,6 +952,7 @@ void DB::_lpop(Context& con, int option)
         appendReplySingleStr(con, list.back());
         list.pop_back();
     }
+    if (list.empty()) delKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
 }
 
@@ -993,6 +995,7 @@ void DB::rpoplpushCommand(Context& con)
         touchWatchKey(cmdlist[1]);
     }
     srclist.pop_back();
+    if (srclist.empty()) delKey(cmdlist[1]);
 }
 
 void DB::lremCommand(Context& con)
@@ -1043,6 +1046,7 @@ void DB::lremCommand(Context& con)
             }
         }
     }
+    if (list.empty()) delKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
@@ -1233,6 +1237,7 @@ void DB::ltrimCommand(Context& con)
         } else
             i++;
     }
+    if (list.empty()) delKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     con.append(db_return_ok);
 }
@@ -1297,10 +1302,6 @@ void DB::spopCommand(Context& con)
     }
     checkType(con, it, Set);
     Set& set = getSetValue(it);
-    if (set.empty()) {
-        con.append(db_return_nil);
-        return;
-    }
     auto bucket = getRandBucketNumber(set);
     size_t bucketNumber = std::get<0>(bucket);
     size_t where = std::get<1>(bucket);
@@ -1311,6 +1312,7 @@ void DB::spopCommand(Context& con)
             set.erase(set.find(*it));
             break;
         }
+    if (set.empty()) delKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
 }
 
@@ -1410,6 +1412,7 @@ void DB::sremCommand(Context& con)
             retval++;
         }
     }
+    if (set.empty()) delKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
@@ -1426,19 +1429,18 @@ void DB::smoveCommand(Context& con)
     }
     checkType(con, src, Set);
     Set& srcSet = getSetValue(src);
-    auto srcIt = srcSet.find(cmdlist[3]);
-    if (srcIt == srcSet.end()) {
+    auto si = srcSet.find(cmdlist[3]);
+    if (si == srcSet.end()) {
         con.append(db_return_integer_0);
         return;
     }
-    srcSet.erase(srcIt);
+    srcSet.erase(si);
+    if (srcSet.empty()) delKey(cmdlist[1]);
     auto des = find(cmdlist[2]);
     if (isFound(des)) {
         checkType(con, des, Set);
         Set& desSet = getSetValue(des);
-        auto desIt = desSet.find(cmdlist[3]);
-        if (desIt == desSet.end())
-            desSet.emplace(cmdlist[3]);
+        desSet.emplace(cmdlist[3]);
     } else {
         Set set;
         set.emplace(cmdlist[3]);
@@ -1748,6 +1750,7 @@ void DB::hdelCommand(Context& con)
             retval++;
         }
     }
+    if (hash.empty()) delKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
@@ -2472,6 +2475,7 @@ void DB::zremCommand(Context& con)
             rem++;
         }
     }
+    if (zset.empty()) delKey(cmdlist[1]);
     appendReplyNumber(con, rem);
     touchWatchKey(cmdlist[1]);
 }
@@ -2517,6 +2521,7 @@ void DB::zremRangeByRankCommand(Context& con)
         i++;
         rem++;
     }
+    if (zset.empty()) delKey(cmdlist[1]);
     appendReplyNumber(con, rem);
     touchWatchKey(cmdlist[1]);
 }
@@ -2591,6 +2596,7 @@ void DB::zremRangeByScoreCommand(Context& con)
         zset.erase(e);
         rem++;
     }
+    if (zset.empty()) delKey(cmdlist[1]);
     appendReplyNumber(con, rem);
 }
 

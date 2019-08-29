@@ -48,8 +48,13 @@ void Client::parseResponse(Angel::Buffer& buf)
         const char *ps = s;
         int i = buf.findStr(s, "\r\n");
         if (i < 0) goto noenough;
-        size_t len = atoi(s + 1);
-        if (len == 0) goto protocolerr;
+        int len = atoi(s + 1);
+        if (len != -1 && len <= 0) goto protocolerr;
+        if (len == -1) {
+            std::cout << "(nil)\n";
+            buf.retrieve(i + 2);
+            break;
+        }
         s += i + 2;
         i = buf.findStr(s, "\r\n");
         if (i < 0) goto noenough;
@@ -71,8 +76,16 @@ void Client::parseResponse(Angel::Buffer& buf)
             i = buf.findStr(s, "\r\n");
             if (i < 0) goto noenough;
             if (s[0] != '$') goto protocolerr;
-            size_t l = atoi(s + 1);
-            if (l == 0) goto protocolerr;
+            int l = atoi(s + 1);
+            if (l != -1 && l <= 0) goto protocolerr;
+            if (l == -1) {
+                answer.append(convert(j));
+                answer.append(") (nil)\n");
+                s += i + 2;
+                len--;
+                j++;
+                continue;
+            }
             s += i + 2;
             i = buf.findStr(s, "\r\n");
             if (i < 0) goto noenough;

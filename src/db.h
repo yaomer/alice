@@ -339,10 +339,6 @@ private:
     void _sort(Context& con, const String& key, unsigned cmdops, const String& by,
             const String& des, int offset, int count,
             const std::vector<String>& get);
-    void _sortAppendString(Context& con, std::vector<String>& strings,
-            int offset, int count);
-    void _sortAppendDouble(Context& con, std::vector<double>& numbers,
-            int offset, int count);
 
     HashMap _hashMap;
     CommandMap _commandMap;
