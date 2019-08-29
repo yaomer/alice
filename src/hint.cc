@@ -112,6 +112,9 @@ HintInfo hiTable[HTSIZE] = {
     { "DBSIZE",      6, 0, "" },
     { "SORT",        4, 2, " key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern ...]]"
                            " [ASC|DESC] [ALPHA] [STORE destination]" },
+    { "RENAMENX",    8, 2, " key newkey" },
+    { "RENAME",      6, 2, " key newkey" },
+    { "MOVE",        4, 2, " key db" },
     { "", 0, 0, "" },
 };
 

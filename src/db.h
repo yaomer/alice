@@ -230,6 +230,9 @@ public:
     void infoCommand(Context& con);
     void dbsizeCommand(Context& con);
     void sortCommand(Context& con);
+    void renameCommand(Context& con);
+    void renamenxCommand(Context& con);
+    void moveCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);

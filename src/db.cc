@@ -115,6 +115,9 @@ DB::DB(DBServer *dbServer)
         { "SELECT",     { -2, IS_WRITE, BIND(selectCommand) } },
         { "DBSIZE",     { -1, IS_READ,  BIND(dbsizeCommand) } },
         { "SORT",       {  2, IS_READ,  BIND(sortCommand) } },
+        { "RENAME",     { -3, IS_WRITE, BIND(renameCommand) } },
+        { "RENAMENX",   { -3, IS_WRITE, BIND(renamenxCommand) } },
+        { "MOVE",       { -3, IS_WRITE, BIND(moveCommand) } },
         { "ZRANGEBYSCORE",      {  4, IS_READ,  BIND(zrangeByScoreCommand) } },
         { "ZREVRANGEBYSCORE",   {  4, IS_READ,  BIND(zrevRangeByScoreCommand) } },
         { "ZREMRANGEBYRANK",    { -4, IS_WRITE, BIND(zremRangeByRankCommand) } },
@@ -2915,4 +2918,76 @@ end:
         else
             con.append(db_return_nil);
     }
+}
+
+void DB::renameCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    expireIfNeeded(cmdlist[1]);
+    auto it = find(cmdlist[1]);
+    if (!isFound(it)) {
+        con.append("-ERR no such key\r\n");
+        return;
+    }
+    if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
+        con.append(db_return_ok);
+        return;
+    }
+    delExpireKey(cmdlist[2]);
+    delKey(cmdlist[2]);
+    insert(cmdlist[2], it->second);
+    delExpireKey(cmdlist[1]);
+    delKey(cmdlist[1]);
+    con.append(db_return_ok);
+}
+
+void DB::renamenxCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    expireIfNeeded(cmdlist[1]);
+    auto it = find(cmdlist[1]);
+    if (!isFound(it)) {
+        con.append("-ERR no such key\r\n");
+        return;
+    }
+    if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    if (isFound(find(cmdlist[2]))) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    insert(cmdlist[2], it->second);
+    delExpireKey(cmdlist[1]);
+    delKey(cmdlist[1]);
+    con.append(db_return_integer_1);
+}
+
+void DB::moveCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    int dbnum = str2f(cmdlist[2].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_interger_err);
+        return;
+    }
+    if (dbnum < 0 || dbnum >= g_server_conf.databases) {
+        con.append("-ERR DB index out of range\r\n");
+        return;
+    }
+    auto it = find(cmdlist[1]);
+    if (!isFound(it)) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    auto& map = _dbServer->selectDb(dbnum)->hashMap();
+    if (map.find(cmdlist[1]) != map.end()) {
+        con.append(db_return_integer_0);
+        return;
+    }
+    map.emplace(it->first, it->second);
+    delExpireKey(cmdlist[1]);
+    delKey(cmdlist[1]);
+    con.append(db_return_integer_1);
 }
