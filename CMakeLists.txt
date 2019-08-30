@@ -9,6 +9,12 @@ set (PROJECT_SRC_DIR "${PROJECT_SOURCE_DIR}/src")
 set (SERV_SRC_FILES
     ${PROJECT_SRC_DIR}/server.cc
     ${PROJECT_SRC_DIR}/db.cc
+    ${PROJECT_SRC_DIR}/db_string.cc
+    ${PROJECT_SRC_DIR}/db_list.cc
+    ${PROJECT_SRC_DIR}/db_hash.cc
+    ${PROJECT_SRC_DIR}/db_set.cc
+    ${PROJECT_SRC_DIR}/db_zset.cc
+    ${PROJECT_SRC_DIR}/db_sort.cc
     ${PROJECT_SRC_DIR}/rdb.cc
     ${PROJECT_SRC_DIR}/aof.cc
     ${PROJECT_SRC_DIR}/sentinel.cc

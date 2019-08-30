@@ -108,7 +108,7 @@ void Client::parseResponse(Angel::Buffer& buf)
         int i = buf.findStr(s, "\r\n");
         if (i < 0) goto noenough;
         answer.assign(s + 1, i - 1);
-        std::cout << "(integer)" << answer << "\n";
+        std::cout << "(integer) " << answer << "\n";
         buf.retrieve(i + 2);
         break;
     }

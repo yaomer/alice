@@ -26,6 +26,11 @@ enum CommandPerm {
     IS_WRITE = 0x02,
 };
 
+enum ReturnCode {
+    C_OK,
+    C_ERR,
+};
+
 class Context {
 public:
     enum ParseState {
@@ -55,6 +60,8 @@ public:
         // 事务中有写操作
         EXEC_MULTI_WRITE = 0x100,
         SYNC_RECV_PING = 0x200,
+        // 客户端处于阻塞状态
+        BLOCK = 0x400,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn)
         : _db(db),
@@ -89,6 +96,13 @@ public:
     int perm() const { return _perm; }
     void setPerm(int perm) { _perm |= perm; }
     void clearPerm(int perm) { _perm &= ~perm; }
+    int64_t blockStartTime() const { return _blockStartTime; }
+    int blockTimeout() const { return _blockTimeout; }
+    void setBlockTimeout(int timeout)
+    {
+        _blockStartTime = Angel::TimeStamp::now();
+        _blockTimeout = timeout * 1000;
+    }
     void setSlaveAddr(Angel::InetAddr slaveAddr)
     {
         if (_slaveAddr) _slaveAddr.reset();
@@ -109,6 +123,10 @@ private:
     int _perm;
     // 从服务器的inetAddr
     std::shared_ptr<Angel::InetAddr> _slaveAddr;
+    // 执行阻塞命令开始阻塞的时间
+    int64_t _blockStartTime;
+    // 阻塞的时间
+    int _blockTimeout;
 };
 
 class Command {
@@ -168,6 +186,19 @@ public:
     }
 };
 
+struct SortObject {
+    SortObject(const std::string *value)
+        : _value(value)
+    {
+        _u.cmpVal = value;
+    }
+    const std::string *_value;
+    union {
+        double score;
+        const std::string *cmpVal;
+    } _u;
+};
+
 class DB {
 public:
     using Key = std::string;
@@ -179,6 +210,7 @@ public:
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
     using _Zset = std::multiset<std::tuple<double, std::string>, _ZsetCompare>;
+    using SortObjectList = std::deque<SortObject>;
     // 根据一个member可以在常数时间找到其score
     using _Zmap = std::unordered_map<std::string, double>;
     using Zset = std::tuple<_Zset, _Zmap>;
@@ -320,28 +352,21 @@ private:
         if (!it.second) _hashMap[key] = std::move(value);
     }
 
-    void _ttl(Context& con, int option);
-    void _expire(Context& con, int option);
-    void _incr(Context& con, int64_t incr);
-    void _lpush(Context& con, int option);
-    void _lpushx(Context& con, int option);
-    void _lpop(Context& con, int option);
-    void _hgetXX(Context& con, int getXX);
-    void _zrange(Context& con, bool reverse);
-    void _zrank(Context& con, bool reverse);
-    void _zrangeByScore(Context& con, bool reverse);
-    void _zrangeByScoreWithLimit(Context& con, _Zset::iterator lowerbound,
-            _Zset::iterator upperbound, int offset, int count,
-            bool withscores, bool reverse);
-    void _zrangeByScoreCheckLimit(unsigned *cmdops, int *lower, int *upper,
-            const String& min, const String& max);
-    void _zrangefor(Context& con, _Zset::iterator first, _Zset::iterator last,
-            int count, bool withscores, bool reverse);
-    bool _checkRange(Context& con, int *start, int *stop,
-            int lowerbound, int upperbound);
-    void _sort(Context& con, const String& key, unsigned cmdops, const String& by,
-            const String& des, int offset, int count,
-            const std::vector<String>& get);
+    void ttl(Context& con, int option);
+    void expire(Context& con, int option);
+    void incr(Context& con, int64_t incr);
+    void lpush(Context& con, int option);
+    void lpushx(Context& con, int option);
+    void lpop(Context& con, int option);
+    void hgetXX(Context& con, int getXX);
+    void zrange(Context& con, bool reverse);
+    void zrank(Context& con, bool reverse);
+    void zrangeByScore(Context& con, bool reverse);
+    int checkRange(Context& con, int *start, int *stop, int lowerbound, int upperbound);
+    int sortGetResult(Context& con, const String& key, SortObjectList& result, unsigned *cmdops);
+    void sortByPattern(unsigned *cmdops, const String& by, SortObjectList& result);
+    void sortByGetKeys(SortObjectList& result, unsigned cmdops, const std::vector<std::string>& get);
+    void sortStore(SortObjectList& result, unsigned cmdops, const String& des);
 
     HashMap _hashMap;
     CommandMap _commandMap;
@@ -349,7 +374,35 @@ private:
     ExpireMap _expireMap;
     WatchMap _watchMap;
 };
-
 };
+
+// type(it): DB::Iterator
+#define isXXType(it, _type) \
+    ((it)->second.value().type() == typeid(_type))
+#define checkType(con, it, _type) \
+    do { \
+        if (!isXXType(it, _type)) { \
+            (con).append(db_return_type_err); \
+            return; \
+        } \
+    } while (0)
+#define getXXType(it, _type) \
+    (std::any_cast<_type>((it)->second.value()))
+
+#define getStringValue(it)  getXXType(it, String&)
+#define getListValue(it)    getXXType(it, List&)
+#define getHashValue(it)    getXXType(it, Hash&)
+#define getSetValue(it)     getXXType(it, Set&)
+#define getZsetValue(it)    getXXType(it, Zset&)
+
+extern const char *db_return_ok;
+extern const char *db_return_nil;
+extern const char *db_return_0;
+extern const char *db_return_1;
+extern const char *db_return_type_err;
+extern const char *db_return_integer_err;
+extern const char *db_return_float_err;
+extern const char *db_return_syntax_err;
+extern const char *db_return_no_such_key;
 
 #endif

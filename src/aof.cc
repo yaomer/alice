@@ -91,11 +91,6 @@ void Aof::load()
     fclose(fp);
 }
 
-#define isXXType(it, _type) \
-    ((it).second.value().type() == typeid(_type))
-#define getXXType(it, _type) \
-    (std::any_cast<_type>((it).second.value()))
-
 void Aof::rewriteBackground()
 {
     strcpy(tmpfile, "tmp.XXXXX");
@@ -132,15 +127,15 @@ void Aof::rewrite()
                     rewriteExpire(it.first, expire->second);
                 }
             }
-            if (isXXType(it, DB::String))
+            if (isXXType(&it, DB::String))
                 rewriteString(it);
-            else if (isXXType(it, DB::List))
+            else if (isXXType(&it, DB::List))
                 rewriteList(it);
-            else if (isXXType(it, DB::Set))
+            else if (isXXType(&it, DB::Set))
                 rewriteSet(it);
-            else if (isXXType(it, DB::Hash))
+            else if (isXXType(&it, DB::Hash))
                 rewriteHash(it);
-            else
+            else if (isXXType(&it, DB::Zset))
                 rewriteZset(it);
             index++;
         }
@@ -186,7 +181,7 @@ void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)
 
 void Aof::rewriteString(Pair pair)
 {
-    DB::String& string = getXXType(pair, DB::String&);
+    DB::String& string = getXXType(&pair, DB::String&);
     append("*3\r\n$3\r\nSET\r\n$");
     append(convert(pair.first.size()));
     append("\r\n");
@@ -198,7 +193,7 @@ void Aof::rewriteString(Pair pair)
 
 void Aof::rewriteList(Pair pair)
 {
-    DB::List& list = getXXType(pair, DB::List&);
+    DB::List& list = getXXType(&pair, DB::List&);
     if (list.empty()) return;
     append("*");
     append(convert(list.size() + 2));
@@ -216,7 +211,7 @@ void Aof::rewriteList(Pair pair)
 
 void Aof::rewriteSet(Pair pair)
 {
-    DB::Set& set = getXXType(pair, DB::Set&);
+    DB::Set& set = getXXType(&pair, DB::Set&);
     if (set.empty()) return;
     append("*");
     append(convert(set.size() + 2));
@@ -234,7 +229,7 @@ void Aof::rewriteSet(Pair pair)
 
 void Aof::rewriteHash(Pair pair)
 {
-    DB::Hash& hash = getXXType(pair, DB::Hash&);
+    DB::Hash& hash = getXXType(&pair, DB::Hash&);
     if (hash.empty()) return;
     append("*");
     append(convert(hash.size() * 2 + 2));
@@ -255,7 +250,7 @@ void Aof::rewriteHash(Pair pair)
 
 void Aof::rewriteZset(Pair pair)
 {
-    auto& tuple = getXXType(pair, DB::Zset&);
+    auto& tuple = getXXType(&pair, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);
     if (zset.empty()) return;
     append("*");

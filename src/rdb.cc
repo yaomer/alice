@@ -32,11 +32,6 @@ namespace Alice {
     static unsigned char rdb_64bit_len = 0x81;
 }
 
-#define isXXType(it, _type) \
-    ((it).second.value().type() == typeid(_type))
-#define getXXType(it, _type) \
-    (std::any_cast<_type>((it).second.value()))
-
 void Rdb::save()
 {
     char tmpfile[16];
@@ -66,16 +61,17 @@ void Rdb::save()
                     append(&timeval, 8);
                 }
             }
-            if (isXXType(it, DB::String)) {
+            if (isXXType(&it, DB::String)) {
                 saveString(it);
-            } else if (isXXType(it, DB::List)) {
+            } else if (isXXType(&it, DB::List)) {
                 saveList(it);
-            } else if (isXXType(it, DB::Set)) {
+            } else if (isXXType(&it, DB::Set)) {
                 saveSet(it);
-            } else if (isXXType(it, DB::Hash)) {
+            } else if (isXXType(&it, DB::Hash)) {
                 saveHash(it);
-            } else
+            } else if (isXXType(&it, DB::Zset)) {
                 saveZset(it);
+            }
         }
         index++;
     }
@@ -156,7 +152,7 @@ void Rdb::saveString(Pair pair)
     saveLen(string_type);
     saveLen(pair.first.size());
     append(pair.first);
-    DB::String& string = getXXType(pair, DB::String&);
+    DB::String& string = getXXType(&pair, DB::String&);
     saveLen(string.size());
     append(string);
 }
@@ -166,7 +162,7 @@ void Rdb::saveList(Pair pair)
     saveLen(list_type);
     saveLen(pair.first.size());
     append(pair.first);
-    DB::List& list = getXXType(pair, DB::List&);
+    DB::List& list = getXXType(&pair, DB::List&);
     saveLen(list.size());
     for (auto& it : list) {
         saveLen(it.size());
@@ -179,7 +175,7 @@ void Rdb::saveSet(Pair pair)
     saveLen(set_type);
     saveLen(pair.first.size());
     append(pair.first);
-    DB::Set& set = getXXType(pair, DB::Set&);
+    DB::Set& set = getXXType(&pair, DB::Set&);
     saveLen(set.size());
     for (auto& it : set) {
         saveLen(it.size());
@@ -192,7 +188,7 @@ void Rdb::saveHash(Pair pair)
     saveLen(hash_type);
     saveLen(pair.first.size());
     append(pair.first);
-    DB::Hash& hash = getXXType(pair, DB::Hash&);
+    DB::Hash& hash = getXXType(&pair, DB::Hash&);
     saveLen(hash.size());
     for (auto& it : hash) {
         saveLen(it.first.size());
@@ -207,7 +203,7 @@ void Rdb::saveZset(Pair pair)
     saveLen(zset_type);
     saveLen(pair.first.size());
     append(pair.first);
-    auto& tuple = getXXType(pair, DB::Zset&);
+    auto& tuple = getXXType(&pair, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);
     saveLen(zset.size());
     for (auto& it : zset) {
