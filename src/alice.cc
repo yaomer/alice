@@ -137,6 +137,7 @@ wait:
         break;
     }
     }
+    return;
 protocolerr:
     _err = PROTOCOL_ERR;
 }

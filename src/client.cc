@@ -1,7 +1,7 @@
-#include <Angel/EventLoopThread.h>
-#include <Angel/TcpClient.h>
+#include <Angel/Buffer.h>
 #include <linenoise.h>
 #include <unistd.h>
+#include <iostream>
 #include <map>
 #include "client.h"
 #include "util.h"
@@ -22,22 +22,31 @@ void Client::send()
         _message += it;
         _message += "\r\n";
         if (strcasecmp(it.c_str(), "SUBSCRIBE") == 0)
-            _flag |= PUBSUB;
+            _flag = PUBSUB;
     }
     _argv.clear();
-    _client.conn()->send(_message);
+    size_t remainBytes = _message.size();
+    const char *data = _message.data();
+    while (remainBytes > 0) {
+        ssize_t n = write(_fd, data, remainBytes);
+        remainBytes -= n;
+        data += n;
+    }
     _message.clear();
 }
 
-void Client::parseResponse(Angel::Buffer& buf)
+void Client::parseResponse()
 {
+    Angel::Buffer buf;
+wait:
+    buf.readFd(_fd);
     char *s = buf.peek();
     std::string answer;
     switch (s[0]) {
     case '+':
     case '-': {
         int crlf = buf.findCrlf();
-        if (crlf < 0) goto noenough;
+        if (crlf < 0) goto wait;
         answer.assign(s + 1, crlf);
         if (s[0] == '-') std::cout << "(error) ";
         buf.retrieve(crlf + 2);
@@ -47,7 +56,7 @@ void Client::parseResponse(Angel::Buffer& buf)
     case '$': {
         const char *ps = s;
         int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto noenough;
+        if (i < 0) goto wait;
         int len = atoi(s + 1);
         if (len != -1 && len <= 0) goto protocolerr;
         if (len == -1) {
@@ -57,7 +66,7 @@ void Client::parseResponse(Angel::Buffer& buf)
         }
         s += i + 2;
         i = buf.findStr(s, "\r\n");
-        if (i < 0) goto noenough;
+        if (i < 0) goto wait;
         if (i != len) goto protocolerr;
         answer.assign(s, len);
         buf.retrieve(s + i + 2 - ps);
@@ -67,14 +76,14 @@ void Client::parseResponse(Angel::Buffer& buf)
     case '*': {
         const char *ps = s;
         int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto noenough;
+        if (i < 0) goto wait;
         size_t len = atoi(s + 1);
         if (len == 0) goto protocolerr;
         s += i + 2;
         int j = 1;
         while (len > 0) {
             i = buf.findStr(s, "\r\n");
-            if (i < 0) goto noenough;
+            if (i < 0) buf.readFd(_fd);
             if (s[0] != '$') goto protocolerr;
             int l = atoi(s + 1);
             if (l != -1 && l <= 0) goto protocolerr;
@@ -88,7 +97,7 @@ void Client::parseResponse(Angel::Buffer& buf)
             }
             s += i + 2;
             i = buf.findStr(s, "\r\n");
-            if (i < 0) goto noenough;
+            if (i < 0) buf.readFd(_fd);
             if (i != l) goto protocolerr;
             answer.append(convert(j));
             answer.append(") \"");
@@ -106,7 +115,7 @@ void Client::parseResponse(Angel::Buffer& buf)
     }
     case ':': {
         int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto noenough;
+        if (i < 0) goto wait;
         answer.assign(s + 1, i - 1);
         std::cout << "(integer) " << answer << "\n";
         buf.retrieve(i + 2);
@@ -114,12 +123,8 @@ void Client::parseResponse(Angel::Buffer& buf)
     }
     }
     return;
-noenough:
-    _state = NOENOUGH;
-    return;
 protocolerr:
-    _state = PROTOCOLERR;
-    return;
+    _flag = PROTOCOLERR;
 }
 
 void completion(const char *buf, linenoiseCompletions *lc);
@@ -131,10 +136,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "./cli [port]\n");
         return 1;
     }
-    Angel::EventLoopThread t_loop;
-    Angel::InetAddr connAddr(atoi(argv[1]), "127.0.0.1");
-    Alice::Client client(t_loop.getLoop(), connAddr);
-    client.start();
+    Alice::Client client;
+    client.connect("127.0.0.1", atoi(argv[1]));
 
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
@@ -148,12 +151,16 @@ int main(int argc, char *argv[])
             std::cout << "input error\n";
         }
         client.send();
-        if (client.flag() & Alice::Client::PUBSUB) {
+        if (client.flag() == Alice::Client::PUBSUB) {
             while (true)
                 pause();
         }
+        client.parseResponse();
+        if (client.flag() == Client::PROTOCOLERR) {
+            std::cout << "protocol error\n";
+            abort();
+        }
         line[len] = '\0';
-        usleep(200000);
         linenoiseHistoryAdd(line);
         linenoiseFree(line);
     }
