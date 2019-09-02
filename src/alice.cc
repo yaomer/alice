@@ -57,89 +57,105 @@ void AliceContext::executor(const char *fmt, ...)
     recvResponse();
 }
 
-void AliceContext::recvResponse()
+void AliceContext::parseStatusReply()
 {
-    _reply.clear();
-    Angel::Buffer buf;
-wait:
-    buf.readFd(_fd);
-    char *s = buf.peek();
-    switch (s[0]) {
-    case '+':
-    case '-': {
-        int crlf = buf.findCrlf();
-        if (crlf < 0) goto wait;
-        if (s[0] == '-') {
-            _err = OTHER_ERR;
-            _errStr.assign(s + 1, crlf);
-        } else {
-            _reply.push_back(std::string(s + 1, crlf));
-        }
-        buf.retrieve(crlf + 2);
-        break;
+next:
+    char *s = _buf.peek();
+    int crlf = _buf.findCrlf();
+    if (crlf < 0) { read(); goto next; }
+    if (s[0] == '-') {
+        _err = OTHER_ERR;
+        _errStr.assign(s + 1, crlf);
+    } else {
+        _reply.emplace_back(std::string(s + 1, crlf));
     }
-    case '$': {
+    _buf.retrieve(crlf + 2);
+}
+
+void AliceContext::parseIntegerReply()
+{
+next:
+    char *s = _buf.peek();
+    int crlf = _buf.findCrlf();
+    if (crlf < 0) { read(); goto next; }
+    _reply.emplace_back(std::string(s + 1, crlf));
+    _buf.retrieve(crlf + 2);
+}
+
+void AliceContext::parseBulkReply()
+{
+next:
+    char *s = _buf.peek();
+    const char *ps = s;
+    int crlf = _buf.findCrlf();
+    if (crlf < 0) { read(); goto next; }
+    int l = atoi(s + 1);
+    if (l != -1 && l <= 0) goto protocolerr;
+    if (l == -1) {
+        _reply.emplace_back(std::string("(nil)"));
+        _buf.retrieve(crlf + 2);
+        return;
+    }
+    s += crlf + 2;
+    crlf = _buf.findStr(s, "\r\n");
+    if (crlf < 0) { read(); goto next; }
+    if (crlf != l) goto protocolerr;
+    _reply.emplace_back(std::string(s, l));
+    _buf.retrieve(s + l + 2 - ps);
+    return;
+protocolerr:
+    _err = PROTOCOL_ERR;
+}
+
+void AliceContext::parseMultiBulkReply()
+{
+next:
+    char *s = _buf.peek();
+    int i = _buf.findCrlf();
+    if (i < 0) { read(); goto next; }
+    size_t len = atoi(s + 1);
+    if (len == 0) goto protocolerr;
+    s += i + 2;
+    _buf.retrieve(i + 2);
+    while (len > 0) {
+then:
         const char *ps = s;
-        int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        int len = atoi(s + 1);
-        if (len != -1 && len <= 0) goto protocolerr;
-        if (len == -1) {
-            _reply.push_back(std::string("(nil)"));
-            buf.retrieve(i + 2);
-            break;
-        }
+        i = _buf.findStr(s, "\r\n");
+        if (i < 0) { read(); s = _buf.peek(); goto then; }
+        if (s[0] != '$') goto protocolerr;
+        int l = atoi(s + 1);
+        if (l != -1 && l <= 0) goto protocolerr;
         s += i + 2;
-        i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        if (i != len) goto protocolerr;
-        _reply.push_back(std::string(s, len));
-        buf.retrieve(s + i + 2 - ps);
-        break;
-    }
-    case '*': {
-        char *ps = s;
-        int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        size_t len = atoi(s + 1);
-        if (len == 0) goto protocolerr;
-        s += i + 2;
-        while (len > 0) {
-            i = buf.findStr(s, "\r\n");
-            if (i < 0) buf.readFd(_fd);
-            if (s[0] != '$') goto protocolerr;
-            int l = atoi(s + 1);
-            if (l != -1 && l <= 0) goto protocolerr;
-            if (l == -1) {
-                _reply.push_back(std::string("(nil)"));
-                s += i + 2;
-                len--;
-                continue;
-            }
-            s += i + 2;
-            i = buf.findStr(s, "\r\n");
-            if (i < 0) buf.readFd(_fd);
-            if (i != l) goto protocolerr;
-            _reply.push_back(std::string(s, l));
-            s += i + 2;
+        if (l == -1) {
+            _reply.emplace_back(std::string("(nil)"));
+            _buf.retrieve(i + 2);
             len--;
+            continue;
         }
-        if (len == 0) {
-            buf.retrieve(s - ps);
-        }
-        break;
-    }
-    case ':': {
-        int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        _reply.push_back(std::string(s + 1, i - 1));
-        buf.retrieve(i + 2);
-        break;
-    }
+        i = _buf.findStr(s, "\r\n");
+        if (i < 0) { read(); s = _buf.peek(); goto then; }
+        if (i != l) goto protocolerr;
+        _reply.emplace_back(std::string(s, l));
+        s += i + 2;
+        _buf.retrieve(s - ps);
+        len--;
     }
     return;
 protocolerr:
     _err = PROTOCOL_ERR;
+}
+
+void AliceContext::recvResponse()
+{
+    _reply.clear();
+    _buf.readFd(_fd);
+    switch (_buf[0]) {
+    case '+': case '-': parseStatusReply(); break;
+    case ':': parseIntegerReply(); break;
+    case '$': parseBulkReply(); break;
+    case '*': parseMultiBulkReply(); break;
+    default: _err = PROTOCOL_ERR; break;
+    }
 }
 
 void AliceContext::connect(const char *ip, int port)

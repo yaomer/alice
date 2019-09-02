@@ -35,96 +35,97 @@ void Client::send()
     _message.clear();
 }
 
-void Client::parseResponse()
+void Client::parseStatusReply()
 {
-    Angel::Buffer buf;
-wait:
-    buf.readFd(_fd);
-    char *s = buf.peek();
-    std::string answer;
-    switch (s[0]) {
-    case '+':
-    case '-': {
-        int crlf = buf.findCrlf();
-        if (crlf < 0) goto wait;
-        answer.assign(s + 1, crlf);
-        if (s[0] == '-') std::cout << "(error) ";
-        buf.retrieve(crlf + 2);
-        std::cout << answer << "\n";
-        break;
-    }
-    case '$': {
+next:
+    char *s = _buf.peek();
+    int crlf = _buf.findCrlf();
+    if (crlf < 0) { read(); goto next; }
+    if (s[0] == '-') std::cout << "(error) ";
+    std::cout << std::string(s + 1, crlf) << "\n";
+    _buf.retrieve(crlf + 2);
+}
+
+void Client::parseIntegerReply()
+{
+next:
+    char *s = _buf.peek();
+    int crlf = _buf.findCrlf();
+    if (crlf < 0) { read(); goto next; }
+    std::cout << "(integer) " << std::string(s + 1, crlf) << "\n";
+    _buf.retrieve(crlf + 2);
+}
+
+void Client::parseBulkReply()
+{
+next:
+    char *s = _buf.peek();
+    const char *ps = s;
+    int crlf = _buf.findCrlf();
+    if (crlf < 0) { read(); goto next; }
+    int l = atoi(s + 1);
+    if (l != -1 && l <= 0) goto protocolerr;
+    if (l == -1) { std::cout << "(nil)\n"; return; }
+    s += crlf + 2;
+    crlf = _buf.findStr(s, "\r\n");
+    if (crlf < 0) { read(); goto next; }
+    if (crlf != l) goto protocolerr;
+    std::cout << "\"" << std::string(s, l) << "\"\n";
+    _buf.retrieve(s + l + 2 - ps);
+    return;
+protocolerr:
+    _flag = PROTOCOLERR;
+}
+
+void Client::parseMultiBulkReply()
+{
+next:
+    char *s = _buf.peek();
+    int i = _buf.findCrlf();
+    int j = 1;
+    if (i < 0) { read(); goto next; }
+    size_t len = atoi(s + 1);
+    if (len == 0) goto protocolerr;
+    s += i + 2;
+    _buf.retrieve(i + 2);
+    while (len > 0) {
+then:
         const char *ps = s;
-        int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        int len = atoi(s + 1);
-        if (len != -1 && len <= 0) goto protocolerr;
-        if (len == -1) {
-            std::cout << "(nil)\n";
-            buf.retrieve(i + 2);
-            break;
-        }
+        i = _buf.findStr(s, "\r\n");
+        if (i < 0) { read(); s = _buf.peek(); goto then; }
+        if (s[0] != '$') goto protocolerr;
+        int l = atoi(s + 1);
+        if (l != -1 && l <= 0) goto protocolerr;
         s += i + 2;
-        i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        if (i != len) goto protocolerr;
-        answer.assign(s, len);
-        buf.retrieve(s + i + 2 - ps);
-        std::cout << "\"" << answer << "\"\n";
-        break;
-    }
-    case '*': {
-        const char *ps = s;
-        int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        size_t len = atoi(s + 1);
-        if (len == 0) goto protocolerr;
-        s += i + 2;
-        int j = 1;
-        while (len > 0) {
-            i = buf.findStr(s, "\r\n");
-            if (i < 0) buf.readFd(_fd);
-            if (s[0] != '$') goto protocolerr;
-            int l = atoi(s + 1);
-            if (l != -1 && l <= 0) goto protocolerr;
-            if (l == -1) {
-                answer.append(convert(j));
-                answer.append(") (nil)\n");
-                s += i + 2;
-                len--;
-                j++;
-                continue;
-            }
-            s += i + 2;
-            i = buf.findStr(s, "\r\n");
-            if (i < 0) buf.readFd(_fd);
-            if (i != l) goto protocolerr;
-            answer.append(convert(j));
-            answer.append(") \"");
-            answer.append(std::string(s, l));
-            answer.append("\"\n");
-            s += i + 2;
+        if (l == -1) {
+            std::cout << j++ << ") (nil)\n";
+            _buf.retrieve(i + 2);
             len--;
-            j++;
+            continue;
         }
-        if (len == 0) {
-            std::cout << answer;
-            buf.retrieve(s - ps);
-        }
-        break;
-    }
-    case ':': {
-        int i = buf.findStr(s, "\r\n");
-        if (i < 0) goto wait;
-        answer.assign(s + 1, i - 1);
-        std::cout << "(integer) " << answer << "\n";
-        buf.retrieve(i + 2);
-        break;
-    }
+        i = _buf.findStr(s, "\r\n");
+        if (i < 0) { read(); s = _buf.peek(); goto then; }
+        if (i != l) goto protocolerr;
+        std::cout << j++ << ") \"" << std::string(s, l) << "\"\n";
+        s += i + 2;
+        _buf.retrieve(s - ps);
+        len--;
     }
     return;
 protocolerr:
     _flag = PROTOCOLERR;
+}
+
+void Client::parseResponse()
+{
+    _buf.readFd(_fd);
+    switch (_buf[0]) {
+    case '+': case '-': parseStatusReply(); break;
+    case ':': parseIntegerReply(); break;
+    case '$': parseBulkReply(); break;
+    case '*': parseMultiBulkReply(); break;
+    default: _flag = PROTOCOLERR; break;
+    }
 }
 
 void completion(const char *buf, linenoiseCompletions *lc);

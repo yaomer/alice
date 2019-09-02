@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <Angel/Buffer.h>
+
 namespace Alice {
 
 class AliceContext {
@@ -13,8 +15,8 @@ public:
         _fd(-1)
     {
     }
-    enum { 
-        CONNECT_ERR = 1, 
+    enum {
+        CONNECT_ERR = 1,
         PROTOCOL_ERR,
         OTHER_ERR,
     };
@@ -27,13 +29,19 @@ public:
     void close();
 private:
     void sendRequest();
+    void parseStatusReply();
+    void parseIntegerReply();
+    void parseBulkReply();
+    void parseMultiBulkReply();
     void recvResponse();
+    void read() { _buf.readFd(_fd); }
 
     List _reply;
     int _err;
     std::string _errStr;
     List _argv;
     int _fd;
+    Angel::Buffer _buf;
 };
 }
 

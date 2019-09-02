@@ -36,10 +36,17 @@ public:
     int flag() const { return _flag; }
     Arglist& argv() { return _argv; }
 private:
+    void parseStatusReply();
+    void parseIntegerReply();
+    void parseBulkReply();
+    void parseMultiBulkReply();
+    void read() { _buf.readFd(_fd); }
+
     int _fd;
     Arglist _argv;
-    std::string _message;
     int _flag;
+    Angel::Buffer _buf;
+    std::string _message;
 };
 }
 
