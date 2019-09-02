@@ -66,7 +66,7 @@ void DB::spopCommand(Context& con)
             set.erase(set.find(*it));
             break;
         }
-    if (set.empty()) delKey(cmdlist[1]);
+    if (set.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
 }
 
@@ -166,7 +166,7 @@ void DB::sremCommand(Context& con)
             retval++;
         }
     }
-    if (set.empty()) delKey(cmdlist[1]);
+    if (set.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
@@ -189,7 +189,7 @@ void DB::smoveCommand(Context& con)
         return;
     }
     srcSet.erase(si);
-    if (srcSet.empty()) delKey(cmdlist[1]);
+    if (srcSet.empty()) delKeyWithExpire(cmdlist[1]);
     auto des = find(cmdlist[2]);
     if (isFound(des)) {
         checkType(con, des, Set);

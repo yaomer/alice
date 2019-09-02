@@ -40,7 +40,7 @@ public:
         REPLY,          // 发送响应
     };
     enum Flag{
-        // 从服务器中设置该标志的连接表示与主服务器相连
+        // 主服务器中设置该标志的连接表示与从服务器相连
         SLAVE = 0x001, // for slave
         // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件
         // 从服务器设置该标志表示该连接处于接收同步文件的状态
@@ -60,19 +60,24 @@ public:
         // 事务中有写操作
         EXEC_MULTI_WRITE = 0x100,
         SYNC_RECV_PING = 0x200,
-        // 客户端处于阻塞状态
-        BLOCK = 0x400,
+        // 从服务器中设置该标志的连接表示与主服务器相连
+        MASTER = 0x400,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn)
         : _db(db),
         _conn(conn),
         _state(PARSING),
         _flag(0),
-        _perm(IS_READ | IS_WRITE)
+        _perm(IS_READ | IS_WRITE),
+        _blockStartTime(-1),
+        _blockTimeout(-1),
+        _blockDbnum(-1)
     {
     }
     using CommandList = std::vector<std::string>;
     using TransactionList = std::vector<CommandList>;
+    using WatchKeys = std::vector<std::string>;
+    using BlockingKeys = std::vector<std::string>;
 
     DBServer *db() { return _db; }
     const Angel::TcpConnectionPtr& conn() { return _conn; }
@@ -83,6 +88,7 @@ public:
     void addMultiArg(CommandList& cmdlist)
     { _transactionList.push_back(cmdlist); }
     TransactionList& transactionList() { return _transactionList; }
+    WatchKeys& watchKeys() { return _watchKeys; }
     void append(const std::string& s)
     { _buffer.append(s); }
     void assign(const std::string& s)
@@ -98,6 +104,11 @@ public:
     void clearPerm(int perm) { _perm &= ~perm; }
     int64_t blockStartTime() const { return _blockStartTime; }
     int blockTimeout() const { return _blockTimeout; }
+    int blockDbnum() const { return _blockDbnum; }
+    void setBlockDbnum(int dbnum) { _blockDbnum = dbnum; }
+    BlockingKeys& blockingKeys() { return _blockingKeys; }
+    std::string& lastcmd() { return _lastcmd; }
+    void setLastcmd(const std::string& cmd) { _lastcmd = cmd; }
     void setBlockTimeout(int timeout)
     {
         _blockStartTime = Angel::TimeStamp::now();
@@ -115,6 +126,7 @@ private:
     CommandList _commandList;
     // 事务队列
     TransactionList _transactionList;
+    WatchKeys _watchKeys;
     // 发送缓冲区
     std::string _buffer;
     int _state;
@@ -127,6 +139,10 @@ private:
     int64_t _blockStartTime;
     // 阻塞的时间
     int _blockTimeout;
+    // 阻塞的所有keys
+    BlockingKeys _blockingKeys;
+    int _blockDbnum;
+    std::string _lastcmd;
 };
 
 class Command {
@@ -216,10 +232,13 @@ public:
     using Zset = std::tuple<_Zset, _Zmap>;
     using ExpireMap = std::unordered_map<Key, int64_t>;
     using WatchMap = std::unordered_map<Key, std::vector<size_t>>;
+    using BlockingKeys = std::unordered_map<Key, std::list<size_t>>;
     explicit DB(DBServer *);
     ~DB() {  }
     HashMap& hashMap() { return _hashMap; }
     void delKey(const Key& key) { _hashMap.erase(key); }
+    void delKeyWithExpire(const Key& key)
+    { _hashMap.erase(key); _expireMap.erase(key); }
     CommandMap& commandMap() { return _commandMap; }
 
     ExpireMap& expireMap() { return _expireMap; }
@@ -228,8 +247,11 @@ public:
     void delExpireKey(const Key& key) { _expireMap.erase(key); }
     void expireIfNeeded(const Key& key);
 
+    BlockingKeys& blockingKeys() { return _blockingKeys; }
+    void clearBlockingKeysForContext(Context& con);
+
     void watchKeyForClient(const Key& key, size_t id);
-    void unwatchKeys() { _watchMap.clear(); }
+    void unwatchKeys(Context& con);
     void touchWatchKey(const Key& key);
 
     void selectCommand(Context& con);
@@ -292,6 +314,9 @@ public:
     void lsetCommand(Context& con);
     void lrangeCommand(Context& con);
     void ltrimCommand(Context& con);
+    void blpopCommand(Context& con);
+    void brpopCommand(Context& con);
+    void brpoplpushCommand(Context& con);
     // Set Keys Operation
     void saddCommand(Context& con);
     void sisMemberCommand(Context& con);
@@ -350,6 +375,8 @@ private:
     {
         auto it = _hashMap.emplace(key, value);
         if (!it.second) _hashMap[key] = std::move(value);
+        if (typeid(T) == typeid(List))
+            blockingPop(key);
     }
 
     void ttl(Context& con, int option);
@@ -358,6 +385,8 @@ private:
     void lpush(Context& con, int option);
     void lpushx(Context& con, int option);
     void lpop(Context& con, int option);
+    void blpop(Context& con, int option);
+    void blockingPop(const std::string& key);
     void hgetXX(Context& con, int getXX);
     void zrange(Context& con, bool reverse);
     void zrank(Context& con, bool reverse);
@@ -368,11 +397,12 @@ private:
     void sortByGetKeys(SortObjectList& result, unsigned cmdops, const std::vector<std::string>& get);
     void sortStore(SortObjectList& result, unsigned cmdops, const String& des);
 
+    DBServer *_dbServer;
     HashMap _hashMap;
     CommandMap _commandMap;
-    DBServer *_dbServer;
     ExpireMap _expireMap;
     WatchMap _watchMap;
+    BlockingKeys _blockingKeys;
 };
 };
 
@@ -389,11 +419,11 @@ private:
 #define getXXType(it, _type) \
     (std::any_cast<_type>((it)->second.value()))
 
-#define getStringValue(it)  getXXType(it, String&)
-#define getListValue(it)    getXXType(it, List&)
-#define getHashValue(it)    getXXType(it, Hash&)
-#define getSetValue(it)     getXXType(it, Set&)
-#define getZsetValue(it)    getXXType(it, Zset&)
+#define getStringValue(it)  getXXType(it, DB::String&)
+#define getListValue(it)    getXXType(it, DB::List&)
+#define getHashValue(it)    getXXType(it, DB::Hash&)
+#define getSetValue(it)     getXXType(it, DB::Set&)
+#define getZsetValue(it)    getXXType(it, DB::Zset&)
 
 extern const char *db_return_ok;
 extern const char *db_return_nil;

@@ -40,6 +40,9 @@ DB::DB(DBServer *dbServer)
         { "LSET",       { -4, IS_WRITE, BIND(lsetCommand) } },
         { "LRANGE",     { -4, IS_READ,  BIND(lrangeCommand) } },
         { "LTRIM",      { -4, IS_WRITE, BIND(ltrimCommand) } },
+        { "BLPOP",      {  3, IS_READ,  BIND(blpopCommand) } },
+        { "BRPOP",      {  3, IS_READ,  BIND(brpopCommand) } },
+        { "BRPOPLPUSH", { -4, IS_READ,  BIND(brpoplpushCommand) } },
         { "SADD",       {  3, IS_WRITE, BIND(saddCommand) } },
         { "SISMEMBER",  { -3, IS_READ,  BIND(sisMemberCommand) } },
         { "SPOP",       { -2, IS_WRITE, BIND(spopCommand) } },
@@ -285,8 +288,7 @@ void DB::delCommand(Context& con)
     int retval = 0;
     for (size_t i = 1; i < size; i++) {
         if (isFound(find(cmdlist[i]))) {
-            delExpireKey(cmdlist[i]);
-            delKey(cmdlist[i]);
+            delKeyWithExpire(cmdlist[i]);
             retval++;
         }
     }
@@ -388,7 +390,7 @@ void DB::psyncCommand(Context& con)
     if (cmdlist[1].compare("?") == 0 && cmdlist[2].compare("-1") == 0) {
 sync:
         // 执行完整重同步
-        con.setFlag(Context::SYNC_RDB_FILE);
+        con.setFlag(Context::SLAVE | Context::SYNC_RDB_FILE);
         con.append("+FULLRESYNC\r\n");
         con.append(_dbServer->selfRunId());
         con.append("\r\n");
@@ -448,7 +450,11 @@ void DB::replconfCommand(Context& con)
 
 void DB::pingCommand(Context& con)
 {
-    con.append("*1\r\n$4\r\nPONG\r\n");
+    if (con.flag() & Context::SLAVE) {
+        con.append("*1\r\n$4\r\nPONG\r\n");
+        return;
+    }
+    con.append("+PONG\r\n");
 }
 
 void DB::pongCommand(Context& con)
@@ -493,7 +499,7 @@ void DB::execCommand(Context& con)
         _dbServer->doWriteCommand(tlist);
         con.clearFlag(Context::EXEC_MULTI_WRITE);
     }
-    unwatchKeys();
+    unwatchKeys(con);
 end:
     con.transactionList().clear();
     con.clearFlag(Context::EXEC_MULTI);
@@ -502,7 +508,7 @@ end:
 void DB::discardCommand(Context& con)
 {
     con.transactionList().clear();
-    unwatchKeys();
+    unwatchKeys(con);
     con.clearFlag(Context::EXEC_MULTI);
     con.clearFlag(Context::EXEC_MULTI_ERR);
     con.clearFlag(Context::EXEC_MULTI_WRITE);
@@ -514,16 +520,34 @@ void DB::watchCommand(Context& con)
     auto& cmdlist = con.commandList();
     for (size_t i = 1; i < cmdlist.size(); i++) {
         expireIfNeeded(cmdlist[i]);
-        if (isFound(find(cmdlist[i])))
+        if (isFound(find(cmdlist[i]))) {
             watchKeyForClient(cmdlist[i], con.conn()->id());
+            con.watchKeys().emplace_back(cmdlist[i]);
+        }
     }
     con.append(db_return_ok);
 }
 
 void DB::unwatchCommand(Context& con)
 {
-    unwatchKeys();
+    unwatchKeys(con);
     con.append(db_return_ok);
+}
+
+void DB::unwatchKeys(Context& con)
+{
+    for (auto& key : con.watchKeys()) {
+        auto clist = _watchMap.find(key);
+        if (clist != _watchMap.end()) {
+            for (auto c = clist->second.begin(); c != clist->second.end(); ++c) {
+                if (*c == con.conn()->id()) {
+                    clist->second.erase(c);
+                    break;
+                }
+            }
+        }
+    }
+    con.watchKeys().clear();
 }
 
 void DB::publishCommand(Context& con)
@@ -592,8 +616,7 @@ void DB::expireIfNeeded(const Key& key)
     if (it == expireMap().end()) return;
     int64_t now = _lru_cache;
     if (it->second > now) return;
-    delExpireKey(key);
-    delKey(key);
+    delKeyWithExpire(key);
     Context::CommandList cmdlist = { "DEL", key };
     _dbServer->appendWriteCommand(cmdlist);
 }
@@ -603,7 +626,7 @@ void DB::watchKeyForClient(const Key& key, size_t id)
     auto it = _watchMap.find(key);
     if (it == _watchMap.end()) {
         std::vector<size_t> clist = { id };
-        _watchMap[key] = std::move(clist);
+        _watchMap.emplace(key, std::move(clist));
     } else {
         it->second.push_back(id);
     }
@@ -637,11 +660,9 @@ void DB::renameCommand(Context& con)
         con.append(db_return_ok);
         return;
     }
-    delExpireKey(cmdlist[2]);
-    delKey(cmdlist[2]);
+    delKeyWithExpire(cmdlist[2]);
     insert(cmdlist[2], it->second);
-    delExpireKey(cmdlist[1]);
-    delKey(cmdlist[1]);
+    delKeyWithExpire(cmdlist[1]);
     con.append(db_return_ok);
 }
 
@@ -663,8 +684,7 @@ void DB::renamenxCommand(Context& con)
         return;
     }
     insert(cmdlist[2], it->second);
-    delExpireKey(cmdlist[1]);
-    delKey(cmdlist[1]);
+    delKeyWithExpire(cmdlist[1]);
     con.append(db_return_1);
 }
 
@@ -691,7 +711,24 @@ void DB::moveCommand(Context& con)
         return;
     }
     map.emplace(it->first, it->second);
-    delExpireKey(cmdlist[1]);
-    delKey(cmdlist[1]);
+    delKeyWithExpire(cmdlist[1]);
     con.append(db_return_1);
+}
+
+void DB::clearBlockingKeysForContext(Context& con)
+{
+    for (auto& it : con.blockingKeys()) {
+        auto cl = blockingKeys().find(it);
+        if (cl != blockingKeys().end()) {
+            for (auto c = cl->second.begin(); c != cl->second.end(); ++c) {
+                if (*c == con.conn()->id()) {
+                    cl->second.erase(c);
+                    break;
+                }
+            }
+            if (cl->second.empty())
+                blockingKeys().erase(it);
+        }
+    }
+    con.blockingKeys().clear();
 }

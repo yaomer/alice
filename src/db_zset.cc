@@ -548,7 +548,7 @@ void DB::zremCommand(Context& con)
             rem++;
         }
     }
-    if (zset.empty()) delKey(cmdlist[1]);
+    if (zset.empty()) delKeyWithExpire(cmdlist[1]);
     appendReplyNumber(con, rem);
     touchWatchKey(cmdlist[1]);
 }
@@ -594,7 +594,7 @@ void DB::zremRangeByRankCommand(Context& con)
         i++;
         rem++;
     }
-    if (zset.empty()) delKey(cmdlist[1]);
+    if (zset.empty()) delKeyWithExpire(cmdlist[1]);
     appendReplyNumber(con, rem);
     touchWatchKey(cmdlist[1]);
 }
@@ -669,6 +669,6 @@ void DB::zremRangeByScoreCommand(Context& con)
         zset.erase(e);
         rem++;
     }
-    if (zset.empty()) delKey(cmdlist[1]);
+    if (zset.empty()) delKeyWithExpire(cmdlist[1]);
     appendReplyNumber(con, rem);
 }

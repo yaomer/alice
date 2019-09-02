@@ -97,7 +97,7 @@ void DB::lpop(Context& con, int option)
         appendReplySingleStr(con, list.back());
         list.pop_back();
     }
-    if (list.empty()) delKey(cmdlist[1]);
+    if (list.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
 }
 
@@ -140,7 +140,7 @@ void DB::rpoplpushCommand(Context& con)
         touchWatchKey(cmdlist[1]);
     }
     srclist.pop_back();
-    if (srclist.empty()) delKey(cmdlist[1]);
+    if (srclist.empty()) delKeyWithExpire(cmdlist[1]);
 }
 
 void DB::lremCommand(Context& con)
@@ -191,7 +191,7 @@ void DB::lremCommand(Context& con)
             }
         }
     }
-    if (list.empty()) delKey(cmdlist[1]);
+    if (list.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }
@@ -382,7 +382,99 @@ void DB::ltrimCommand(Context& con)
         } else
             i++;
     }
-    if (list.empty()) delKey(cmdlist[1]);
+    if (list.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     con.append(db_return_ok);
+}
+
+#define BLPOP 1
+#define BRPOP 2
+
+void DB::blpop(Context& con, int option)
+{
+    auto& cmdlist = con.commandList();
+    size_t size = cmdlist.size();
+    int timeout = str2l(cmdlist[size - 1].c_str());
+    if (str2numberErr()) {
+        con.append(db_return_integer_err);
+        return;
+    }
+    if (timeout < 0) {
+        con.append("-ERR timeout out of range\r\n");
+        return;
+    }
+    for (size_t i = 1 ; i < size - 1; i++) {
+        auto it = find(cmdlist[i]);
+        if (isFound(it)) {
+            List& list = getListValue(it);
+            appendReplyMulti(con, 2);
+            appendReplySingleStr(con, cmdlist[i]);
+            appendReplySingleStr(con, option == BLPOP ? list.front() : list.back());
+            option == BLPOP ? list.pop_front() : list.pop_back();
+            if (list.empty()) delKeyWithExpire(cmdlist[i]);
+            return;
+        }
+    }
+    for (size_t j = 1; j < size - 1; j++) {
+        con.blockingKeys().emplace_back(cmdlist[j]);
+        auto it = _blockingKeys.find(cmdlist[j]);
+        if (it != _blockingKeys.end()) {
+            it->second.push_back(con.conn()->id());
+        } else {
+            std::list<size_t> idlist = { con.conn()->id() };
+            _blockingKeys.emplace(cmdlist[j], std::move(idlist));
+        }
+    }
+    con.setBlockDbnum(_dbServer->curDbnum());
+    con.setBlockTimeout(timeout);
+    _dbServer->blockedClients().push_back(con.conn()->id());
+}
+
+void DB::blpopCommand(Context& con)
+{
+    blpop(con, BLPOP);
+}
+
+void DB::brpopCommand(Context& con)
+{
+    blpop(con, BRPOP);
+}
+
+void DB::brpoplpushCommand(Context& con)
+{
+
+}
+
+void DB::blockingPop(const std::string& key)
+{
+    auto cl = _blockingKeys.find(key);
+    if (cl == _blockingKeys.end()) return;
+    bool blpop = false;
+    Context other(_dbServer, nullptr);
+    int64_t now = Angel::TimeStamp::now();
+    auto& maps = g_server->server().connectionMaps();
+    auto& value = getListValue(find(key));
+    for (auto& c : cl->second) {
+        auto conn = maps.find(c);
+        if (conn != maps.end()) {
+            auto& context = std::any_cast<Context&>(conn->second->getContext());
+            blpop = (context.lastcmd().compare("BLPOP") == 0);
+            DB::appendReplyMulti(other, 3);
+            DB::appendReplySingleStr(other, key);
+            DB::appendReplySingleStr(other, blpop ? value.front() : value.back());
+            double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
+            DB::appendReplySingleDouble(other, seconds);
+            conn->second->send(other.message());
+            other.message().clear();
+            for (auto it = context.blockingKeys().begin(); it != context.blockingKeys().end(); ++it)
+                if ((*it).compare(key) == 0) {
+                    context.blockingKeys().erase(it);
+                    break;
+                }
+            clearBlockingKeysForContext(context);
+        }
+    }
+    blpop ? value.pop_front() : value.pop_back();
+    if (value.empty()) delKeyWithExpire(key);
+    _blockingKeys.erase(key);
 }

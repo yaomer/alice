@@ -26,6 +26,8 @@ public:
     using DBS = std::vector<std::unique_ptr<DB>>;
     using Key = std::string;
     using PubsubChannels = std::unordered_map<Key, std::vector<size_t>>;
+    using BlockedClients = std::list<size_t>;
+    using ReadyKeys = std::vector<std::tuple<std::string, int>>;
     enum FLAG {
         // 有rewriteaof请求被延迟
         REWRITEAOF_DELAY = 0x02,
@@ -36,7 +38,7 @@ public:
         // 有psync请求被延迟
         PSYNC_DELAY = 0x10,
     };
-    DBServer() 
+    DBServer()
         : _curDbnum(0),
         _rdb(new Rdb(this)),
         _aof(new Aof(this)),
@@ -50,7 +52,7 @@ public:
         _lastRecvHeartBeatTime(0),
         _heartBeatTimerId(0),
         _curCheckDb(0)
-    { 
+    {
         for (int i = 0; i < g_server_conf.databases; i++) {
             std::unique_ptr<DB> db(new DB(this));
             _dbs.push_back(std::move(db));
@@ -61,6 +63,7 @@ public:
         bzero(_tmpfile, sizeof(_tmpfile));
     }
     DBS& dbs() { return _dbs; }
+    int curDbnum() const { return _curDbnum; }
     void switchDb(int dbnum) { _curDbnum = dbnum; }
     DB *db() { return _dbs[_curDbnum].get(); }
     DB *selectDb(int dbnum) { return _dbs[dbnum].get(); }
@@ -107,10 +110,12 @@ public:
     void subChannel(const Key& key, size_t id);
     size_t pubMessage(const std::string& msg, const std::string& channel,  size_t id);
     void checkExpireCycle(int64_t now);
+    void checkBlockedClients(int64_t now);
+    BlockedClients& blockedClients() { return _blockedClients; }
     void setMasterAddr(Angel::InetAddr addr)
-    { 
+    {
         if (_masterAddr) _masterAddr.reset();
-        _masterAddr.reset(new Angel::InetAddr(addr.inetAddr())); 
+        _masterAddr.reset(new Angel::InetAddr(addr.inetAddr()));
     }
 private:
     DBS _dbs;
@@ -139,7 +144,7 @@ private:
     char _selfRunId[33];
     // 服务器作为从服务器去复制主服务器时的主服务器运行ID
     char _masterRunId[33];
-    // 要发送给从服务器的rdb文件大小 
+    // 要发送给从服务器的rdb文件大小
     size_t _syncRdbFilesize;
     char _tmpfile[16];
     int _syncFd;
@@ -151,6 +156,7 @@ private:
     PubsubChannels _pubsubChannels;
     // 记录过期键删除进度
     int _curCheckDb;
+    BlockedClients _blockedClients;
 };
 
 class Server {
@@ -189,14 +195,14 @@ public:
                 if (context.state() == Context::PARSING)
                     return;
                 break;
-            case Context::PROTOCOLERR: 
+            case Context::PROTOCOLERR:
                 conn->close();
                 return;
-            case Context::SUCCEED: 
-                executeCommand(context); 
+            case Context::SUCCEED:
+                executeCommand(context);
                 break;
-            case Context::REPLY: 
-                replyResponse(conn); 
+            case Context::REPLY:
+                replyResponse(conn);
                 break;
             }
         }

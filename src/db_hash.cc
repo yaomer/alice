@@ -105,7 +105,7 @@ void DB::hdelCommand(Context& con)
             retval++;
         }
     }
-    if (hash.empty()) delKey(cmdlist[1]);
+    if (hash.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     appendReplyNumber(con, retval);
 }

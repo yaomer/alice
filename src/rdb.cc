@@ -52,8 +52,7 @@ void Rdb::save()
             auto expire = db->expireMap().find(it.first);
             if (expire != db->expireMap().end()) {
                 if (expire->second <= now) {
-                    db->delExpireKey(it.first);
-                    db->delKey(it.first);
+                    db->delKeyWithExpire(it.first);
                     continue;
                 } else {
                     saveLen(expire_key);

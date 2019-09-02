@@ -89,6 +89,7 @@ void Server::executeCommand(Context& con)
         con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
         goto err;
     }
+    con.setLastcmd(it->first);
     // 执行事务时，只有遇见MULTI，EXEC，WATCH，DISCARD命令时才会直接执行，
     // 其他命令则加入事务队列
     if (con.flag() & Context::EXEC_MULTI) {
@@ -124,7 +125,7 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
     // 从服务器不应向主服务器发送回复信息
-    if (!(context.flag() & Context::SLAVE))
+    if (!(context.flag() & Context::MASTER))
         conn->send(context.message());
     context.message().clear();
     context.setState(Context::PARSING);
@@ -208,6 +209,8 @@ void Server::serverCron()
         }
     }
 
+    _dbServer.checkBlockedClients(now);
+
     _dbServer.checkExpireCycle(now);
 
     _dbServer.aof()->appendAof(now);
@@ -234,11 +237,36 @@ void DBServer::checkExpireCycle(int64_t now)
                     it != db->expireMap().cend(bucketNumber); it++) {
                 if (where-- == 0) {
                     if (it->second <= now) {
-                        db->delKey(it->first);
-                        db->delExpireKey(it->first);
+                        db->delKeyWithExpire(it->first);
                     }
                     break;
                 }
+            }
+        }
+    }
+}
+
+// 检查是否有阻塞的客户端超时
+void DBServer::checkBlockedClients(int64_t now)
+{
+    Context other(this, nullptr);
+    auto& maps = g_server->server().connectionMaps();
+    for (auto it = _blockedClients.begin(); it != _blockedClients.end(); ) {
+        auto e = it++;
+        auto conn = maps.find(*e);
+        if (conn != maps.end()) {
+            auto& context = std::any_cast<Context&>(conn->second->getContext());
+            DB *db = selectDb(context.blockDbnum());
+            if (context.blockTimeout() != 0 && context.blockStartTime() + context.blockTimeout() <= now) {
+                std::cout << conn->second->id() << " timeout\n";
+                DB::appendReplyMulti(other, 2);
+                other.append(db_return_nil);
+                double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
+                DB::appendReplySingleDouble(other, seconds);
+                conn->second->send(other.message());
+                other.message().clear();
+                _blockedClients.erase(e);
+                db->clearBlockingKeysForContext(context);
             }
         }
     }
@@ -351,8 +379,8 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
     auto& context = std::any_cast<Context&>(conn->getContext());
     while (true) {
         if (context.flag() & Context::SYNC_RECV_PING) {
-            if (strncasecmp(buf.c_str(), "*1\r\n$4\r\nPONG\r\n", 14) == 0) {
-                buf.retrieve(14);
+            if (strncasecmp(buf.c_str(), "+PONG\r\n", 7) == 0) {
+                buf.retrieve(7);
                 context.clearFlag(Context::SYNC_RECV_PING);
                 context.setFlag(Context::SYNC_WAIT);
                 sendInetAddrToMaster(conn);
@@ -378,7 +406,7 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
             } else if (strncasecmp(buf.c_str(), "+CONTINUE\r\n", 11) == 0) {
                 buf.retrieve(11);
                 context.clearFlag(Context::SYNC_WAIT);
-                context.setFlag(Context::SLAVE | Context::SYNC_COMMAND);
+                context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
                 setHeartBeatTimer(conn);
             } else
                 break;
@@ -427,7 +455,7 @@ next:
         db()->hashMap().clear();
         rdb()->load();
         context.clearFlag(Context::SYNC_FULL);
-        context.setFlag(Context::SLAVE | Context::SYNC_COMMAND);
+        context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
         setHeartBeatTimer(conn);
     }
     return;

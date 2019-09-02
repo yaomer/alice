@@ -120,8 +120,7 @@ void Aof::rewrite()
             auto expire = db->expireMap().find(it.first);
             if (expire != db->expireMap().end()) {
                 if (expire->second <= now) {
-                    db->delExpireKey(it.first);
-                    db->delKey(it.first);
+                    db->delKeyWithExpire(it.first);
                     continue;
                 } else {
                     rewriteExpire(it.first, expire->second);
