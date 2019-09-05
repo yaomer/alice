@@ -33,10 +33,7 @@ void DB::setCommand(Context& con)
         case SET_EX: case SET_PX: {
             if (i + 1 >= len) goto syntax_err;
             expire = str2ll(cmdlist[++i].c_str());
-            if (str2numberErr()) {
-                con.append(db_return_integer_err);
-                return;
-            }
+            if (str2numberErr()) db_return(con, db_return_integer_err);
             if (op->second == SET_EX)
                 expire *= 1000;
             break;
@@ -48,21 +45,13 @@ void DB::setCommand(Context& con)
     if ((cmdops & SET_NX) && (cmdops & SET_XX))
         goto syntax_err;
     if (cmdops & SET_NX) {
-        if (!isFound(find(cmdlist[1]))) {
-            insert(cmdlist[1], cmdlist[2]);
-            con.append(db_return_ok);
-        } else {
-            con.append(db_return_nil);
-            return;
-        }
+        if (isFound(find(cmdlist[1]))) db_return(con, db_return_nil);
+        insert(cmdlist[1], cmdlist[2]);
+        con.append(db_return_ok);
     } else if (cmdops & SET_XX) {
-        if (isFound(find(cmdlist[1]))) {
-            insert(cmdlist[1], cmdlist[2]);
-            con.append(db_return_ok);
-        } else {
-            con.append(db_return_nil);
-            return;
-        }
+        if (!isFound(find(cmdlist[1]))) db_return(con, db_return_nil);
+        insert(cmdlist[1], cmdlist[2]);
+        con.append(db_return_ok);
     } else {
         insert(cmdlist[1], cmdlist[2]);
         con.append(db_return_ok);
@@ -94,10 +83,7 @@ void DB::getCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, String);
     auto& value = getStringValue(it);
     appendReplySingleStr(con, value);
@@ -111,8 +97,7 @@ void DB::getSetCommand(Context& con)
     auto it = find(cmdlist[1]);
     if (!isFound(it)) {
         insert(cmdlist[1], cmdlist[2]);
-        con.append(db_return_nil);
-        return;
+        db_return(con, db_return_nil);
     }
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
@@ -125,10 +110,7 @@ void DB::strlenCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, String);
     String& value = getStringValue(it);
     appendReplyNumber(con, value.size());
@@ -155,10 +137,8 @@ void DB::msetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    if (size % 2 == 0) {
-        con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
-        return;
-    }
+    if (size % 2 == 0)
+        db_return(con, "-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
     for (size_t i = 1; i < size; i += 2) {
         expireIfNeeded(cmdlist[i]);
         insert(cmdlist[i], cmdlist[i+1]);
@@ -196,14 +176,10 @@ void DB::incr(Context& con, int64_t incr)
         checkType(con, it, String);
         String& value = getStringValue(it);
         int64_t number = str2ll(value.c_str());
-        if (!str2numberErr()) {
-            number += incr;
-            insert(cmdlist[1], String(convert(number)));
-            appendReplyNumber(con, number);
-        } else {
-            con.append(db_return_integer_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_integer_err);
+        number += incr;
+        insert(cmdlist[1], String(convert(number)));
+        appendReplyNumber(con, number);
     } else {
         insert(cmdlist[1], String(convert(incr)));
         appendReplyNumber(con, incr);
@@ -220,10 +196,7 @@ void DB::incrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t increment = str2ll(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     incr(con, increment);
 }
 
@@ -236,9 +209,6 @@ void DB::decrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t decrement = str2ll(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     incr(con, -decrement);
 }

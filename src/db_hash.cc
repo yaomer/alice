@@ -12,8 +12,7 @@ void DB::hsetCommand(Context& con)
         Hash hash;
         hash.emplace(cmdlist[2], cmdlist[3]);
         insert(cmdlist[1], hash);
-        con.append(db_return_1);
-        return;
+        db_return(con, db_return_1);
     }
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
@@ -35,8 +34,7 @@ void DB::hsetnxCommand(Context& con)
         hash.emplace(cmdlist[2], cmdlist[3]);
         insert(cmdlist[1], hash);
         touchWatchKey(cmdlist[1]);
-        con.append(db_return_1);
-        return;
+        db_return(con, db_return_1);
     }
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
@@ -54,10 +52,7 @@ void DB::hgetCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
@@ -72,10 +67,7 @@ void DB::hexistsCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
     if (hash.find(cmdlist[2]) != hash.end()) {
@@ -90,10 +82,7 @@ void DB::hdelCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     size_t size = cmdlist.size();
     checkType(con, it, Hash);
     int retval = 0;
@@ -129,10 +118,7 @@ void DB::hstrlenCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
@@ -148,28 +134,21 @@ void DB::hincrbyCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     int64_t incr = str2ll(cmdlist[3].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     auto it = find(cmdlist[1]);
     if (!isFound(it)) {
         Hash hash;
         hash.emplace(cmdlist[2], cmdlist[3]);
         insert(cmdlist[1], hash);
         touchWatchKey(cmdlist[1]);
-        con.append(db_return_0);
-        return;
+        db_return(con, db_return_0);
     }
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
         int64_t i64 = str2ll(value->second.c_str());
-        if (str2numberErr()) {
-            con.append(db_return_integer_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_integer_err);
         i64 += incr;
         value->second.assign(convert(i64));
         appendReplyNumber(con, i64);
@@ -185,10 +164,8 @@ void DB::hmsetCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
-    if (size % 2 != 0) {
-        con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
-        return;
-    }
+    if (size % 2 != 0)
+        db_return(con, "-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
     touchWatchKey(cmdlist[1]);
     auto it = find(cmdlist[1]);
     if (!isFound(it)) {
@@ -196,8 +173,7 @@ void DB::hmsetCommand(Context& con)
         for (size_t i = 2; i < size; i += 2)
             hash.emplace(cmdlist[i], cmdlist[i+1]);
         insert(cmdlist[1], hash);
-        con.append(db_return_ok);
-        return;
+        db_return(con, db_return_ok);
     }
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
@@ -239,16 +215,9 @@ void DB::hgetXX(Context& con, int getXX)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
-    if (hash.empty()) {
-        con.append(db_return_nil);
-        return;
-    }
     if (getXX == HGETALL)
         appendReplyMulti(con, hash.size() * 2);
     else

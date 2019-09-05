@@ -31,6 +31,7 @@ enum ReturnCode {
     C_ERR,
 };
 
+// 一个Context表示一个客户端上下文
 class Context {
 public:
     enum ParseState {
@@ -41,7 +42,7 @@ public:
     };
     enum Flag{
         // 主服务器中设置该标志的连接表示与从服务器相连
-        SLAVE = 0x001, // for slave
+        SLAVE = 0x001, // for master
         // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件
         // 从服务器设置该标志表示该连接处于接收同步文件的状态
         SYNC_RDB_FILE = 0x002, // for master and slave
@@ -61,7 +62,7 @@ public:
         EXEC_MULTI_WRITE = 0x100,
         SYNC_RECV_PING = 0x200,
         // 从服务器中设置该标志的连接表示与主服务器相连
-        MASTER = 0x400,
+        MASTER = 0x400, // for slave
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn)
         : _db(db),
@@ -141,7 +142,9 @@ private:
     int _blockTimeout;
     // 阻塞的所有keys
     BlockingKeys _blockingKeys;
+    // 阻塞时操作的数据库
     int _blockDbnum;
+    // 最后执行的命令
     std::string _lastcmd;
 };
 
@@ -202,6 +205,8 @@ public:
     }
 };
 
+// 排序时会为每个待排序的元素(e)创建一个SortObject对象(s)，s->_value存储
+// &e->value，s->_u的值取决于按哪种方式进行排序
 struct SortObject {
     SortObject(const std::string *value)
         : _value(value)
@@ -226,12 +231,14 @@ public:
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
     using _Zset = std::multiset<std::tuple<double, std::string>, _ZsetCompare>;
-    using SortObjectList = std::deque<SortObject>;
     // 根据一个member可以在常数时间找到其score
     using _Zmap = std::unordered_map<std::string, double>;
     using Zset = std::tuple<_Zset, _Zmap>;
     using ExpireMap = std::unordered_map<Key, int64_t>;
     using WatchMap = std::unordered_map<Key, std::vector<size_t>>;
+    // 因为排序结果集需要剪切，所以deque优于vector
+    using SortObjectList = std::deque<SortObject>;
+    // 保存所有阻塞的键，每个键的值是阻塞于它的客户端列表
     using BlockingKeys = std::unordered_map<Key, std::list<size_t>>;
     explicit DB(DBServer *);
     ~DB() {  }
@@ -374,6 +381,7 @@ private:
     void insert(const Key& key, const T& value)
     {
         auto it = _hashMap.emplace(key, value);
+        // emplace()和insert()都不会覆盖已存在的键
         if (!it.second) _hashMap[key] = std::move(value);
         if (typeid(T) == typeid(List))
             blockingPop(key);
@@ -424,6 +432,9 @@ private:
 #define getHashValue(it)    getXXType(it, DB::Hash&)
 #define getSetValue(it)     getXXType(it, DB::Set&)
 #define getZsetValue(it)    getXXType(it, DB::Zset&)
+
+#define db_return(con, str) \
+    do { (con).append(str); return; } while(0)
 
 extern const char *db_return_ok;
 extern const char *db_return_nil;

@@ -156,6 +156,7 @@ private:
     PubsubChannels _pubsubChannels;
     // 记录过期键删除进度
     int _curCheckDb;
+    // 保存所有执行阻塞命令阻塞的客户端
     BlockedClients _blockedClients;
 };
 

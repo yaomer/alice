@@ -177,13 +177,9 @@ void DB::selectCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int dbnum = str2l(cmdlist[1].c_str());
-    if (str2numberErr()) {
-        con.append("-ERR invalid DB index\r\n");
-        return;
-    }
+    if (str2numberErr()) db_return(con, "-ERR invalid DB index\r\n");
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
-        con.append("-ERR DB index is out of range\r\n");
-        return;
+        db_return(con, "-ERR DB index is out of range\r\n");
     }
     con.db()->switchDb(dbnum);
     con.append(db_return_ok);
@@ -193,11 +189,7 @@ void DB::existsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
-    if (isFound(find(cmdlist[1]))) {
-        con.append(db_return_1);
-    } else {
-        con.append(db_return_0);
-    }
+    con.append(isFound(find(cmdlist[1])) ? db_return_1 : db_return_0);
 }
 
 void DB::typeCommand(Context& con)
@@ -205,10 +197,7 @@ void DB::typeCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append("+none\r\n");
-        return;
-    }
+    if (!isFound(it)) db_return(con, "+none\r\n");
     if (isXXType(it, String))
         con.append("+string\r\n");
     else if (isXXType(it, List))
@@ -227,15 +216,9 @@ void DB::typeCommand(Context& con)
 void DB::ttl(Context& con, int option)
 {
     auto& cmdlist = con.commandList();
-    if (!isFound(find(cmdlist[1]))) {
-        con.append(": -2\r\n");
-        return;
-    }
+    if (!isFound(find(cmdlist[1]))) db_return(con, ":-2\r\n");
     auto expire = expireMap().find(cmdlist[1]);
-    if (expire == expireMap().end()) {
-        con.append(": -1\r\n");
-        return;
-    }
+    if (expire == expireMap().end()) db_return(con, ":-1\r\n");
     int64_t milliseconds = expire->second - Angel::TimeStamp::now();
     if (option == TTL) milliseconds /= 1000;
     appendReplyNumber(con, milliseconds);
@@ -258,17 +241,11 @@ void DB::expire(Context& con, int option)
 {
     auto& cmdlist = con.commandList();
     int64_t expire = str2ll(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
-    if (isFound(find(cmdlist[1]))) {
-        if (option == EXPIRE) expire *= 1000;
-        addExpireKey(cmdlist[1], expire);
-        con.append(db_return_1);
-    } else {
-        con.append(db_return_0);
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (!isFound(find(cmdlist[1]))) db_return(con, db_return_0);
+    if (option == EXPIRE) expire *= 1000;
+    addExpireKey(cmdlist[1], expire);
+    con.append(db_return_1);
 }
 
 void DB::expireCommand(Context& con)
@@ -298,14 +275,8 @@ void DB::delCommand(Context& con)
 void DB::keysCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (cmdlist[1].compare("*")) {
-        con.append("-ERR unknown option\r\n");
-        return;
-    }
-    if (_hashMap.empty()) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (cmdlist[1].compare("*")) db_return(con, "-ERR unknown option\r\n");
+    if (_hashMap.empty()) db_return(con, db_return_nil);
     appendReplyMulti(con, _hashMap.size());
     for (auto& it : _hashMap)
         appendReplySingleStr(con, it.first);
@@ -313,8 +284,7 @@ void DB::keysCommand(Context& con)
 
 void DB::saveCommand(Context& con)
 {
-    if (_dbServer->rdb()->childPid() != -1)
-        return;
+    if (_dbServer->rdb()->childPid() != -1) return;
     _dbServer->rdb()->save();
     con.append(db_return_ok);
     _dbServer->setLastSaveTime(Angel::TimeStamp::now());
@@ -325,11 +295,9 @@ void DB::bgSaveCommand(Context& con)
 {
     // 有rdb或aof持久化在进行中，忽略此次请求
     if (_dbServer->aof()->childPid() != -1) {
-        con.append("+Background append only file rewriting ...\r\n");
-        return;
+        db_return(con, "+Background append only file rewriting ...\r\n");
     }
-    if (_dbServer->rdb()->childPid() != -1)
-        return;
+    if (_dbServer->rdb()->childPid() != -1) return;
     _dbServer->rdb()->saveBackground();
     con.append("+Background saving started\r\n");
     _dbServer->setLastSaveTime(Angel::TimeStamp::now());
@@ -345,9 +313,7 @@ void DB::bgRewriteAofCommand(Context& con)
         return;
     }
     // 有aof持久化在进行中，忽略此次请求
-    if (_dbServer->aof()->childPid() != -1) {
-        return;
-    }
+    if (_dbServer->aof()->childPid() != -1) return;
     _dbServer->aof()->rewriteBackground();
     con.append("+Background append only file rewriting started\r\n");
     _dbServer->setLastSaveTime(Angel::TimeStamp::now());
@@ -375,13 +341,10 @@ void DB::slaveofCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int port = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-    } else {
-        _dbServer->setMasterAddr(Angel::InetAddr(port, cmdlist[1].c_str()));
-        _dbServer->connectMasterServer();
-        con.append(db_return_ok);
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
+    _dbServer->setMasterAddr(Angel::InetAddr(port, cmdlist[1].c_str()));
+    _dbServer->connectMasterServer();
+    con.append(db_return_ok);
 }
 
 void DB::psyncCommand(Context& con)
@@ -450,10 +413,8 @@ void DB::replconfCommand(Context& con)
 
 void DB::pingCommand(Context& con)
 {
-    if (con.flag() & Context::SLAVE) {
-        con.append("*1\r\n$4\r\nPONG\r\n");
-        return;
-    }
+    if (con.flag() & Context::SLAVE)
+        db_return(con, "*1\r\n$4\r\nPONG\r\n");
     con.append("+PONG\r\n");
 }
 
@@ -577,11 +538,8 @@ void DB::infoCommand(Context& con)
     con.append(_dbServer->selfRunId());
     con.append("\n");
     con.append("role:");
-    if (_dbServer->flag() & DBServer::SLAVE) {
-        con.append("slave\r\n");
-        return;
-    } else
-        con.append("master\n");
+    if (_dbServer->flag() & DBServer::SLAVE) db_return(con, "slave\r\n");
+    con.append("master\n");
     con.append("connected_slaves:");
     con.append(convert(_dbServer->slaveIds().size()));
     con.append("\n");
@@ -635,8 +593,7 @@ void DB::watchKeyForClient(const Key& key, size_t id)
 void DB::touchWatchKey(const Key& key)
 {
     auto clist = _watchMap.find(key);
-    if (clist == _watchMap.end())
-        return;
+    if (clist == _watchMap.end()) return;
     auto& maps = g_server->server().connectionMaps();
     for (auto& id : clist->second) {
         auto conn = maps.find(id);
@@ -652,13 +609,9 @@ void DB::renameCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_no_such_key);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_no_such_key);
     if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
-        con.append(db_return_ok);
-        return;
+        db_return(con, db_return_ok);
     }
     delKeyWithExpire(cmdlist[2]);
     insert(cmdlist[2], it->second);
@@ -671,18 +624,11 @@ void DB::renamenxCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_no_such_key);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_no_such_key);
     if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
-        con.append(db_return_0);
-        return;
+        db_return(con, db_return_0);
     }
-    if (isFound(find(cmdlist[2]))) {
-        con.append(db_return_0);
-        return;
-    }
+    if (isFound(find(cmdlist[2]))) db_return(con, db_return_0);
     insert(cmdlist[2], it->second);
     delKeyWithExpire(cmdlist[1]);
     con.append(db_return_1);
@@ -692,24 +638,14 @@ void DB::moveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int dbnum = str2f(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
-        con.append("-ERR DB index out of range\r\n");
-        return;
+        db_return(con, "-ERR DB index out of range\r\n");
     }
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     auto& map = _dbServer->selectDb(dbnum)->hashMap();
-    if (map.find(cmdlist[1]) != map.end()) {
-        con.append(db_return_0);
-        return;
-    }
+    if (map.find(cmdlist[1]) != map.end()) db_return(con, db_return_0);
     map.emplace(it->first, it->second);
     delKeyWithExpire(cmdlist[1]);
     con.append(db_return_1);

@@ -9,16 +9,11 @@ using namespace Alice;
 void DB::zaddCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (cmdlist.size() % 2 != 0) {
-        con.append("-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
-        return;
-    }
+    if (cmdlist.size() % 2 != 0)
+        db_return(con, "-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
     for (size_t i = 2; i < cmdlist.size(); i += 2) {
         void(str2f(cmdlist[i].c_str()));
-        if (str2numberErr()) {
-            con.append(db_return_float_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_float_err);
     }
     expireIfNeeded(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
@@ -60,10 +55,7 @@ void DB::zscoreCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zmap zmap = std::get<1>(tuple);
@@ -78,10 +70,7 @@ void DB::zincrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     double score = str2f(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_float_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_float_err);
     expireIfNeeded(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
     auto it = find(cmdlist[1]);
@@ -116,10 +105,7 @@ void DB::zcardCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     appendReplyNumber(con, std::get<0>(tuple).size());
@@ -129,25 +115,13 @@ void DB::zcountCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     double min = str2f(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_float_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_float_err);
     double max = str2f(cmdlist[3].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_float_err);
-        return;
-    }
-    if (min > max) {
-        con.append(db_return_0);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_float_err);
+    if (min > max) db_return(con, db_return_0);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
@@ -155,10 +129,7 @@ void DB::zcountCommand(Context& con)
     auto upperbound = zset.upper_bound(std::make_tuple(max, ""));
     // if max >= set.max() upperbound == zset.end()
     // else upperbound = set.find(max) + 1
-    if (lowerbound == zset.end()) {
-        con.append(db_return_0);
-        return;
-    }
+    if (lowerbound == zset.end()) db_return(con, db_return_0);
     int distance = std::distance(lowerbound, upperbound);
     appendReplyNumber(con, distance);
 }
@@ -169,27 +140,17 @@ void DB::zrange(Context& con, bool reverse)
     bool withscores = false;
     if (cmdlist.size() > 4 ) {
         if (strcasecmp(cmdlist[4].c_str(), "WITHSCORES")) {
-            con.append(db_return_syntax_err);
-            return;
+            db_return(con, db_return_syntax_err);
         }
         withscores = true;
     }
     int start = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     int stop = str2l(cmdlist[3].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
@@ -246,19 +207,13 @@ void DB::zrank(Context& con, bool reverse)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
     _Zmap& zmap = std::get<1>(tuple);
     auto e = zmap.find(cmdlist[2]);
-    if (e == zmap.end()) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (e == zmap.end()) db_return(con, db_return_nil);
     int distance = 0;
     auto last = zset.find(std::make_tuple(e->second, cmdlist[2]));
     if (!reverse)
@@ -383,34 +338,19 @@ void DB::zrangeByScore(Context& con, bool reverse)
     for (size_t i = 4; i < len; i++) {
         std::transform(cmdlist[i].begin(), cmdlist[i].end(), cmdlist[i].begin(), ::toupper);
         auto op = zrbsops.find(cmdlist[i]);
-        if (op != zrbsops.end())
-            cmdops |= op->second;
-        else {
-            con.append(db_return_syntax_err);
-            return;
-        }
+        if (op == zrbsops.end()) db_return(con, db_return_syntax_err);
+        cmdops |= op->second;
         switch (op->second) {
         case WITHSCORES: break;
         case LIMIT: {
-            if (i + 2 >= len) {
-                con.append(db_return_syntax_err);
-                return;
-            }
+            if (i + 2 >= len) db_return(con, db_return_syntax_err);
             offset = str2l(cmdlist[++i].c_str());
-            if (str2numberErr()) {
-                con.append(db_return_integer_err);
-                return;
-            }
+            if (str2numberErr()) db_return(con, db_return_integer_err);
             count = str2l(cmdlist[++i].c_str());
-            if (str2numberErr()) {
-                con.append(db_return_integer_err);
-                return;
-            }
+            if (str2numberErr()) db_return(con, db_return_integer_err);
             break;
         }
-        default:
-            con.append(db_return_syntax_err);
-            return;
+        default: db_return(con, db_return_syntax_err);
         }
     }
     checkLimit(&cmdops, &lower, &upper, cmdlist[2], cmdlist[3]);
@@ -419,41 +359,25 @@ void DB::zrangeByScore(Context& con, bool reverse)
             min = str2f((cmdops & LOI) ? cmdlist[2].c_str() + 1 : cmdlist[2].c_str());
         else
             max = str2f((cmdops & LOI) ? cmdlist[2].c_str() + 1 : cmdlist[2].c_str());
-        if (str2numberErr()) {
-        con.append(db_return_float_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_float_err);
     }
     if (!upper) {
         if (!reverse)
             max = str2f((cmdops & ROI) ? cmdlist[3].c_str() + 1 : cmdlist[3].c_str());
         else
             min = str2f((cmdops & ROI) ? cmdlist[3].c_str() + 1 : cmdlist[3].c_str());
-        if (str2numberErr()) {
-        con.append(db_return_float_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_float_err);
     }
     // [+-]inf[other chars]中前缀可以被合法转换，但整个字符串是无效的
-    if (isinf(min) || isinf(max)) {
-        con.append(db_return_syntax_err);
-        return;
-    }
-    if (!lower && !upper && min > max) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (isinf(min) || isinf(max)) db_return(con, db_return_syntax_err);
+    if (!lower && !upper && min > max) db_return(con, db_return_nil);
     if ((reverse && (lower == MIN_INF || upper == POS_INF))
     || (!reverse && (lower == POS_INF || upper == MIN_INF))) {
-        con.append(db_return_nil);
-        return;
+        db_return(con, db_return_nil);
     }
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
@@ -462,10 +386,7 @@ void DB::zrangeByScore(Context& con, bool reverse)
     else lowerbound = zset.lower_bound(std::make_tuple(min, ""));
     if (upper) upperbound = zset.cend();
     else upperbound = zset.upper_bound(std::make_tuple(max, ""));
-    if (lowerbound == zset.end()) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (lowerbound == zset.end()) db_return(con, db_return_nil);
     if (!lower && (cmdops & LOI)) {
         if (!reverse) {
             while (lowerbound != upperbound && std::get<0>(*lowerbound) == min)
@@ -483,8 +404,7 @@ void DB::zrangeByScore(Context& con, bool reverse)
             while (lowerbound != upperbound && std::get<0>(*upperbound) == max)
                 --upperbound;
             if (lowerbound == upperbound && std::get<0>(*upperbound) == max) {
-                con.append(db_return_nil);
-                return;
+                db_return(con, db_return_nil);
             }
             ++upperbound;
         } else {
@@ -492,10 +412,7 @@ void DB::zrangeByScore(Context& con, bool reverse)
                 ++lowerbound;
         }
     }
-    if (lowerbound == upperbound) {
-        con.append(db_return_nil);
-        return;
-    }
+    if (lowerbound == upperbound) db_return(con, db_return_nil);
     int distance = 0;
     if (lower && upper)
         distance = zset.size();
@@ -531,10 +448,7 @@ void DB::zremCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
@@ -557,21 +471,12 @@ void DB::zremRangeByRankCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int start = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     int stop = str2l(cmdlist[3].c_str());
-    if (str2numberErr()) {
-        con.append(db_return_integer_err);
-        return;
-    }
+    if (str2numberErr()) db_return(con, db_return_integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
@@ -608,46 +513,25 @@ void DB::zremRangeByScoreCommand(Context& con)
     double min = 0, max = 0;
     if (!lower) {
         min = str2f((cmdops & LOI)? cmdlist[2].c_str() + 1 : cmdlist[2].c_str());
-        if (str2numberErr()) {
-        con.append(db_return_float_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_float_err);
     }
     if (!upper) {
         max = str2f((cmdops & ROI) ? cmdlist[3].c_str() + 1 : cmdlist[3].c_str());
-        if (str2numberErr()) {
-        con.append(db_return_float_err);
-            return;
-        }
+        if (str2numberErr()) db_return(con, db_return_float_err);
     }
-    if (isinf(min) || isinf(max)) {
-        con.append(db_return_syntax_err);
-        return;
-    }
-    if (!lower && !upper && min > max) {
-        con.append(db_return_0);
-        return;
-    }
-    if (lower == POS_INF || upper == MIN_INF) {
-        con.append(db_return_0);
-        return;
-    }
+    if (isinf(min) || isinf(max)) db_return(con, db_return_syntax_err);
+    if (!lower && !upper && min > max) db_return(con, db_return_0);
+    if (lower == POS_INF || upper == MIN_INF) db_return(con, db_return_0);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) {
-        con.append(db_return_0);
-        return;
-    }
+    if (!isFound(it)) db_return(con, db_return_0);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
     _Zset& zset = std::get<0>(tuple);
     _Zmap& zmap = std::get<1>(tuple);
     auto lowerbound = zset.lower_bound(std::make_tuple(min, ""));
     auto upperbound = zset.upper_bound(std::make_tuple(max, ""));
-    if (lowerbound == zset.end()) {
-        con.append(db_return_0);
-        return;
-    }
+    if (lowerbound == zset.end()) db_return(con, db_return_0);
     if (cmdops & LOI) {
         while (lowerbound != upperbound && std::get<0>(*lowerbound) == min)
             ++lowerbound;
@@ -658,10 +542,7 @@ void DB::zremRangeByScoreCommand(Context& con)
             --upperbound;
         ++upperbound;
     }
-    if (lowerbound == upperbound) {
-        con.append(db_return_0);
-        return;
-    }
+    if (lowerbound == upperbound) db_return(con, db_return_0);
     int rem = 0;
     while (lowerbound != upperbound) {
         auto e = lowerbound++;
