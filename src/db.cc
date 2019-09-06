@@ -651,6 +651,7 @@ void DB::moveCommand(Context& con)
     con.append(db_return_1);
 }
 
+// 清空con.blockingKeys()，并从DB::blockingKeys()中移除所有con
 void DB::clearBlockingKeysForContext(Context& con)
 {
     for (auto& it : con.blockingKeys()) {

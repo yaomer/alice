@@ -26,7 +26,7 @@ void DB::lpush(Context& con, int option)
             option == LPUSH ? list.emplace_front(cmdlist[i])
                             : list.emplace_back(cmdlist[i]);
         }
-        insert(cmdlist[1], list);
+        insert(cmdlist[1], std::move(list));
         appendReplyNumber(con, list.size());
     }
     touchWatchKey(cmdlist[1]);
@@ -101,13 +101,31 @@ void DB::rpopCommand(Context& con)
     lpop(con, RPOP);
 }
 
-void DB::rpoplpushCommand(Context& con)
+#define BLOCK 1
+#define NONBLOCK 2
+
+void DB::rpoplpush(Context& con, int option)
 {
     auto& cmdlist = con.commandList();
+    size_t size = cmdlist.size();
     expireIfNeeded(cmdlist[1]);
     expireIfNeeded(cmdlist[2]);
+    int timeout = 0;
+    if (option == BLOCK) {
+        timeout = str2l(cmdlist[size - 1].c_str());
+        if (str2numberErr()) db_return(con, db_return_integer_err);
+        if (timeout < 0) db_return(con, "-ERR timeout out of range\r\n");
+    }
     auto src = find(cmdlist[1]);
-    if (!isFound(src)) db_return(con, db_return_nil);
+    if (!isFound(src)) {
+        if (option == NONBLOCK) db_return(con, db_return_nil);
+        auto e = find(cmdlist[2]);
+        if (isFound(e)) checkType(con, e, List);
+        addBlockingKey(con, cmdlist[1]);
+        con.des().assign(cmdlist[2]);
+        setContextToBlock(con, timeout);
+        return;
+    }
     checkType(con, src, List);
     List& srclist = getListValue(src);
     appendReplySingleStr(con, srclist.back());
@@ -124,6 +142,11 @@ void DB::rpoplpushCommand(Context& con)
     }
     srclist.pop_back();
     if (srclist.empty()) delKeyWithExpire(cmdlist[1]);
+}
+
+void DB::rpoplpushCommand(Context& con)
+{
+    rpoplpush(con, NONBLOCK);
 }
 
 void DB::lremCommand(Context& con)
@@ -331,6 +354,26 @@ void DB::ltrimCommand(Context& con)
 #define BLPOP 1
 #define BRPOP 2
 
+// 将一个blocking Key添加到DB::blockingKeys和Context::blockingKeys中
+void DB::addBlockingKey(Context& con, const Key& key)
+{
+    con.blockingKeys().emplace_back(key);
+    auto it = _blockingKeys.find(key);
+    if (it != _blockingKeys.end()) {
+        it->second.push_back(con.conn()->id());
+    } else {
+        std::list<size_t> idlist = { con.conn()->id() };
+        _blockingKeys.emplace(key, std::move(idlist));
+    }
+}
+
+void DB::setContextToBlock(Context& con, int timeout)
+{
+    con.setBlockDbnum(_dbServer->curDbnum());
+    con.setBlockTimeout(timeout);
+    _dbServer->blockedClients().push_back(con.conn()->id());
+}
+
 void DB::blpop(Context& con, int option)
 {
     auto& cmdlist = con.commandList();
@@ -341,6 +384,7 @@ void DB::blpop(Context& con, int option)
     for (size_t i = 1 ; i < size - 1; i++) {
         auto it = find(cmdlist[i]);
         if (isFound(it)) {
+            checkType(con, it, List);
             List& list = getListValue(it);
             appendReplyMulti(con, 2);
             appendReplySingleStr(con, cmdlist[i]);
@@ -351,65 +395,80 @@ void DB::blpop(Context& con, int option)
         }
     }
     for (size_t j = 1; j < size - 1; j++) {
-        con.blockingKeys().emplace_back(cmdlist[j]);
-        auto it = _blockingKeys.find(cmdlist[j]);
-        if (it != _blockingKeys.end()) {
-            it->second.push_back(con.conn()->id());
-        } else {
-            std::list<size_t> idlist = { con.conn()->id() };
-            _blockingKeys.emplace(cmdlist[j], std::move(idlist));
-        }
+        addBlockingKey(con, cmdlist[j]);
     }
-    con.setBlockDbnum(_dbServer->curDbnum());
-    con.setBlockTimeout(timeout);
-    _dbServer->blockedClients().push_back(con.conn()->id());
+    setContextToBlock(con, timeout);
 }
 
 void DB::blpopCommand(Context& con)
 {
-    blpop(con, BLPOP);
+    (con.flag() & Context::EXEC_MULTI) ? lpopCommand(con) : blpop(con, BLPOP);
 }
 
 void DB::brpopCommand(Context& con)
 {
-    blpop(con, BRPOP);
+    (con.flag() & Context::EXEC_MULTI) ? rpopCommand(con) : blpop(con, BRPOP);
 }
 
 void DB::brpoplpushCommand(Context& con)
 {
-
+    (con.flag() & Context::EXEC_MULTI) ? rpoplpushCommand(con) : rpoplpush(con, BLOCK);
 }
 
+#define BLOCK_LPOP 1
+#define BLOCK_RPOP 2
+#define BLOCK_RPOPLPUSH 3
+
+static unsigned getLastcmd(const std::string& lc)
+{
+    unsigned ops = 0;
+    if (lc.compare("BLPOP") == 0) ops = BLOCK_LPOP;
+    else if (lc.compare("BRPOP") == 0) ops = BLOCK_RPOP;
+    else if (lc.compare("BRPOPLPUSH") == 0) ops = BLOCK_RPOPLPUSH;
+    return ops;
+}
+
+void DB::blockMoveSrcToDes(const String& src, const String& des)
+{
+    auto it = find(des);
+    if (isFound(it)) {
+        List& list = getListValue(it);
+        list.emplace_front(src);
+    } else {
+        List list;
+        list.emplace_front(src);
+        insert(des, std::move(list));
+    }
+}
+
+// 正常弹出解除阻塞的键
 void DB::blockingPop(const std::string& key)
 {
     auto cl = _blockingKeys.find(key);
     if (cl == _blockingKeys.end()) return;
-    bool blpop = false;
+    unsigned bops = 0;
     Context other(_dbServer, nullptr);
     int64_t now = Angel::TimeStamp::now();
     auto& maps = g_server->server().connectionMaps();
     auto& value = getListValue(find(key));
-    for (auto& c : cl->second) {
-        auto conn = maps.find(c);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            blpop = (context.lastcmd().compare("BLPOP") == 0);
-            DB::appendReplyMulti(other, 3);
-            DB::appendReplySingleStr(other, key);
-            DB::appendReplySingleStr(other, blpop ? value.front() : value.back());
-            double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
-            DB::appendReplySingleDouble(other, seconds);
-            conn->second->send(other.message());
-            other.message().clear();
-            for (auto it = context.blockingKeys().begin(); it != context.blockingKeys().end(); ++it)
-                if ((*it).compare(key) == 0) {
-                    context.blockingKeys().erase(it);
-                    break;
-                }
-            clearBlockingKeysForContext(context);
-        }
+
+    auto conn = maps.find(*cl->second.begin());
+    if (conn == maps.end()) return;
+    auto& context = std::any_cast<Context&>(conn->second->getContext());
+    bops = getLastcmd(context.lastcmd());
+    DB::appendReplyMulti(other, 3);
+    DB::appendReplySingleStr(other, key);
+    DB::appendReplySingleStr(other, (bops == BLOCK_LPOP) ? value.front() : value.back());
+    double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
+    DB::appendReplySingleDouble(other, seconds);
+    conn->second->send(other.message());
+    other.message().clear();
+
+    clearBlockingKeysForContext(context);
+    _dbServer->removeBlockedClient(conn->second->id());
+    if (bops == BLOCK_RPOPLPUSH) {
+        blockMoveSrcToDes(value.back(), context.des());
     }
-    blpop ? value.pop_front() : value.pop_back();
+    (bops == BLOCK_LPOP) ? value.pop_front() : value.pop_back();
     if (value.empty()) delKeyWithExpire(key);
-    _blockingKeys.erase(key);
 }

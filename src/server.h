@@ -112,6 +112,7 @@ public:
     void checkExpireCycle(int64_t now);
     void checkBlockedClients(int64_t now);
     BlockedClients& blockedClients() { return _blockedClients; }
+    void removeBlockedClient(size_t id);
     void setMasterAddr(Angel::InetAddr addr)
     {
         if (_masterAddr) _masterAddr.reset();

@@ -258,7 +258,6 @@ void DBServer::checkBlockedClients(int64_t now)
             auto& context = std::any_cast<Context&>(conn->second->getContext());
             DB *db = selectDb(context.blockDbnum());
             if (context.blockTimeout() != 0 && context.blockStartTime() + context.blockTimeout() <= now) {
-                std::cout << conn->second->id() << " timeout\n";
                 DB::appendReplyMulti(other, 2);
                 other.append(db_return_nil);
                 double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
@@ -270,6 +269,12 @@ void DBServer::checkBlockedClients(int64_t now)
             }
         }
     }
+}
+
+void DBServer::removeBlockedClient(size_t id)
+{
+    for (auto c = _blockedClients.begin(); c != _blockedClients.end(); ++c)
+        if (*c == id) break;
 }
 
 // 将目前已连接的所有客户端设置为只读

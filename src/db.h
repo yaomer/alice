@@ -110,6 +110,7 @@ public:
     BlockingKeys& blockingKeys() { return _blockingKeys; }
     std::string& lastcmd() { return _lastcmd; }
     void setLastcmd(const std::string& cmd) { _lastcmd = cmd; }
+    std::string& des() { return _des; }
     void setBlockTimeout(int timeout)
     {
         _blockStartTime = Angel::TimeStamp::now();
@@ -144,6 +145,8 @@ private:
     BlockingKeys _blockingKeys;
     // 阻塞时操作的数据库
     int _blockDbnum;
+    // brpoplpush中的des
+    std::string _des;
     // 最后执行的命令
     std::string _lastcmd;
 };
@@ -256,6 +259,9 @@ public:
 
     BlockingKeys& blockingKeys() { return _blockingKeys; }
     void clearBlockingKeysForContext(Context& con);
+    void blockMoveSrcToDes(const String& src, const String& des);
+    void addBlockingKey(Context& con, const Key& key);
+    void setContextToBlock(Context& con, int timeout);
 
     void watchKeyForClient(const Key& key, size_t id);
     void unwatchKeys(Context& con);
@@ -394,6 +400,7 @@ private:
     void lpushx(Context& con, int option);
     void lpop(Context& con, int option);
     void blpop(Context& con, int option);
+    void rpoplpush(Context& con, int option);
     void blockingPop(const std::string& key);
     void hgetXX(Context& con, int getXX);
     void zrange(Context& con, bool reverse);

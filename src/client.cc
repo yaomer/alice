@@ -133,12 +133,10 @@ char *hints(const char *buf, int *color, int *bold);
 
 int main(int argc, char *argv[])
 {
-    if (argc != 2) {
-        fprintf(stderr, "./cli [port]\n");
-        return 1;
-    }
+    int port = 1296;
+    if (argv[1]) port = atoi(argv[1]);
     Alice::Client client;
-    client.connect("127.0.0.1", atoi(argv[1]));
+    client.connect("127.0.0.1", port);
 
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
