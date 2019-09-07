@@ -63,6 +63,7 @@ public:
         SYNC_RECV_PING = 0x200,
         // 从服务器中设置该标志的连接表示与主服务器相连
         MASTER = 0x400, // for slave
+        CON_BLOCK = 0x800,
     };
     explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn)
         : _db(db),
@@ -83,11 +84,7 @@ public:
     DBServer *db() { return _db; }
     const Angel::TcpConnectionPtr& conn() { return _conn; }
     Angel::InetAddr *slaveAddr() { return _slaveAddr.get(); }
-    void addArg(const char *s, const char *es)
-    { _commandList.push_back(std::string(s, es)); }
     CommandList& commandList() { return _commandList; }
-    void addMultiArg(CommandList& cmdlist)
-    { _transactionList.push_back(cmdlist); }
     TransactionList& transactionList() { return _transactionList; }
     WatchKeys& watchKeys() { return _watchKeys; }
     void append(const std::string& s)
@@ -447,6 +444,7 @@ extern const char *db_return_ok;
 extern const char *db_return_nil;
 extern const char *db_return_0;
 extern const char *db_return_1;
+extern const char *db_return_multi_empty;
 extern const char *db_return_type_err;
 extern const char *db_return_integer_err;
 extern const char *db_return_float_err;

@@ -369,6 +369,7 @@ void DB::addBlockingKey(Context& con, const Key& key)
 
 void DB::setContextToBlock(Context& con, int timeout)
 {
+    con.setFlag(Context::CON_BLOCK);
     con.setBlockDbnum(_dbServer->curDbnum());
     con.setBlockTimeout(timeout);
     _dbServer->blockedClients().push_back(con.conn()->id());
@@ -456,11 +457,13 @@ void DB::blockingPop(const std::string& key)
     if (conn == maps.end()) return;
     auto& context = std::any_cast<Context&>(conn->second->getContext());
     bops = getLastcmd(context.lastcmd());
-    DB::appendReplyMulti(other, 3);
+    DB::appendReplyMulti(other, 2);
     DB::appendReplySingleStr(other, key);
     DB::appendReplySingleStr(other, (bops == BLOCK_LPOP) ? value.front() : value.back());
     double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
-    DB::appendReplySingleDouble(other, seconds);
+    other.append("+(");
+    other.append(convert2f(seconds));
+    other.append("s)\r\n");
     conn->second->send(other.message());
     other.message().clear();
 

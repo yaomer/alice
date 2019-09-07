@@ -86,7 +86,7 @@ int parseLine(std::vector<std::string>& argv, const char *line, const char *line
 {
     const char *start;
     do {
-        line = std::find_if(line, linep, [](char c){ return !isspace(c); });
+        line = std::find_if_not(line, linep, ::isspace);
         if (line == linep) break;
         if (*line == '\"') {
             start = ++line;
@@ -98,13 +98,13 @@ search:
                 goto search;
             }
             if (!isspace(line[1])) goto err;
-            argv.push_back(std::string(start, line - start));
+            argv.emplace_back(start, line - start);
             line++;
         } else {
             start = line;
-            line = std::find_if(line, linep, [](char c){ return isspace(c); });
+            line = std::find_if(line, linep, ::isspace);
             if (line == linep) goto err;
-            argv.push_back(std::string(start, line - start));
+            argv.emplace_back(start, line - start);
         }
     } while (1);
     return 0;

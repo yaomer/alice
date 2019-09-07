@@ -27,11 +27,11 @@ next:
         if (p == es)  {
             p = std::find_if(s, es, isspace);
             if (p == es) continue;
-            param.push_back(std::string(s, p - s));
-            confParamList.push_back(std::move(param));
+            param.emplace_back(s, p);
+            confParamList.emplace_back(std::move(param));
             continue;
         }
-        param.push_back(std::string(s, p - s));
+        param.emplace_back(s, p);
         s = p + 1;
         goto next;
     }
@@ -75,8 +75,7 @@ void Alice::readServerConf()
             if (g_server_conf.databases <= 0)
                 error("databases");
         } else if (strcasecmp(it[0].c_str(), "save") == 0) {
-            g_server_conf.save_params.push_back(
-                    std::make_tuple(atol(it[1].c_str()), atol(it[2].c_str())));
+            g_server_conf.save_params.emplace_back(atol(it[1].c_str()), atol(it[2].c_str()));
         } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
             if (strcasecmp(it[1].c_str(), "yes") == 0)
                 g_server_conf.enable_appendonly = true;

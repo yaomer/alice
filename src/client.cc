@@ -35,6 +35,9 @@ void Client::send()
     _message.clear();
 }
 
+// 解析状态回复和错误回复
+// +OK\r\n
+// -ERR syntax error\r\n
 void Client::parseStatusReply()
 {
 next:
@@ -46,6 +49,7 @@ next:
     _buf.retrieve(crlf + 2);
 }
 
+// 解析整数回复 :1\r\n
 void Client::parseIntegerReply()
 {
 next:
@@ -56,27 +60,37 @@ next:
     _buf.retrieve(crlf + 2);
 }
 
+// 解析批量回复
+// hello -> $5\r\nhello\r\n
+// $-1\r\n表示请求的值不存在，此时客户端会返回nil
 void Client::parseBulkReply()
 {
 next:
     char *s = _buf.peek();
+    const char *es = s + _buf.readable();
     const char *ps = s;
     int crlf = _buf.findCrlf();
     if (crlf < 0) { read(); goto next; }
-    int l = atoi(s + 1);
-    if (l != -1 && l <= 0) goto protocolerr;
-    if (l == -1) { std::cout << "(nil)\n"; return; }
+    int len = atoi(s + 1);
+    if (len < 0 && len != -1) goto protocolerr;
+    if (len == 0 || len == -1) {
+        std::cout << "(nil)\n";
+        _buf.retrieve(crlf + 2);
+        return;
+    }
     s += crlf + 2;
-    crlf = _buf.findStr(s, "\r\n");
-    if (crlf < 0) { read(); goto next; }
-    if (crlf != l) goto protocolerr;
-    std::cout << "\"" << std::string(s, l) << "\"\n";
-    _buf.retrieve(s + l + 2 - ps);
+    if (es - s < len + 2) { read(); goto next; }
+    std::cout << "\"" << std::string(s, len) << "\"\n";
+    _buf.retrieve(s + len + 2 - ps);
     return;
 protocolerr:
     _flag = PROTOCOLERR;
 }
 
+// 解析多批量回复
+// set key value -> *3\r\n$3\r\nset\r\n$3\r\nkey\r\n$5\r\nvalue\r\n
+// *0\r\n表示一个空白多批量回复，此时客户端会返回一个空数组
+// *-1\r\n则表示一个无内容多批量回复，此时客户端会返回nil
 void Client::parseMultiBulkReply()
 {
 next:
@@ -84,32 +98,28 @@ next:
     int i = _buf.findCrlf();
     int j = 1;
     if (i < 0) { read(); goto next; }
-    size_t len = atoi(s + 1);
-    if (len == 0) goto protocolerr;
+    int len = atoi(s + 1);
+    if (len < 0 && len != -1) goto protocolerr;
+    if (len == 0 || len == -1) {
+        if (len == 0) std::cout << "(empty array)\n";
+        else std::cout << "(nil)\n";
+        _buf.retrieve(i + 2);
+        return;
+    }
     s += i + 2;
     _buf.retrieve(i + 2);
-    while (len > 0) {
-then:
-        const char *ps = s;
-        i = _buf.findStr(s, "\r\n");
-        if (i < 0) { read(); s = _buf.peek(); goto then; }
-        if (s[0] != '$') goto protocolerr;
-        int l = atoi(s + 1);
-        if (l != -1 && l <= 0) goto protocolerr;
-        s += i + 2;
-        if (l == -1) {
-            std::cout << j++ << ") (nil)\n";
-            _buf.retrieve(i + 2);
-            len--;
-            continue;
+    while (len-- > 0) {
+        std::cout << j++ << ") ";
+        switch (s[0]) {
+        case '+': case '-': parseStatusReply(); break;
+        case ':': parseIntegerReply(); break;
+        case '$': parseBulkReply(); break;
+        case '*': parseMultiBulkReply(); break;
+        default: goto protocolerr;
         }
-        i = _buf.findStr(s, "\r\n");
-        if (i < 0) { read(); s = _buf.peek(); goto then; }
-        if (i != l) goto protocolerr;
-        std::cout << j++ << ") \"" << std::string(s, l) << "\"\n";
-        s += i + 2;
-        _buf.retrieve(s - ps);
-        len--;
+        if (_flag == PROTOCOLERR) return;
+        if (len > 0 && _buf.readable() == 0) read();
+        s = _buf.peek();
     }
     return;
 protocolerr:
@@ -118,14 +128,18 @@ protocolerr:
 
 void Client::parseResponse()
 {
-    _buf.readFd(_fd);
-    switch (_buf[0]) {
+    read();
+next:
+    char *s = _buf.peek();
+    switch (s[0]) {
     case '+': case '-': parseStatusReply(); break;
     case ':': parseIntegerReply(); break;
     case '$': parseBulkReply(); break;
     case '*': parseMultiBulkReply(); break;
-    default: _flag = PROTOCOLERR; break;
+    default: _flag = PROTOCOLERR; return;
     }
+    if (_flag == PROTOCOLERR) return;
+    if (_buf.readable() > 0) goto next;
 }
 
 void completion(const char *buf, linenoiseCompletions *lc);

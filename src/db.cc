@@ -126,6 +126,7 @@ const char *db_return_ok = "+OK\r\n";
 const char *db_return_nil = "$-1\r\n";
 const char *db_return_0 = ":0\r\n";
 const char *db_return_1 = ":1\r\n";
+const char *db_return_multi_empty = "*0\r\n";
 const char *db_return_type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 const char *db_return_integer_err = "-ERR value is not an integer or out of range\r\n";
 const char *db_return_float_err = "-ERR value is not a valid float\r\n";
@@ -276,7 +277,6 @@ void DB::keysCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     if (cmdlist[1].compare("*")) db_return(con, "-ERR unknown option\r\n");
-    if (_hashMap.empty()) db_return(con, db_return_nil);
     appendReplyMulti(con, _hashMap.size());
     for (auto& it : _hashMap)
         appendReplySingleStr(con, it.first);
@@ -667,5 +667,6 @@ void DB::clearBlockingKeysForContext(Context& con)
                 blockingKeys().erase(it);
         }
     }
+    con.clearFlag(Context::CON_BLOCK);
     con.blockingKeys().clear();
 }

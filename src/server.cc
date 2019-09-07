@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <errno.h>
 #include <algorithm>
 #include <vector>
 #include <string>
@@ -28,7 +29,7 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
     if (s[0] != '*' || next[-1] != '\r') goto err;
     s += 1;
     argc = atol(s);
-    s = std::find_if(s, es, [](char c){ return !isnumber(c); });
+    s = std::find_if_not(s, es, ::isnumber);
     if (s[0] != '\r' || s[1] != '\n') goto err;
     s += 2;
     // 解析各个命令
@@ -36,18 +37,12 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         next = std::find(s, es, '\n');
         if (next == es) goto clr;
         if (s[0] != '$' || next[-1] != '\r') goto err;
-
-        s += 1;
-        len = atol(s);
-        s = std::find_if(s, es, [](char c){ return !isnumber(c); });
-        if (s[0] != '\r' || s[1] != '\n') goto err;
-
-        s += 2;
-        next = std::find(s, es, '\r');
-        if (next == es) goto clr;
-        if (next[1] != '\n' || next - s != len) goto err;
-        con.addArg(s, next);
-        s = next + 2;
+        len = atol(s + 1);
+        s = next + 1;
+        if (es - s < len + 2) goto clr;
+        if (s[len] != '\r' || s[len+1] != '\n') goto err;
+        con.commandList().emplace_back(s, len);
+        s += len + 2;
         argc--;
     }
     buf.retrieve(s - ps);
@@ -101,7 +96,7 @@ void Server::executeCommand(Context& con)
             // 则进行必要的命令传播操作
             if (!(con.flag() & Context::EXEC_MULTI_WRITE) && (it->second.perm() & IS_WRITE))
                 con.setFlag(Context::EXEC_MULTI_WRITE);
-            con.addMultiArg(cmdlist);
+            con.transactionList().emplace_back(cmdlist);
             con.append("+QUEUED\r\n");
             goto end;
         }
@@ -249,24 +244,23 @@ void DBServer::checkExpireCycle(int64_t now)
 // 检查是否有阻塞的客户端超时
 void DBServer::checkBlockedClients(int64_t now)
 {
-    Context other(this, nullptr);
+    std::string message;
     auto& maps = g_server->server().connectionMaps();
     for (auto it = _blockedClients.begin(); it != _blockedClients.end(); ) {
         auto e = it++;
         auto conn = maps.find(*e);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            DB *db = selectDb(context.blockDbnum());
-            if (context.blockTimeout() != 0 && context.blockStartTime() + context.blockTimeout() <= now) {
-                DB::appendReplyMulti(other, 2);
-                other.append(db_return_nil);
-                double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
-                DB::appendReplySingleDouble(other, seconds);
-                conn->second->send(other.message());
-                other.message().clear();
-                _blockedClients.erase(e);
-                db->clearBlockingKeysForContext(context);
-            }
+        if (conn == maps.end()) continue;
+        auto& context = std::any_cast<Context&>(conn->second->getContext());
+        DB *db = selectDb(context.blockDbnum());
+        if (context.blockTimeout() != 0 && context.blockStartTime() + context.blockTimeout() <= now) {
+            message.append("*-1\r\n+(");
+            double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
+            message.append(convert2f(seconds));
+            message.append("s)\r\n");
+            conn->second->send(message);
+            message.clear();
+            _blockedClients.erase(e);
+            db->clearBlockingKeysForContext(context);
         }
     }
 }

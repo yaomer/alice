@@ -179,6 +179,12 @@ public:
         auto it = _dbServer.slaveIds().find(conn->id());
         if (it != _dbServer.slaveIds().end())
             _dbServer.slaveIds().erase(conn->id());
+        auto& context = std::any_cast<Context&>(conn->getContext());
+        if (context.flag() & Context::CON_BLOCK) {
+            DB *db = _dbServer.selectDb(context.blockDbnum());
+            db->clearBlockingKeysForContext(context);
+            _dbServer.removeBlockedClient(conn->id());
+        }
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
@@ -205,6 +211,8 @@ public:
                 break;
             case Context::REPLY:
                 replyResponse(conn);
+                if (buf.readable() == 0)
+                    return;
                 break;
             }
         }

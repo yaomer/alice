@@ -96,7 +96,7 @@ static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::
             if (cmdlist[i+1].compare("#") == 0)
                 *cmdops |= SORT_GET_VAL;
             else
-                get.push_back(cmdlist[i+1]);
+                get.emplace_back(cmdlist[i + 1]);
             i++;
             break;
         }
@@ -119,7 +119,7 @@ int DB::sortGetResult(Context& con, const std::string& key, DB::SortObjectList& 
     expireIfNeeded(key);
     auto it = find(key);
     if (!isFound(it)) {
-        con.append(db_return_nil);
+        con.append(db_return_multi_empty);
         return C_ERR;
     }
     if (isXXType(it, List)) {
@@ -193,12 +193,12 @@ static int sort(Context& con, unsigned cmdops, DB::SortObjectList& result)
 static int sortLimit(Context& con, DB::SortObjectList& result, int offset, int count)
 {
     if (offset < 0 || count <= 0) {
-        con.append(db_return_nil);
+        con.append(db_return_multi_empty);
         return C_ERR;
     }
     int size = result.size();
     if (offset >= size || offset + count > size) {
-        con.append(db_return_nil);
+        con.append(db_return_multi_empty);
         return C_ERR;
     }
     int i = 0;
@@ -288,10 +288,6 @@ void DB::sortCommand(Context& con)
     if (cmdops & SORT_GET) sortByGetKeys(result, cmdops, get);
     if (cmdops & SORT_STORE) sortStore(result, cmdops, des);
 end:
-    if (result.empty()) {
-        con.append(db_return_nil);
-        return;
-    }
     appendReplyMulti(con, result.size());
     for (auto& it : result) {
         if (it._value)
