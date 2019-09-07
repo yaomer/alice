@@ -86,7 +86,7 @@ void DB::getCommand(Context& con)
     if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, String);
     auto& value = getStringValue(it);
-    appendReplySingleStr(con, value);
+    appendReplyString(con, value);
 }
 
 void DB::getSetCommand(Context& con)
@@ -102,7 +102,7 @@ void DB::getSetCommand(Context& con)
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
     insert(cmdlist[1], cmdlist[2]);
-    appendReplySingleStr(con, oldvalue);
+    appendReplyString(con, oldvalue);
 }
 
 void DB::strlenCommand(Context& con)
@@ -161,7 +161,7 @@ void DB::mgetCommand(Context& con)
                 continue;
             }
             String& value = getStringValue(it);
-            appendReplySingleStr(con, value);
+            appendReplyString(con, value);
         } else
             con.append(db_return_nil);
     }

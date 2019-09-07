@@ -81,10 +81,10 @@ void DB::lpop(Context& con, int option)
     checkType(con, it, List);
     List& list = getListValue(it);
     if (option == LPOP) {
-        appendReplySingleStr(con, list.front());
+        appendReplyString(con, list.front());
         list.pop_front();
     } else {
-        appendReplySingleStr(con, list.back());
+        appendReplyString(con, list.back());
         list.pop_back();
     }
     if (list.empty()) delKeyWithExpire(cmdlist[1]);
@@ -128,7 +128,7 @@ void DB::rpoplpush(Context& con, int option)
     }
     checkType(con, src, List);
     List& srclist = getListValue(src);
-    appendReplySingleStr(con, srclist.back());
+    appendReplyString(con, srclist.back());
     auto des = find(cmdlist[2]);
     if (isFound(des)) {
         checkType(con, des, List);
@@ -225,7 +225,7 @@ void DB::lindexCommand(Context& con)
     }
     for (auto& it : list)
         if (index-- == 0) {
-            appendReplySingleStr(con, it);
+            appendReplyString(con, it);
             break;
         }
 }
@@ -280,7 +280,7 @@ void DB::lrangeCommand(Context& con)
         }
         if (i > stop)
             break;
-        appendReplySingleStr(con, it);
+        appendReplyString(con, it);
         i++;
     }
 }
@@ -388,8 +388,8 @@ void DB::blpop(Context& con, int option)
             checkType(con, it, List);
             List& list = getListValue(it);
             appendReplyMulti(con, 2);
-            appendReplySingleStr(con, cmdlist[i]);
-            appendReplySingleStr(con, option == BLPOP ? list.front() : list.back());
+            appendReplyString(con, cmdlist[i]);
+            appendReplyString(con, option == BLPOP ? list.front() : list.back());
             option == BLPOP ? list.pop_front() : list.pop_back();
             if (list.empty()) delKeyWithExpire(cmdlist[i]);
             return;
@@ -458,8 +458,8 @@ void DB::blockingPop(const std::string& key)
     auto& context = std::any_cast<Context&>(conn->second->getContext());
     bops = getLastcmd(context.lastcmd());
     DB::appendReplyMulti(other, 2);
-    DB::appendReplySingleStr(other, key);
-    DB::appendReplySingleStr(other, (bops == BLOCK_LPOP) ? value.front() : value.back());
+    DB::appendReplyString(other, key);
+    DB::appendReplyString(other, (bops == BLOCK_LPOP) ? value.front() : value.back());
     double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
     other.append("+(");
     other.append(convert2f(seconds));
@@ -474,4 +474,5 @@ void DB::blockingPop(const std::string& key)
     }
     (bops == BLOCK_LPOP) ? value.pop_front() : value.pop_back();
     if (value.empty()) delKeyWithExpire(key);
+    touchWatchKey(key);
 }

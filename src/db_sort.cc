@@ -291,7 +291,7 @@ end:
     appendReplyMulti(con, result.size());
     for (auto& it : result) {
         if (it._value)
-            appendReplySingleStr(con, *it._value);
+            appendReplyString(con, *it._value);
         else
             con.append(db_return_nil);
     }

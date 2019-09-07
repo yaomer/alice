@@ -57,7 +57,7 @@ void DB::hgetCommand(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        appendReplySingleStr(con, value->second);
+        appendReplyString(con, value->second);
     } else
         con.append(db_return_nil);
 }
@@ -199,7 +199,7 @@ void DB::hmgetCommand(Context& con)
     for (size_t i = 2; i < size; i++) {
         auto it = hash.find(cmdlist[i]);
         if (it != hash.end()) {
-            appendReplySingleStr(con, it->second);
+            appendReplyString(con, it->second);
         } else {
             con.append(db_return_nil);
         }
@@ -224,12 +224,12 @@ void DB::hgetXX(Context& con, int getXX)
         appendReplyMulti(con, hash.size());
     for (auto& it : hash) {
         if (getXX == HGETKEYS) {
-            appendReplySingleStr(con, it.first);
+            appendReplyString(con, it.first);
         } else if (getXX == HGETVALUES) {
-            appendReplySingleStr(con, it.second);
+            appendReplyString(con, it.second);
         } else if (getXX == HGETALL) {
-            appendReplySingleStr(con, it.first);
-            appendReplySingleStr(con, it.second);
+            appendReplyString(con, it.first);
+            appendReplyString(con, it.second);
         }
     }
 }

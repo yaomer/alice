@@ -140,20 +140,11 @@ void DB::appendReplyMulti(Context& con, size_t size)
     con.append("\r\n");
 }
 
-void DB::appendReplySingleStr(Context& con, const std::string& s)
+void DB::appendReplyString(Context& con, const std::string& s)
 {
     con.append("$");
     con.append(convert(s.size()));
     con.append("\r\n" + s + "\r\n");
-}
-
-void DB::appendReplySingleLen(Context& con, size_t size)
-{
-    con.append("$");
-    con.append(convert(strlen(convert(size))));
-    con.append("\r\n");
-    con.append(convert(size));
-    con.append("\r\n");
 }
 
 void DB::appendReplyNumber(Context& con, int64_t number)
@@ -163,11 +154,9 @@ void DB::appendReplyNumber(Context& con, int64_t number)
     con.append("\r\n");
 }
 
-void DB::appendReplySingleDouble(Context& con, double number)
+void DB::appendReplyDouble(Context& con, double number)
 {
-    con.append("$");
-    con.append(convert(strlen(convert2f(number))));
-    con.append("\r\n");
+    con.append(":");
     con.append(convert2f(number));
     con.append("\r\n");
 }
@@ -279,7 +268,7 @@ void DB::keysCommand(Context& con)
     if (cmdlist[1].compare("*")) db_return(con, "-ERR unknown option\r\n");
     appendReplyMulti(con, _hashMap.size());
     for (auto& it : _hashMap)
-        appendReplySingleStr(con, it.first);
+        appendReplyString(con, it.first);
 }
 
 void DB::saveCommand(Context& con)
@@ -526,8 +515,8 @@ void DB::subscribeCommand(Context& con)
         _dbServer->subChannel(cmdlist[i], con.conn()->id());
         appendReplyMulti(con, 3);
         con.append("$9\r\nsubscribe\r\n");
-        appendReplySingleStr(con, cmdlist[i]);
-        appendReplySingleLen(con, i);
+        appendReplyString(con, cmdlist[i]);
+        appendReplyNumber(con, i);
     }
 }
 

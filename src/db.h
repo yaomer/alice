@@ -373,10 +373,9 @@ public:
     void zremRangeByScoreCommand(Context& con);
 
     static void appendReplyMulti(Context& con, size_t size);
-    static void appendReplySingleStr(Context& con, const std::string& s);
-    static void appendReplySingleLen(Context& con, size_t size);
-    static void appendReplySingleDouble(Context& con, double number);
+    static void appendReplyString(Context& con, const std::string& s);
     static void appendReplyNumber(Context& con, int64_t number);
+    static void appendReplyDouble(Context& con, double number);
 private:
     Iterator find(const Key& key) { return _hashMap.find(key); }
     bool isFound(Iterator it) { return it != _hashMap.end(); }

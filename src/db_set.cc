@@ -57,7 +57,7 @@ void DB::spopCommand(Context& con)
     for (auto it = set.cbegin(bucketNumber);
             it != set.cend(bucketNumber); it++)
         if (where-- == 0) {
-            appendReplySingleStr(con, *it);
+            appendReplyString(con, *it);
             set.erase(set.find(*it));
             break;
         }
@@ -83,7 +83,7 @@ void DB::srandMemberCommand(Context& con)
     if (count >= static_cast<ssize_t>(set.size())) {
         appendReplyMulti(con, set.size());
         for (auto& it : set) {
-            appendReplySingleStr(con, it);
+            appendReplyString(con, it);
         }
         return;
     }
@@ -98,7 +98,7 @@ void DB::srandMemberCommand(Context& con)
             for (auto it = set.cbegin(bucketNumber);
                     it != set.cend(bucketNumber); it++) {
                 if (where-- == 0) {
-                    appendReplySingleStr(con, *it);
+                    appendReplyString(con, *it);
                     break;
                 }
             }
@@ -124,7 +124,7 @@ void DB::srandMemberCommand(Context& con)
         }
     }
     for (auto it : tset) {
-        appendReplySingleStr(con, it);
+        appendReplyString(con, it);
     }
 }
 
@@ -199,7 +199,7 @@ void DB::smembersCommand(Context& con)
     Set& set = getSetValue(it);
     appendReplyMulti(con, set.size());
     for (auto& it : set) {
-        appendReplySingleStr(con, it);
+        appendReplyString(con, it);
     }
 }
 
@@ -237,7 +237,7 @@ void DB::sinterCommand(Context& con)
     }
     appendReplyMulti(con, rset.size());
     for (auto& it : rset)
-        appendReplySingleStr(con, it);
+        appendReplyString(con, it);
 }
 
 void DB::sinterStoreCommand(Context& con)
@@ -306,7 +306,7 @@ void DB::sunionCommand(Context& con)
     else {
         appendReplyMulti(con, rset.size());
         for (auto& it : rset)
-            appendReplySingleStr(con, it);
+            appendReplyString(con, it);
     }
 }
 

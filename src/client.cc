@@ -164,11 +164,11 @@ int main(int argc, char *argv[])
             std::cout << "input error\n";
         }
         client.send();
+        client.parseResponse();
         if (client.flag() == Alice::Client::PUBSUB) {
             while (true)
                 pause();
         }
-        client.parseResponse();
         if (client.flag() == Client::PROTOCOLERR) {
             std::cout << "protocol error\n";
             abort();

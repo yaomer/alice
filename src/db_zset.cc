@@ -61,7 +61,7 @@ void DB::zscoreCommand(Context& con)
     _Zmap zmap = std::get<1>(tuple);
     auto e = zmap.find(cmdlist[2]);
     if (e != zmap.end()) {
-        appendReplySingleDouble(con, e->second);
+        appendReplyDouble(con, e->second);
     } else
         con.append(db_return_nil);
 }
@@ -80,7 +80,7 @@ void DB::zincrbyCommand(Context& con)
         zmap.emplace(cmdlist[3], score);
         zset.emplace(score, cmdlist[3]);
         insert(cmdlist[1], std::make_tuple(zset, zmap));
-        appendReplySingleDouble(con, score);
+        appendReplyDouble(con, score);
         return;
     }
     checkType(con, it, Zset);
@@ -92,11 +92,11 @@ void DB::zincrbyCommand(Context& con)
         zset.erase(std::make_tuple(e->second, cmdlist[3]));
         e->second += score;
         zset.emplace(e->second, cmdlist[3]);
-        appendReplySingleDouble(con, e->second);
+        appendReplyDouble(con, e->second);
     } else {
         zmap.emplace(cmdlist[3], score);
         zset.emplace(score, cmdlist[3]);
-        appendReplySingleDouble(con, score);
+        appendReplyDouble(con, score);
     }
 }
 
@@ -171,9 +171,9 @@ void DB::zrange(Context& con, bool reverse)
             }
             if (i > stop)
                 break;
-            appendReplySingleStr(con, std::get<1>(it));
+            appendReplyString(con, std::get<1>(it));
             if (withscores)
-                appendReplySingleDouble(con, std::get<0>(it));
+                appendReplyDouble(con, std::get<0>(it));
             i++;
         }
     } else {
@@ -184,9 +184,9 @@ void DB::zrange(Context& con, bool reverse)
             }
             if (i > stop)
                 break;
-            appendReplySingleStr(con, std::get<1>(*it));
+            appendReplyString(con, std::get<1>(*it));
             if (withscores)
-                appendReplySingleDouble(con, std::get<0>(*it));
+                appendReplyDouble(con, std::get<0>(*it));
             i++;
         }
     }
@@ -283,18 +283,18 @@ static void zrangefor(Context& con, DB::_Zset::iterator first, DB::_Zset::iterat
     bool isCount = (count > 0);
     if (!reverse) {
         while (first != last) {
-            DB::appendReplySingleStr(con, std::get<1>(*first));
+            DB::appendReplyString(con, std::get<1>(*first));
             if (withscores)
-                DB::appendReplySingleDouble(con, std::get<0>(*first));
+                DB::appendReplyDouble(con, std::get<0>(*first));
             ++first;
             if (isCount && --count == 0)
                 break;
         }
     } else {
         for (--last; ; --last) {
-            DB::appendReplySingleStr(con, std::get<1>(*last));
+            DB::appendReplyString(con, std::get<1>(*last));
             if (withscores)
-                DB::appendReplySingleDouble(con, std::get<0>(*last));
+                DB::appendReplyDouble(con, std::get<0>(*last));
             if (last == first || (isCount && --count == 0))
                 break;
         }
