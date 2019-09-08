@@ -20,7 +20,7 @@ int parseLine(std::vector<std::string>& argv, const char *line, const char *line
 // getRandBucketNumber()从Hash中挑选出一个随机元素，并返回这个元素
 // 所在的bucket以及bucket中的位置
 template <typename Hash>
-std::tuple<size_t, size_t> getRandBucketNumber(Hash h)
+std::tuple<size_t, size_t> getRandBucketNumber(const Hash& h)
 {
     size_t bucketNumber;
     std::uniform_int_distribution<size_t> u(0, h.bucket_count() - 1);
