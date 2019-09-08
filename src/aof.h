@@ -11,7 +11,7 @@ class DBServer;
 
 class Aof {
 public:
-    using Pair = std::pair<DB::Key, Value>;
+    using Iterator = DB::HashMap::iterator;
 
     static const size_t buffer_flush_size = 4096;
     static const size_t rewrite_min_filesize = 16 * 1024 * 1024;
@@ -33,11 +33,11 @@ private:
     void rewrite();
     void rewriteSelectDb(int dbnum);
     void rewriteExpire(const DB::Key& key, int64_t milliseconds);
-    void rewriteString(Pair pair);
-    void rewriteList(Pair pair);
-    void rewriteSet(Pair pair);
-    void rewriteHash(Pair pair);
-    void rewriteZset(Pair pair);
+    void rewriteString(Iterator it);
+    void rewriteList(Iterator it);
+    void rewriteSet(Iterator it);
+    void rewriteHash(Iterator it);
+    void rewriteZset(Iterator it);
     size_t getFilesize(int fd);
 
     DBServer *_dbServer;

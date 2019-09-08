@@ -48,11 +48,11 @@ void Rdb::save()
         }
         saveLen(select_db);
         saveLen(index);
-        for (auto& it : db->hashMap()) {
-            auto expire = db->expireMap().find(it.first);
+        for (auto it = db->hashMap().begin(); it != db->hashMap().end(); ++it) {
+            auto expire = db->expireMap().find(it->first);
             if (expire != db->expireMap().end()) {
                 if (expire->second <= now) {
-                    db->delKeyWithExpire(it.first);
+                    db->delKeyWithExpire(it->first);
                     continue;
                 } else {
                     saveLen(expire_key);
@@ -60,15 +60,15 @@ void Rdb::save()
                     append(&timeval, 8);
                 }
             }
-            if (isXXType(&it, DB::String)) {
+            if (isXXType(it, DB::String)) {
                 saveString(it);
-            } else if (isXXType(&it, DB::List)) {
+            } else if (isXXType(it, DB::List)) {
                 saveList(it);
-            } else if (isXXType(&it, DB::Set)) {
+            } else if (isXXType(it, DB::Set)) {
                 saveSet(it);
-            } else if (isXXType(&it, DB::Hash)) {
+            } else if (isXXType(it, DB::Hash)) {
                 saveHash(it);
-            } else if (isXXType(&it, DB::Zset)) {
+            } else if (isXXType(it, DB::Zset)) {
                 saveZset(it);
             }
         }
@@ -146,22 +146,22 @@ int Rdb::loadLen(char *ptr, uint64_t *lenptr)
     return readBytes;
 }
 
-void Rdb::saveString(Pair pair)
+void Rdb::saveString(Iterator it)
 {
     saveLen(string_type);
-    saveLen(pair.first.size());
-    append(pair.first);
-    DB::String& string = getXXType(&pair, DB::String&);
+    saveLen(it->first.size());
+    append(it->first);
+    DB::String& string = getXXType(it, DB::String&);
     saveLen(string.size());
     append(string);
 }
 
-void Rdb::saveList(Pair pair)
+void Rdb::saveList(Iterator it)
 {
     saveLen(list_type);
-    saveLen(pair.first.size());
-    append(pair.first);
-    DB::List& list = getXXType(&pair, DB::List&);
+    saveLen(it->first.size());
+    append(it->first);
+    DB::List& list = getXXType(it, DB::List&);
     saveLen(list.size());
     for (auto& it : list) {
         saveLen(it.size());
@@ -169,12 +169,12 @@ void Rdb::saveList(Pair pair)
     }
 }
 
-void Rdb::saveSet(Pair pair)
+void Rdb::saveSet(Iterator it)
 {
     saveLen(set_type);
-    saveLen(pair.first.size());
-    append(pair.first);
-    DB::Set& set = getXXType(&pair, DB::Set&);
+    saveLen(it->first.size());
+    append(it->first);
+    DB::Set& set = getXXType(it, DB::Set&);
     saveLen(set.size());
     for (auto& it : set) {
         saveLen(it.size());
@@ -182,12 +182,12 @@ void Rdb::saveSet(Pair pair)
     }
 }
 
-void Rdb::saveHash(Pair pair)
+void Rdb::saveHash(Iterator it)
 {
     saveLen(hash_type);
-    saveLen(pair.first.size());
-    append(pair.first);
-    DB::Hash& hash = getXXType(&pair, DB::Hash&);
+    saveLen(it->first.size());
+    append(it->first);
+    DB::Hash& hash = getXXType(it, DB::Hash&);
     saveLen(hash.size());
     for (auto& it : hash) {
         saveLen(it.first.size());
@@ -197,12 +197,12 @@ void Rdb::saveHash(Pair pair)
     }
 }
 
-void Rdb::saveZset(Pair pair)
+void Rdb::saveZset(Iterator it)
 {
     saveLen(zset_type);
-    saveLen(pair.first.size());
-    append(pair.first);
-    auto& tuple = getXXType(&pair, DB::Zset&);
+    saveLen(it->first.size());
+    append(it->first);
+    auto& tuple = getXXType(it, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);
     saveLen(zset.size());
     for (auto& it : zset) {
@@ -267,7 +267,7 @@ char *Rdb::loadString(char *ptr, int64_t *tvptr)
     memcpy(val, ptr, vallen);
     ptr += vallen;
     std::string strKey(key, keylen);
-    _curDb->hashMap()[strKey] = std::string(val, vallen);
+    _curDb->hashMap().emplace(strKey, std::string(val, vallen));
     if (*tvptr > 0) {
         _curDb->expireMap()[strKey] = *tvptr;
         *tvptr = 0;
@@ -290,10 +290,10 @@ char *Rdb::loadList(char *ptr, int64_t *tvptr)
         char val[vallen];
         memcpy(val, ptr, vallen);
         ptr += vallen;
-        list.push_back(std::string(val, vallen));
+        list.emplace_back(std::string(val, vallen));
     }
     std::string listKey(key, keylen);
-    _curDb->hashMap()[listKey] = std::move(list);
+    _curDb->hashMap().emplace(listKey, std::move(list));
     if (*tvptr > 0) {
         _curDb->expireMap()[listKey] = *tvptr;
         *tvptr = 0;
@@ -316,10 +316,10 @@ char *Rdb::loadSet(char *ptr, int64_t *tvptr)
         char val[vallen];
         memcpy(val, ptr, vallen);
         ptr += vallen;
-        set.insert(std::string(val, vallen));
+        set.emplace(std::string(val, vallen));
     }
     std::string setKey(key, keylen);
-    _curDb->hashMap()[setKey] = std::move(set);
+    _curDb->hashMap().emplace(setKey, std::move(set));
     if (*tvptr > 0) {
         _curDb->expireMap()[setKey] = *tvptr;
         *tvptr = 0;
@@ -347,10 +347,10 @@ char *Rdb::loadHash(char *ptr, int64_t *tvptr)
         char val[vallen];
         memcpy(val, ptr, vallen);
         ptr += vallen;
-        hash[std::string(field, fieldlen)] = std::string(val, vallen);
+        hash.emplace(std::string(field, fieldlen), std::string(val, vallen));
     }
     std::string hashKey(key, keylen);
-    _curDb->hashMap()[hashKey] = std::move(hash);
+    _curDb->hashMap().emplace(hashKey, std::move(hash));
     if (*tvptr > 0) {
         _curDb->expireMap()[hashKey] = *tvptr;
         *tvptr = 0;
@@ -381,11 +381,11 @@ char *Rdb::loadZset(char *ptr, int64_t *tvptr)
         ptr += vallen;
         std::string scorestr(score, slen);
         std::string valstr(val, vallen);
-        zset.insert(std::make_tuple(atof(scorestr.c_str()), valstr));
-        zmap[valstr] = std::move(atof(scorestr.c_str()));
+        zset.emplace(atof(scorestr.c_str()), valstr);
+        zmap.emplace(valstr, atof(scorestr.c_str()));
     }
     std::string zsetKey(key, keylen);
-    _curDb->hashMap()[zsetKey] = std::make_tuple(zset, zmap);
+    _curDb->hashMap().emplace(zsetKey, std::make_tuple(zset, zmap));
     if (*tvptr > 0) {
         _curDb->expireMap()[zsetKey] = *tvptr;
         *tvptr = 0;

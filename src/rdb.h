@@ -9,7 +9,7 @@ namespace Alice {
 
 class Rdb {
 public:
-    using Pair = std::pair<DB::Key, Value>;
+    using Iterator = DB::HashMap::iterator;
 
     static const size_t buffer_flush_size = 4096;
 
@@ -31,11 +31,11 @@ public:
 private:
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);
-    void saveString(Pair pair);
-    void saveList(Pair pair);
-    void saveSet(Pair pair);
-    void saveHash(Pair pair);
-    void saveZset(Pair pair);
+    void saveString(Iterator it);
+    void saveList(Iterator it);
+    void saveSet(Iterator it);
+    void saveHash(Iterator it);
+    void saveZset(Iterator it);
     char *loadString(char *ptr, int64_t *tvptr);
     char *loadList(char *ptr, int64_t *tvptr);
     char *loadSet(char *ptr, int64_t *tvptr);

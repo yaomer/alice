@@ -218,10 +218,7 @@ void DB::hgetXX(Context& con, int getXX)
     if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
-    if (getXX == HGETALL)
-        appendReplyMulti(con, hash.size() * 2);
-    else
-        appendReplyMulti(con, hash.size());
+    appendReplyMulti(con, getXX == HGETALL ? hash.size() * 2 : hash.size());
     for (auto& it : hash) {
         if (getXX == HGETKEYS) {
             appendReplyString(con, it.first);

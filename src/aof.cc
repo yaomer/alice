@@ -116,25 +116,25 @@ void Aof::rewrite()
             continue;
         }
         rewriteSelectDb(index);
-        for (auto& it : db->hashMap()) {
-            auto expire = db->expireMap().find(it.first);
+        for (auto it = db->hashMap().begin(); it != db->hashMap().end(); ++it) {
+            auto expire = db->expireMap().find(it->first);
             if (expire != db->expireMap().end()) {
                 if (expire->second <= now) {
-                    db->delKeyWithExpire(it.first);
+                    db->delKeyWithExpire(it->first);
                     continue;
                 } else {
-                    rewriteExpire(it.first, expire->second);
+                    rewriteExpire(it->first, expire->second);
                 }
             }
-            if (isXXType(&it, DB::String))
+            if (isXXType(it, DB::String))
                 rewriteString(it);
-            else if (isXXType(&it, DB::List))
+            else if (isXXType(it, DB::List))
                 rewriteList(it);
-            else if (isXXType(&it, DB::Set))
+            else if (isXXType(it, DB::Set))
                 rewriteSet(it);
-            else if (isXXType(&it, DB::Hash))
+            else if (isXXType(it, DB::Hash))
                 rewriteHash(it);
-            else if (isXXType(&it, DB::Zset))
+            else if (isXXType(it, DB::Zset))
                 rewriteZset(it);
             index++;
         }
@@ -178,28 +178,28 @@ void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)
 
 }
 
-void Aof::rewriteString(Pair pair)
+void Aof::rewriteString(Iterator it)
 {
-    DB::String& string = getXXType(&pair, DB::String&);
+    DB::String& string = getXXType(it, DB::String&);
     append("*3\r\n$3\r\nSET\r\n$");
-    append(convert(pair.first.size()));
+    append(convert(it->first.size()));
     append("\r\n");
-    append(pair.first + "\r\n$");
+    append(it->first + "\r\n$");
     append(convert(string.size()));
     append("\r\n");
     append(string + "\r\n");
 }
 
-void Aof::rewriteList(Pair pair)
+void Aof::rewriteList(Iterator it)
 {
-    DB::List& list = getXXType(&pair, DB::List&);
+    DB::List& list = getXXType(it, DB::List&);
     if (list.empty()) return;
     append("*");
     append(convert(list.size() + 2));
     append("\r\n$5\r\nRPUSH\r\n$");
-    append(convert(pair.first.size()));
+    append(convert(it->first.size()));
     append("\r\n");
-    append(pair.first + "\r\n");
+    append(it->first + "\r\n");
     for (auto& it : list) {
         append("$");
         append(convert(it.size()));
@@ -208,16 +208,16 @@ void Aof::rewriteList(Pair pair)
     }
 }
 
-void Aof::rewriteSet(Pair pair)
+void Aof::rewriteSet(Iterator it)
 {
-    DB::Set& set = getXXType(&pair, DB::Set&);
+    DB::Set& set = getXXType(it, DB::Set&);
     if (set.empty()) return;
     append("*");
     append(convert(set.size() + 2));
     append("\r\n$4\r\nSADD\r\n$");
-    append(convert(pair.first.size()));
+    append(convert(it->first.size()));
     append("\r\n");
-    append(pair.first + "\r\n");
+    append(it->first + "\r\n");
     for (auto& it : set) {
         append("$");
         append(convert(it.size()));
@@ -226,16 +226,16 @@ void Aof::rewriteSet(Pair pair)
     }
 }
 
-void Aof::rewriteHash(Pair pair)
+void Aof::rewriteHash(Iterator it)
 {
-    DB::Hash& hash = getXXType(&pair, DB::Hash&);
+    DB::Hash& hash = getXXType(it, DB::Hash&);
     if (hash.empty()) return;
     append("*");
     append(convert(hash.size() * 2 + 2));
     append("\r\n$5\r\nHMSET\r\n$");
-    append(convert(pair.first.size()));
+    append(convert(it->first.size()));
     append("\r\n");
-    append(pair.first + "\r\n");
+    append(it->first + "\r\n");
     for (auto& it : hash) {
         append("$");
         append(convert(it.first.size()));
@@ -247,17 +247,17 @@ void Aof::rewriteHash(Pair pair)
     }
 }
 
-void Aof::rewriteZset(Pair pair)
+void Aof::rewriteZset(Iterator it)
 {
-    auto& tuple = getXXType(&pair, DB::Zset&);
+    auto& tuple = getXXType(it, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);
     if (zset.empty()) return;
     append("*");
     append(convert(zset.size() * 2 + 2));
     append("\r\n$4\r\nZADD\r\n$");
-    append(convert(pair.first.size()));
+    append(convert(it->first.size()));
     append("\r\n");
-    append(pair.first + "\r\n");
+    append(it->first + "\r\n");
     for (auto& it : zset) {
         append("$");
         append(convert(strlen(convert2f(std::get<0>(it)))));
