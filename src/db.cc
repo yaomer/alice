@@ -27,6 +27,8 @@ DB::DB(DBServer *dbServer)
         { "INCRBY",     { -3, IS_WRITE, BIND(incrbyCommand) } },
         { "DECR",       { -2, IS_WRITE, BIND(decrCommand) } },
         { "DECRBY",     { -3, IS_WRITE, BIND(decrbyCommand) } },
+        { "SETRANGE",   { -4, IS_WRITE, BIND(setRangeCommand) } },
+        { "GETRANGE",   { -4, IS_READ,  BIND(getRangeCommand) } },
         { "LPUSH",      {  3, IS_WRITE, BIND(lpushCommand) } },
         { "LPUSHX",     { -3, IS_WRITE, BIND(lpushxCommand) } },
         { "RPUSH",      {  3, IS_WRITE, BIND(rpushCommand) } },
@@ -113,6 +115,7 @@ DB::DB(DBServer *dbServer)
         { "RENAME",     { -3, IS_WRITE, BIND(renameCommand) } },
         { "RENAMENX",   { -3, IS_WRITE, BIND(renamenxCommand) } },
         { "MOVE",       { -3, IS_WRITE, BIND(moveCommand) } },
+        { "LRU",        { -2, IS_READ,  BIND(lruCommand) } },
         { "ZRANGEBYSCORE",      {  4, IS_READ,  BIND(zrangeByScoreCommand) } },
         { "ZREVRANGEBYSCORE",   {  4, IS_READ,  BIND(zrevRangeByScoreCommand) } },
         { "ZREMRANGEBYRANK",    { -4, IS_WRITE, BIND(zremRangeByRankCommand) } },
@@ -638,6 +641,16 @@ void DB::moveCommand(Context& con)
     map.emplace(it->first, it->second);
     delKeyWithExpire(cmdlist[1]);
     con.append(db_return_1);
+}
+
+void DB::lruCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    expireIfNeeded(cmdlist[1]);
+    auto it = find(cmdlist[1]);
+    if (!isFound(it)) db_return(con, ":-1\r\n");
+    int64_t seconds = (_lru_cache - it->second.lru()) / 1000;
+    appendReplyNumber(con, seconds);
 }
 
 // 清空con.blockingKeys()，并从DB::blockingKeys()中移除所有con

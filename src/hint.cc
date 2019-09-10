@@ -18,8 +18,10 @@ typedef struct {
 // 放在cmdstr1前面（这是hints()实现导致的缺陷，但我暂时并不想去修复它)
 // e.g: SETNX必须放在SET前面，否则将无法提示SETNX
 HintInfo hiTable[HTSIZE] = {
-    { "SET",         3, 3, " key value [EX seconds|PX milliseconds] [NX|XX]" },
+    { "SETRANGE",    8, 3, " key offset value" },
+    { "GETRANGE",    8, 3, " key start end" },
     { "SETNX",       5, 2, " key value" },
+    { "SET",         3, 3, " key value [EX seconds|PX milliseconds] [NX|XX]" },
     { "GETSET",      6, 2, " key value" },
     { "GET",         3, 1, " key" },
     { "APPEND",      6, 2, " key value" },
@@ -118,6 +120,7 @@ HintInfo hiTable[HTSIZE] = {
     { "RENAMENX",    8, 2, " key newkey" },
     { "RENAME",      6, 2, " key newkey" },
     { "MOVE",        4, 2, " key db" },
+    { "LRU",         3, 1, " key" },
     { "", 0, 0, "" },
 };
 

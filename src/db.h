@@ -169,19 +169,19 @@ private:
 class Value {
 public:
     Value() : _value(0), _lru(_lru_cache) {  }
-    Value(std::any value) : _value(std::move(value)), _lru(_lru_cache)
+    Value(std::any&& value) : _value(std::move(value)), _lru(_lru_cache)
     {
     }
-    Value& operator=(std::any value)
+    Value& operator=(std::any&& value)
     {
         this->_value = std::move(value);
-        this->_lru = 0;
+        this->_lru = _lru_cache;
         return *this;
     }
     std::any& value() { return _value; }
-    void setValue(std::any& value) { _value = std::move(value); }
+    void setValue(std::any&& value) { _value = std::move(value); }
     int64_t lru() { return _lru; }
-    void setLru(int64_t lru) { _lru = lru; }
+    void updateLru() { _lru = _lru_cache; }
 private:
     std::any _value;
     int64_t _lru;
@@ -297,6 +297,7 @@ public:
     void renameCommand(Context& con);
     void renamenxCommand(Context& con);
     void moveCommand(Context& con);
+    void lruCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
@@ -310,6 +311,8 @@ public:
     void incrbyCommand(Context& con);
     void decrCommand(Context& con);
     void decrbyCommand(Context& con);
+    void setRangeCommand(Context& con);
+    void getRangeCommand(Context& con);
     // List Keys Operation
     void lpushCommand(Context& con);
     void lpushxCommand(Context& con);
@@ -426,6 +429,7 @@ private:
             (con).append(db_return_type_err); \
             return; \
         } \
+        (it)->second.updateLru(); \
     } while (0)
 #define getXXType(it, _type) \
     (std::any_cast<_type>((it)->second.value()))

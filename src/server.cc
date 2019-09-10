@@ -142,7 +142,7 @@ void DBServer::doWriteCommand(Context::CommandList& cmdlist)
 namespace Alice {
 
     // 键的空转时间不需要十分精确
-    thread_local int64_t _lru_cache;
+    thread_local int64_t _lru_cache = Angel::TimeStamp::now();
     Alice::Server *g_server;
     Alice::Sentinel *g_sentinel;
 }
