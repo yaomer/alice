@@ -4,7 +4,6 @@
 #include <random>
 #include <vector>
 #include <string>
-
 #include "util.h"
 
 namespace Alice {

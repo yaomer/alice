@@ -102,6 +102,7 @@ void Server::executeCommand(Context& con)
         }
     }
     if (it->second.perm() & IS_WRITE) {
+        _dbServer.freeMemoryIfNeeded();
         _dbServer.doWriteCommand(cmdlist);
     }
     it->second._commandCb(con);
@@ -225,9 +226,9 @@ void DBServer::checkExpireCycle(int64_t now)
             keys = db->expireMap().size();
         for (int j = 0; j < keys; j++) {
             if (db->expireMap().empty()) break;
-            auto bucket = getRandBucketNumber(db->expireMap());
-            size_t bucketNumber = std::get<0>(bucket);
-            size_t where = std::get<1>(bucket);
+            auto randkey = getRandHashKey(db->expireMap());
+            size_t bucketNumber = std::get<0>(randkey);
+            size_t where = std::get<1>(randkey);
             for (auto it = db->expireMap().cbegin(bucketNumber);
                     it != db->expireMap().cend(bucketNumber); it++) {
                 if (where-- == 0) {
@@ -588,7 +589,7 @@ void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
 
 void DBServer::setHeartBeatTimer(const Angel::TcpConnectionPtr& conn)
 {
-    _heartBeatTimerId = g_server->loop()->runEvery(g_server_conf.repl_ping_preiod, [this, conn]{
+    _heartBeatTimerId = g_server->loop()->runEvery(g_server_conf.repl_ping_period, [this, conn]{
             this->sendAckToMaster(conn);
             conn->send("*1\r\n$4\r\nPING\r\n");
             });

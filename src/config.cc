@@ -44,6 +44,9 @@ static void error(const char *s)
     abort();
 }
 
+#define ASSERT(expr, str) \
+    do { if (!(expr)) error(str); } while (0)
+
 static ssize_t humanSizeToBytes(const char *s)
 {
     const char *es = s + strlen(s);
@@ -66,14 +69,12 @@ void Alice::readServerConf()
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "port") == 0) {
             g_server_conf.port = atoi(it[1].c_str());
-            if (g_server_conf.port <= 0 || g_server_conf.port > 65536)
-                error("port");
+            ASSERT(g_server_conf.port > 0, "port");
         } else if (strcasecmp(it[0].c_str(), "ip") == 0) {
             g_server_conf.addr.assign(it[1]);
         } else if (strcasecmp(it[0].c_str(), "databases") == 0) {
             g_server_conf.databases = atoi(it[1].c_str());
-            if (g_server_conf.databases <= 0)
-                error("databases");
+            ASSERT(g_server_conf.databases > 0, "databases");
         } else if (strcasecmp(it[0].c_str(), "save") == 0) {
             g_server_conf.save_params.emplace_back(atol(it[1].c_str()), atol(it[2].c_str()));
         } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
@@ -92,26 +93,40 @@ void Alice::readServerConf()
                 error("appendfsync");
         } else if (strcasecmp(it[0].c_str(), "repl-timeout") == 0) {
             g_server_conf.repl_timeout = atoi(it[1].c_str());
-            if (g_server_conf.repl_timeout <= 0)
-                error("repl-timeout");
+            ASSERT(g_server_conf.repl_timeout > 0, "repl-timeout");
             g_server_conf.repl_timeout *= 1000;
         } else if (strcasecmp(it[0].c_str(), "repl-ping-period") == 0) {
-            g_server_conf.repl_ping_preiod = atoi(it[1].c_str());
-            if (g_server_conf.repl_ping_preiod <= 0)
-                error("repl-timeout");
-            g_server_conf.repl_ping_preiod *= 1000;
+            g_server_conf.repl_ping_period = atoi(it[1].c_str());
+            ASSERT(g_server_conf.repl_ping_period > 0, "repl-ping-period");
+            g_server_conf.repl_ping_period *= 1000;
         } else if (strcasecmp(it[0].c_str(), "repl-backlog-size") == 0) {
-            ssize_t size = humanSizeToBytes(it[1].c_str());
-            if (size < 0) error("repl-backlog-size");
-            g_server_conf.repl_backlog_size = size;
+            g_server_conf.repl_backlog_size = humanSizeToBytes(it[1].c_str());
+            ASSERT(g_server_conf.repl_backlog_size > 0, "repl-backlog-size");
         } else if (strcasecmp(it[0].c_str(), "expire-check-dbnums") == 0) {
             g_server_conf.expire_check_dbnums = atoi(it[1].c_str());
-            if (g_server_conf.expire_check_dbnums <= 0)
-                error("expire-check-dbnums");
+            ASSERT(g_server_conf.expire_check_dbnums > 0, "expire-check-dbnums");
         } else if (strcasecmp(it[0].c_str(), "expire-check-keys") == 0) {
             g_server_conf.expire_check_keys = atoi(it[1].c_str());
-            if (g_server_conf.expire_check_keys <= 0)
-                error("expire-check-keys");
+            ASSERT(g_server_conf.expire_check_keys > 0, "expire-check-keys");
+        } else if (strcasecmp(it[0].c_str(), "maxmemory") == 0) {
+            g_server_conf.maxmemory = humanSizeToBytes(it[1].c_str());
+            ASSERT(g_server_conf.maxmemory > 0, "maxmemory");
+        } else if (strcasecmp(it[0].c_str(), "maxmemory-policy") == 0) {
+            if (strcasecmp(it[1].c_str(), "allkeys-lru") == 0) {
+                g_server_conf.maxmemory_policy = EVICT_ALLKEYS_LRU;
+            } else if (strcasecmp(it[1].c_str(), "volatile-lru") == 0) {
+                g_server_conf.maxmemory_policy = EVICT_VOLATILE_LRU;
+            } else if (strcasecmp(it[1].c_str(), "allkeys-random") == 0) {
+                g_server_conf.maxmemory_policy = EVICT_ALLKEYS_RANDOM;
+            } else if (strcasecmp(it[1].c_str(), "volatile-random") == 0) {
+                g_server_conf.maxmemory_policy = EVICT_VOLATILE_RANDOM;
+            } else if (strcasecmp(it[1].c_str(), "volatile-ttl") == 0) {
+                g_server_conf.maxmemory_policy = EVICT_VOLATILE_TTL;
+            } else if (strcasecmp(it[1].c_str(), "noeviction"))
+                error("maxmemory-policy");
+        } else if (strcasecmp(it[0].c_str(), "maxmemory-samples") == 0) {
+            g_server_conf.maxmemory_samples = atoi(it[1].c_str());
+            ASSERT(g_server_conf.maxmemory_samples > 0, "maxmemory-samples");
         }
     }
 }
@@ -125,8 +140,7 @@ void Alice::readSentinelConf()
             g_sentinel_conf.addr = it[2];
         } else if (strcasecmp(it[1].c_str(), "port") == 0) {
             g_sentinel_conf.port = atoi(it[2].c_str());
-            if (g_sentinel_conf.port <= 0 || g_sentinel_conf.port > 65536)
-                error("port");
+            ASSERT(g_sentinel_conf.port > 0, "port");
         } else if (strcasecmp(it[1].c_str(), "monitor") == 0) {
             SentinelInstance master;
             master.setFlag(SentinelInstance::MASTER);
@@ -136,8 +150,7 @@ void Alice::readSentinelConf()
             g_sentinel_conf.masters[master.name()] = std::move(master);
         } else if (strcasecmp(it[1].c_str(), "down-after-milliseconds") == 0) {
             auto master = g_sentinel_conf.masters.find(it[2]);
-            if (master == g_sentinel_conf.masters.end())
-                error("down-after-milliseconds");
+            ASSERT(master != g_sentinel_conf.masters.end(), "down-after-milliseconds");
             master->second.setDownAfterPeriod(atoll(it[3].c_str()));
         }
     }

@@ -77,9 +77,9 @@ void Aof::load()
             auto& cmdlist = pseudoClient.commandList();
             auto it = _dbServer->db()->commandMap().find(cmdlist[0]);
             if (strcasecmp(cmdlist[0].c_str(), "PEXPIRE") == 0)
-                _dbServer->db()->expireMap()[cmdlist[1]] = atoll(cmdlist[2].c_str());
+                _dbServer->db()->expireMap().emplace(cmdlist[1], atoll(cmdlist[2].c_str()));
             else if (strcasecmp(cmdlist[0].c_str(), "SET") == 0)
-                _dbServer->db()->hashMap()[cmdlist[1]] = cmdlist[2];
+                _dbServer->db()->hashMap().emplace(cmdlist[1], cmdlist[2]);
             else
                 it->second._commandCb(pseudoClient);
             cmdlist.clear();

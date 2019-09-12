@@ -438,8 +438,10 @@ void DB::execCommand(Context& con)
         con.append(db_return_nil);
         goto end;
     }
-    if (multiIsWrite)
+    if (multiIsWrite) {
+        _dbServer->freeMemoryIfNeeded();
         _dbServer->doWriteCommand(tlist);
+    }
     for (auto& cmdlist : con.transactionList()) {
         auto command = _commandMap.find(cmdlist[0]);
         con.commandList().swap(cmdlist);

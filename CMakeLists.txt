@@ -15,6 +15,7 @@ set (SERV_SRC_FILES
     ${PROJECT_SRC_DIR}/db_set.cc
     ${PROJECT_SRC_DIR}/db_zset.cc
     ${PROJECT_SRC_DIR}/db_sort.cc
+    ${PROJECT_SRC_DIR}/evict.cc
     ${PROJECT_SRC_DIR}/rdb.cc
     ${PROJECT_SRC_DIR}/aof.cc
     ${PROJECT_SRC_DIR}/sentinel.cc

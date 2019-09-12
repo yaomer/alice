@@ -5,6 +5,8 @@
 #include <Angel/TcpServer.h>
 #include <Angel/TcpClient.h>
 #include <Angel/SockOps.h>
+
+#include <unistd.h>
 #include <unordered_map>
 #include <map>
 #include <set>
@@ -61,6 +63,7 @@ public:
         setSelfRunId(_selfRunId);
         bzero(_masterRunId, sizeof(_masterRunId));
         bzero(_tmpfile, sizeof(_tmpfile));
+        _pid = getpid();
     }
     DBS& dbs() { return _dbs; }
     int curDbnum() const { return _curDbnum; }
@@ -118,7 +121,16 @@ public:
         if (_masterAddr) _masterAddr.reset();
         _masterAddr.reset(new Angel::InetAddr(addr.inetAddr()));
     }
+    void freeMemoryIfNeeded();
+    pid_t getpid() const { return _pid; }
+    static ssize_t getProcMemory();
 private:
+    void evictAllkeysWithLru();
+    void evictVolatileWithLru();
+    void evictAllkeysWithRandom();
+    void evictVolatileWithRandom();
+    void evictVolatileWithTtl();
+
     DBS _dbs;
     // 当前选择的数据库号码
     int _curDbnum;
@@ -159,6 +171,8 @@ private:
     int _curCheckDb;
     // 保存所有执行阻塞命令阻塞的客户端
     BlockedClients _blockedClients;
+    // 服务器进程ID
+    pid_t _pid;
 };
 
 class Server {

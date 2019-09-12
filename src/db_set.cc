@@ -51,9 +51,9 @@ void DB::spopCommand(Context& con)
     if (!isFound(it)) db_return(con, db_return_nil);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
-    auto bucket = getRandBucketNumber(set);
-    size_t bucketNumber = std::get<0>(bucket);
-    size_t where = std::get<1>(bucket);
+    auto randkey = getRandHashKey(set);
+    size_t bucketNumber = std::get<0>(randkey);
+    size_t where = std::get<1>(randkey);
     for (auto it = set.cbegin(bucketNumber);
             it != set.cend(bucketNumber); it++)
         if (where-- == 0) {
@@ -92,9 +92,9 @@ void DB::srandMemberCommand(Context& con)
             count = -1;
         appendReplyMulti(con, -count);
         while (count++ < 0) {
-            auto bucket = getRandBucketNumber(set);
-            size_t bucketNumber = std::get<0>(bucket);
-            size_t where = std::get<1>(bucket);
+            auto randkey = getRandHashKey(set);
+            size_t bucketNumber = std::get<0>(randkey);
+            size_t where = std::get<1>(randkey);
             for (auto it = set.cbegin(bucketNumber);
                     it != set.cend(bucketNumber); it++) {
                 if (where-- == 0) {
@@ -108,9 +108,9 @@ void DB::srandMemberCommand(Context& con)
     appendReplyMulti(con, count);
     Set tset;
     while (count-- > 0) {
-        auto bucket = getRandBucketNumber(set);
-        size_t bucketNumber = std::get<0>(bucket);
-        size_t where = std::get<1>(bucket);
+        auto randkey = getRandHashKey(set);
+        size_t bucketNumber = std::get<0>(randkey);
+        size_t where = std::get<1>(randkey);
         for (auto it = set.cbegin(bucketNumber);
                 it != set.cend(bucketNumber); it++) {
             if (where-- == 0) {

@@ -180,7 +180,7 @@ public:
     }
     std::any& value() { return _value; }
     void setValue(std::any&& value) { _value = std::move(value); }
-    int64_t lru() { return _lru; }
+    int64_t lru() const { return _lru; }
     void updateLru() { _lru = _lru_cache; }
 private:
     std::any _value;
