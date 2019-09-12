@@ -6,7 +6,12 @@ using namespace Alice;
 void DBServer::freeMemoryIfNeeded()
 {
     if (g_server_conf.maxmemory == 0) return;
-    if (getProcMemory() < g_server_conf.maxmemory) return;
+    ssize_t memorySize = getProcMemory();
+    if (memorySize < 0) {
+        logError("getProcMemory: %s", Angel::strerrno());
+        return;
+    }
+    if (memorySize < g_server_conf.maxmemory) return;
     switch (g_server_conf.maxmemory_policy) {
     case EVICT_ALLKEYS_LRU: evictAllkeysWithLru(); break;
     case EVICT_VOLATILE_LRU: evictVolatileWithLru(); break;
@@ -44,14 +49,7 @@ void DBServer::evictAllkeysWithLru()
         }
     }
     if (evict[0] == -1) return;
-    for (auto it = hash.cbegin(evict[0]); it != hash.end(evict[0]); ++it) {
-        if (evict[1]-- == 0) {
-            Context::CommandList clist = { "DEL", it->first };
-            db()->delKeyWithExpire(it->first);
-            appendWriteCommand(clist);
-            break;
-        }
-    }
+    evictKey(hash, evict);
 }
 
 void DBServer::evictVolatileWithLru()
@@ -77,30 +75,17 @@ void DBServer::evictVolatileWithLru()
         }
     }
     if (evict[0] == -1) return;
-    for (auto it = hash.cbegin(evict[0]); it != hash.end(evict[0]); ++it) {
-        if (evict[1]-- == 0) {
-            Context::CommandList clist = { "DEL", it->first };
-            db()->delKeyWithExpire(it->first);
-            appendWriteCommand(clist);
-            break;
-        }
-    }
+    evictKey(hash, evict);
 }
 
 void DBServer::evictAllkeysWithRandom()
 {
+    int evict[2];
     auto& hash = db()->hashMap();
     auto randkey = getRandHashKey(hash);
-    auto bucketNumber = std::get<0>(randkey);
-    auto where = std::get<1>(randkey);
-    for (auto it = hash.cbegin(bucketNumber); it != hash.end(bucketNumber); ++it) {
-        if (where-- == 0) {
-            Context::CommandList clist = { "DEL", it->first };
-            db()->delKeyWithExpire(it->first);
-            appendWriteCommand(clist);
-            break;
-        }
-    }
+    evict[0] = std::get<0>(randkey);
+    evict[1] = std::get<1>(randkey);
+    evictKey(hash, evict);
 }
 
 void DBServer::evictVolatileWithRandom()
@@ -112,9 +97,7 @@ void DBServer::evictVolatileWithRandom()
     for (auto it = hash.cbegin(bucketNumber); it != hash.end(bucketNumber); ++it) {
         if (where-- == 0) {
             auto e = db()->hashMap().find(it->first);
-            Context::CommandList clist = { "DEL", e->first };
-            db()->delKeyWithExpire(e->first);
-            appendWriteCommand(clist);
+            evictKey(e->first);
             break;
         }
     }
@@ -144,14 +127,14 @@ void DBServer::evictVolatileWithTtl()
         }
     }
     if (evict[0] == -1) return;
-    for (auto it = hash.cbegin(evict[0]); it != hash.end(evict[0]); ++it) {
-        if (evict[1]-- == 0) {
-            Context::CommandList clist = { "DEL", it->first };
-            db()->delKeyWithExpire(it->first);
-            appendWriteCommand(clist);
-            break;
-        }
-    }
+    evictKey(hash, evict);
+}
+
+void DBServer::evictKey(const std::string& key)
+{
+    Context::CommandList clist = { "DEL", key };
+    db()->delKeyWithExpire(key);
+    appendWriteCommand(clist);
 }
 
 #if defined (__APPLE__)
@@ -163,7 +146,6 @@ ssize_t DBServer::getProcMemory()
 {
     pid_t pid = g_server->dbServer().getpid();
 #if defined (__APPLE__)
-    // need root permission
     struct proc_taskinfo pti;
     int ret = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &pti, PROC_PIDTASKINFO_SIZE);
     if (ret != PROC_PIDTASKINFO_SIZE) return -1;
@@ -185,6 +167,7 @@ ssize_t DBServer::getProcMemory()
     fclose(fp);
     return vmrss;
 #else
+    logError("unknown platform");
     return -1;
 #endif
 }

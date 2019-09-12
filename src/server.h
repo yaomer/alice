@@ -5,6 +5,7 @@
 #include <Angel/TcpServer.h>
 #include <Angel/TcpClient.h>
 #include <Angel/SockOps.h>
+#include <Angel/LogStream.h>
 
 #include <unistd.h>
 #include <unordered_map>
@@ -130,6 +131,17 @@ private:
     void evictAllkeysWithRandom();
     void evictVolatileWithRandom();
     void evictVolatileWithTtl();
+    template <typename T>
+    void evictKey(const T& hash, int (evict)[2])
+    {
+        for (auto it = hash.cbegin(evict[0]); it != hash.end(evict[0]); ++it) {
+            if (evict[1]-- == 0) {
+                evictKey(it->first);
+                break;
+            }
+        }
+    }
+    void evictKey(const std::string& key);
 
     DBS _dbs;
     // 当前选择的数据库号码
