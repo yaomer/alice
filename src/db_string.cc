@@ -212,3 +212,58 @@ void DB::decrbyCommand(Context& con)
     if (str2numberErr()) db_return(con, db_return_integer_err);
     incr(con, -decrement);
 }
+
+void DB::setRangeCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    int offset = str2l(cmdlist[2].c_str());
+    if (str2numberErr() || offset < 0)
+        db_return(con, db_return_integer_err);
+    String string;
+    String& value = cmdlist[3];
+    expireIfNeeded(cmdlist[1]);
+    touchWatchKey(cmdlist[1]);
+    auto it = find(cmdlist[1]);
+    if (!isFound(it)) {
+        string.reserve(offset + value.size());
+        string.resize(offset, '\x00');
+        string.append(value);
+        appendReplyNumber(con, string.size());
+        insert(cmdlist[1], std::move(string));
+        return;
+    }
+    checkType(con, it, String);
+    string.swap(getStringValue(it));
+    size_t size = offset + value.size();
+    if (string.capacity() < size) string.reserve(size);
+    if (offset < string.size()) {
+        for (size_t i = offset; i < size; i++) {
+            string[i] = value[i-offset];
+        }
+    } else {
+        for (size_t i = string.size(); i < offset; i++)
+            string[i] = '\x00';
+        string.append(value);
+    }
+    appendReplyNumber(con, string.size());
+    insert(cmdlist[1], std::move(string));
+}
+
+void DB::getRangeCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    int start = str2l(cmdlist[2].c_str());
+    if (str2numberErr()) db_return(con, db_return_integer_err);
+    int stop = str2l(cmdlist[3].c_str());
+    if (str2numberErr()) db_return(con, db_return_integer_err);
+    expireIfNeeded(cmdlist[1]);
+    auto it = find(cmdlist[1]);
+    if (!isFound(it)) db_return(con, db_return_nil);
+    checkType(con, it, String);
+    String& string = getStringValue(it);
+    int upperbound = string.size() - 1;
+    int lowerbound = -string.size();
+    if (checkRange(con, &start, &stop, lowerbound, upperbound) == C_ERR)
+        return;
+    appendReplyString(con, string.substr(start, stop - start + 1));
+}

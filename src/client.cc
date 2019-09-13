@@ -80,7 +80,12 @@ next:
     }
     s += crlf + 2;
     if (es - s < len + 2) { read(); goto next; }
-    std::cout << "\"" << std::string(s, len) << "\"\n";
+    std::cout << "\"";
+    for (int i = 0; i < len; i++) {
+        if (s[i]) std::cout << s[i];
+        else std::cout << "\\x00";
+    }
+    std::cout << "\"\n";
     _buf.retrieve(s + len + 2 - ps);
     return;
 protocolerr:
