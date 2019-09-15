@@ -116,6 +116,7 @@ DB::DB(DBServer *dbServer)
         { "RENAMENX",   { -3, IS_WRITE, BIND(renamenxCommand) } },
         { "MOVE",       { -3, IS_WRITE, BIND(moveCommand) } },
         { "LRU",        { -2, IS_READ,  BIND(lruCommand) } },
+        { "CONFIG",     {  3, IS_READ,  BIND(configCommand) } },
         { "ZRANGEBYSCORE",      {  4, IS_READ,  BIND(zrangeByScoreCommand) } },
         { "ZREVRANGEBYSCORE",   {  4, IS_READ,  BIND(zrevRangeByScoreCommand) } },
         { "ZREMRANGEBYRANK",    { -4, IS_WRITE, BIND(zremRangeByRankCommand) } },

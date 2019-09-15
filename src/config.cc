@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <vector>
 #include <string>
+#include "db.h"
 #include "config.h"
 
 using namespace Alice;
@@ -49,10 +50,10 @@ static void error(const char *s)
 
 static ssize_t humanSizeToBytes(const char *s)
 {
-    const char *es = s + strlen(s);
-    const char *p = std::find_if(s, es, [](char c){ return !isnumber(c); });
-    if (p == s || p == es) return -1;
     ssize_t bytes = atoll(s);
+    const char *es = s + strlen(s);
+    const char *p = std::find_if_not(s, es, ::isnumber);
+    if (p == s || p == es) return bytes;
     if (strcasecmp(p, "GB") == 0)
         bytes *= 1024 * 1024 * 1024;
     else if (strcasecmp(p, "MB") == 0)
@@ -110,7 +111,7 @@ void Alice::readServerConf()
             ASSERT(g_server_conf.expire_check_keys > 0, "expire-check-keys");
         } else if (strcasecmp(it[0].c_str(), "maxmemory") == 0) {
             g_server_conf.maxmemory = humanSizeToBytes(it[1].c_str());
-            ASSERT(g_server_conf.maxmemory > 0, "maxmemory");
+            ASSERT(g_server_conf.maxmemory >= 0, "maxmemory");
         } else if (strcasecmp(it[0].c_str(), "maxmemory-policy") == 0) {
             if (strcasecmp(it[1].c_str(), "allkeys-lru") == 0) {
                 g_server_conf.maxmemory_policy = EVICT_ALLKEYS_LRU;
@@ -154,4 +155,69 @@ void Alice::readSentinelConf()
             master->second.setDownAfterPeriod(atoll(it[3].c_str()));
         }
     }
+}
+
+void DB::configGet(Context& con, const std::string& arg)
+{
+    appendReplyMulti(con, 2);
+    appendReplyString(con, arg);
+    if (strcasecmp(arg.c_str(), "databases") == 0) {
+        appendReplyString(con, convert(g_server_conf.databases));
+    } else if (strcasecmp(arg.c_str(), "expire-check-dbnums") == 0) {
+        appendReplyString(con, convert(g_server_conf.expire_check_dbnums));
+    } else if (strcasecmp(arg.c_str(), "expire-check-keys") == 0) {
+        appendReplyString(con, convert(g_server_conf.expire_check_keys));
+    } else if (strcasecmp(arg.c_str(), "maxmemory") == 0) {
+        appendReplyString(con, convert(g_server_conf.maxmemory));
+    } else if (strcasecmp(arg.c_str(), "maxmemory-policy") == 0) {
+        appendReplyString(con, convert(g_server_conf.maxmemory_policy));
+    } else if (strcasecmp(arg.c_str(), "maxmemory-samples") == 0) {
+        appendReplyString(con, convert(g_server_conf.maxmemory_samples));
+    } else if (strcasecmp(arg.c_str(), "save") == 0) {
+        std::string s;
+        for (auto& it : g_server_conf.save_params) {
+            s.append(convert(std::get<0>(it)));
+            s.append(" ");
+            s.append(convert(std::get<1>(it)));
+            s.append(" ");
+        }
+        s.pop_back();
+        appendReplyString(con, s);
+    } else if (strcasecmp(arg.c_str(), "appendonly") == 0) {
+        appendReplyString(con, g_server_conf.enable_appendonly ? "yes" : "no");
+    } else if (strcasecmp(arg.c_str(), "appendfsync") == 0) {
+        if (g_server_conf.aof_mode == AOF_EVERYSEC)
+            appendReplyString(con, "everysec");
+        else if (g_server_conf.aof_mode == AOF_ALWAYS)
+            appendReplyString(con, "always");
+        else
+            appendReplyString(con, "no");
+    } else if (strcasecmp(arg.c_str(), "repl-timeout") == 0) {
+        appendReplyString(con, convert(g_server_conf.repl_timeout));
+    } else if (strcasecmp(arg.c_str(), "repl-ping-period") == 0) {
+        appendReplyString(con, convert(g_server_conf.repl_ping_period));
+    } else if (strcasecmp(arg.c_str(), "repl-backlog-size") == 0) {
+        appendReplyString(con, convert(g_server_conf.repl_backlog_size));
+    } else if (strcasecmp(arg.c_str(), "slowlog-log-slower-than") == 0) {
+        appendReplyString(con, convert(g_server_conf.slowlog_log_slower_than));
+    } else if (strcasecmp(arg.c_str(), "slowlog-max-len") == 0) {
+        appendReplyString(con, convert(g_server_conf.slowlog_max_len));
+    } else
+        con.message().assign(db_return_multi_empty);
+}
+
+void DB::configSet(Context& con, const std::string& arg, const std::string& value)
+{
+    // TODO
+}
+
+void DB::configCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    if (strcasecmp(cmdlist[1].c_str(), "get") == 0) {
+        configGet(con, cmdlist[2]);
+    } else if (strcasecmp(cmdlist[1].c_str(), "set") == 0) {
+        configSet(con, cmdlist[2], cmdlist[2]);
+    } else
+        con.append("-ERR Unknown subcommand or wrong argument\r\n");
 }

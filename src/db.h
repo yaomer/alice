@@ -298,6 +298,7 @@ public:
     void renamenxCommand(Context& con);
     void moveCommand(Context& con);
     void lruCommand(Context& con);
+    void configCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
@@ -410,6 +411,8 @@ private:
     void sortByPattern(unsigned *cmdops, const String& by, SortObjectList& result);
     void sortByGetKeys(SortObjectList& result, unsigned cmdops, const std::vector<std::string>& get);
     void sortStore(SortObjectList& result, unsigned cmdops, const String& des);
+    void configGet(Context& con, const std::string& arg);
+    void configSet(Context& con, const std::string& arg, const std::string& value);
 
     DBServer *_dbServer;
     HashMap _hashMap;

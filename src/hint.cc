@@ -121,6 +121,8 @@ HintInfo hiTable[HTSIZE] = {
     { "RENAME",      6, 2, " key newkey" },
     { "MOVE",        4, 2, " key db" },
     { "LRU",         3, 1, " key" },
+    { "CONFIG GET",  10,1, " parameter"  },
+    { "CONFIG SET",  10,2, " parameter value" },
     { "", 0, 0, "" },
 };
 

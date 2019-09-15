@@ -81,6 +81,9 @@ double str2f(const char *nptr)
 }
 
 // 分割一个以\n结尾的字符串，将结果保存在argv中
+// 带空白符的字符串必须包含在双引号内
+// set key value -> [set] [key] [value]
+// set key "hello, wrold" -> [set] [key] [hello, world]
 int parseLine(std::vector<std::string>& argv, const char *line, const char *linep)
 {
     const char *start;

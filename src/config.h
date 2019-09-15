@@ -53,6 +53,8 @@ struct ServerConf {
     int maxmemory_policy = EVICT_NO;
     // 内存淘汰时的随机取样精度
     int maxmemory_samples = 5;
+    int slowlog_log_slower_than = 10000;
+    int slowlog_max_len = 128;
 };
 
 struct SentinelConf {

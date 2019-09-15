@@ -633,6 +633,7 @@ size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, 
 
 int main(int argc, char *argv[])
 {
+    Angel::setLoggerLevel(Angel::Logger::INFO);
     Alice::readServerConf();
     if (argv[1] && strcasecmp(argv[1], "--sentinel") == 0) {
         Alice::readSentinelConf();
