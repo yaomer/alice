@@ -137,8 +137,7 @@ void DB::msetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    if (size % 2 == 0)
-        db_return(con, "-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
+    if (size % 2 == 0) db_return(con, db_return_argnumber_err);
     for (size_t i = 1; i < size; i += 2) {
         expireIfNeeded(cmdlist[i]);
         insert(cmdlist[i], cmdlist[i+1]);

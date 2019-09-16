@@ -138,6 +138,7 @@ const char *db_return_float_err = "-ERR value is not a valid float\r\n";
 const char *db_return_syntax_err = "-ERR syntax error\r\n";
 const char *db_return_no_such_key = "-ERR no such key\r\n";
 const char *db_return_subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";
+const char *db_return_argnumber_err = "-ERR wrong number of arguments\r\n";
 
 void DB::appendReplyMulti(Context& con, size_t size)
 {

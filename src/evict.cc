@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include "server.h"
 #include "config.h"
 
@@ -138,23 +139,26 @@ void DBServer::evictKey(const std::string& key)
 }
 
 #if defined (__APPLE__)
-#include <libproc.h>
+#include <mach/task.h>
+#include <mach/mach_init.h>
 #endif
 
 // 获取当前进程已使用的内存大小(bytes)
 ssize_t DBServer::getProcMemory()
 {
-    pid_t pid = g_server->dbServer().getpid();
 #if defined (__APPLE__)
-    struct proc_taskinfo pti;
-    int ret = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &pti, PROC_PIDTASKINFO_SIZE);
-    if (ret != PROC_PIDTASKINFO_SIZE) return -1;
-    return pti.pti_resident_size;
+    task_t task;
+    struct task_basic_info tbi;
+    mach_msg_type_number_t count = TASK_BASIC_INFO_COUNT;
+    if (task_for_pid(mach_task_self(), ::getpid(), &task) != KERN_SUCCESS)
+        return -1;
+    task_info(task, TASK_BASIC_INFO, (task_info_t)&tbi, &count);
+    return tbi.resident_size;
 #elif defined (__linux__)
     char name[32] = { 0 };
     char buf[1024] = { 0 };
     int vmrss = -1;
-    snprintf(name, sizeof(name), "/proc/%d/status", pid);
+    snprintf(name, sizeof(name), "/proc/%d/status", ::getpid());
     FILE *fp = fopen(name, "r");
     if (fp == nullptr) return -1;
     while (fgets(buf, sizeof(buf), fp)) {

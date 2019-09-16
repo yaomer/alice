@@ -9,8 +9,7 @@ using namespace Alice;
 void DB::zaddCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (cmdlist.size() % 2 != 0)
-        db_return(con, "-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
+    if (cmdlist.size() % 2 != 0) db_return(con, db_return_argnumber_err);
     for (size_t i = 2; i < cmdlist.size(); i += 2) {
         void(str2f(cmdlist[i].c_str()));
         if (str2numberErr()) db_return(con, db_return_float_err);

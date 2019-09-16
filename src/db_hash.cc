@@ -164,8 +164,7 @@ void DB::hmsetCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
-    if (size % 2 != 0)
-        db_return(con, "-ERR wrong number of arguments for '" + cmdlist[0] + "'\r\n");
+    if (size % 2 != 0) db_return(con, db_return_argnumber_err);
     touchWatchKey(cmdlist[1]);
     auto it = find(cmdlist[1]);
     if (!isFound(it)) {
