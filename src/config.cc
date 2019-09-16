@@ -128,6 +128,12 @@ void Alice::readServerConf()
         } else if (strcasecmp(it[0].c_str(), "maxmemory-samples") == 0) {
             g_server_conf.maxmemory_samples = atoi(it[1].c_str());
             ASSERT(g_server_conf.maxmemory_samples > 0, "maxmemory-samples");
+        } else if (strcasecmp(it[0].c_str(), "slowlog-log-slower-than") == 0) {
+            g_server_conf.slowlog_log_slower_than = atoi(it[1].c_str());
+            ASSERT(g_server_conf.slowlog_log_slower_than >= 0, "slowlog-log-slower-than");
+        } else if (strcasecmp(it[0].c_str(), "slowlog-max-len") == 0) {
+            g_server_conf.slowlog_max_len = atoi(it[1].c_str());
+            ASSERT(g_server_conf.slowlog_max_len >= 0, "slowlog-max-len");
         }
     }
 }
@@ -219,5 +225,5 @@ void DB::configCommand(Context& con)
     } else if (strcasecmp(cmdlist[1].c_str(), "set") == 0) {
         configSet(con, cmdlist[2], cmdlist[2]);
     } else
-        con.append("-ERR Unknown subcommand or wrong argument\r\n");
+        con.append(db_return_subcommand_err);
 }

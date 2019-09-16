@@ -117,6 +117,7 @@ DB::DB(DBServer *dbServer)
         { "MOVE",       { -3, IS_WRITE, BIND(moveCommand) } },
         { "LRU",        { -2, IS_READ,  BIND(lruCommand) } },
         { "CONFIG",     {  3, IS_READ,  BIND(configCommand) } },
+        { "SLOWLOG",    {  2, IS_READ,  BIND(slowlogCommand) } },
         { "ZRANGEBYSCORE",      {  4, IS_READ,  BIND(zrangeByScoreCommand) } },
         { "ZREVRANGEBYSCORE",   {  4, IS_READ,  BIND(zrevRangeByScoreCommand) } },
         { "ZREMRANGEBYRANK",    { -4, IS_WRITE, BIND(zremRangeByRankCommand) } },
@@ -136,6 +137,7 @@ const char *db_return_integer_err = "-ERR value is not an integer or out of rang
 const char *db_return_float_err = "-ERR value is not a valid float\r\n";
 const char *db_return_syntax_err = "-ERR syntax error\r\n";
 const char *db_return_no_such_key = "-ERR no such key\r\n";
+const char *db_return_subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";
 
 void DB::appendReplyMulti(Context& con, size_t size)
 {
@@ -654,6 +656,45 @@ void DB::lruCommand(Context& con)
     if (!isFound(it)) db_return(con, ":-1\r\n");
     int64_t seconds = (_lru_cache - it->second.lru()) / 1000;
     appendReplyNumber(con, seconds);
+}
+
+#define SlOWLOG_GET_LOGS 10
+
+void DB::slowlogGet(Context& con, Context::CommandList& cmdlist)
+{
+    int count = 0;
+    if (cmdlist.size() > 2) {
+        count = str2l(cmdlist[2].c_str());
+        if (str2numberErr()) db_return(con, db_return_integer_err);
+        if (count <= 0) db_return(con, db_return_multi_empty);
+    } else
+        count = SlOWLOG_GET_LOGS;
+    if (count > _dbServer->slowlogQueue().size())
+        count = _dbServer->slowlogQueue().size();
+    appendReplyMulti(con, count);
+    for (auto& it : _dbServer->slowlogQueue()) {
+        appendReplyMulti(con, 4);
+        appendReplyString(con, convert(it._id));
+        appendReplyString(con, convert(it._time));
+        appendReplyString(con, convert(it._duration));
+        appendReplyMulti(con, it._args.size());
+        for (auto& arg : it._args)
+            appendReplyString(con, arg);
+    }
+}
+
+void DB::slowlogCommand(Context& con)
+{
+    auto& cmdlist = con.commandList();
+    if (strcasecmp(cmdlist[1].c_str(), "get") == 0) {
+        slowlogGet(con, cmdlist);
+    } else if (strcasecmp(cmdlist[1].c_str(), "len") == 0) {
+        appendReplyNumber(con, _dbServer->slowlogQueue().size());
+    } else if (strcasecmp(cmdlist[1].c_str(), "reset") == 0) {
+        _dbServer->slowlogQueue().clear();
+        con.append(db_return_ok);
+    } else
+        con.append(db_return_subcommand_err);
 }
 
 // 清空con.blockingKeys()，并从DB::blockingKeys()中移除所有con

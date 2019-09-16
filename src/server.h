@@ -24,13 +24,21 @@ using std::placeholders::_2;
 
 namespace Alice {
 
+struct Slowlog {
+    Slowlog() = default;
+    int _id;
+    int64_t _time;
+    int64_t _duration;
+    std::vector<std::string> _args;
+};
+
 class DBServer {
 public:
     using DBS = std::vector<std::unique_ptr<DB>>;
     using Key = std::string;
     using PubsubChannels = std::unordered_map<Key, std::vector<size_t>>;
     using BlockedClients = std::list<size_t>;
-    using ReadyKeys = std::vector<std::tuple<std::string, int>>;
+    using SlowlogQueue = std::list<Slowlog>;
     enum FLAG {
         // 有rewriteaof请求被延迟
         REWRITEAOF_DELAY = 0x02,
@@ -54,7 +62,8 @@ public:
         _syncFd(-1),
         _lastRecvHeartBeatTime(0),
         _heartBeatTimerId(0),
-        _curCheckDb(0)
+        _curCheckDb(0),
+        _slowlogId(0)
     {
         for (int i = 0; i < g_server_conf.databases; i++) {
             std::unique_ptr<DB> db(new DB(this));
@@ -124,6 +133,8 @@ public:
     }
     void freeMemoryIfNeeded();
     pid_t getpid() const { return _pid; }
+    SlowlogQueue& slowlogQueue() { return _slowlogQueue; }
+    void addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end);
     static ssize_t getProcMemory();
 private:
     void evictAllkeysWithLru();
@@ -185,6 +196,10 @@ private:
     BlockedClients _blockedClients;
     // 服务器进程ID
     pid_t _pid;
+    // 记录慢查询日志
+    SlowlogQueue _slowlogQueue;
+    // 慢查询日志的ID
+    int _slowlogId;
 };
 
 class Server {

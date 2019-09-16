@@ -123,6 +123,7 @@ HintInfo hiTable[HTSIZE] = {
     { "LRU",         3, 1, " key" },
     { "CONFIG GET",  10,1, " parameter"  },
     { "CONFIG SET",  10,2, " parameter value" },
+    { "SLOWLOG",     7, 2, " subcommand [argument]" },
     { "", 0, 0, "" },
 };
 

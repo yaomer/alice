@@ -299,6 +299,7 @@ public:
     void moveCommand(Context& con);
     void lruCommand(Context& con);
     void configCommand(Context& con);
+    void slowlogCommand(Context& con);
     // String Keys Operation
     void setCommand(Context& con);
     void setnxCommand(Context& con);
@@ -413,6 +414,7 @@ private:
     void sortStore(SortObjectList& result, unsigned cmdops, const String& des);
     void configGet(Context& con, const std::string& arg);
     void configSet(Context& con, const std::string& arg, const std::string& value);
+    void slowlogGet(Context& con, Context::CommandList& cmdlist);
 
     DBServer *_dbServer;
     HashMap _hashMap;
@@ -456,5 +458,6 @@ extern const char *db_return_integer_err;
 extern const char *db_return_float_err;
 extern const char *db_return_syntax_err;
 extern const char *db_return_no_such_key;
+extern const char *db_return_subcommand_err;
 
 #endif

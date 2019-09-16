@@ -58,6 +58,7 @@ err:
 void Server::executeCommand(Context& con)
 {
     int arity;
+    int64_t start, end;
     auto& cmdlist = con.commandList();
     std::transform(cmdlist[0].begin(), cmdlist[0].end(), cmdlist[0].begin(), ::toupper);
     auto it = _dbServer.db()->commandMap().find(cmdlist[0]);
@@ -105,7 +106,10 @@ void Server::executeCommand(Context& con)
         _dbServer.freeMemoryIfNeeded();
         _dbServer.doWriteCommand(cmdlist);
     }
+    start = Angel::TimeStamp::nowUs();
     it->second._commandCb(con);
+    end = Angel::TimeStamp::nowUs();
+    _dbServer.addSlowlogIfNeeded(cmdlist, start, end);
     goto end;
 err:
     if (con.flag() & Context::EXEC_MULTI) {
@@ -629,6 +633,22 @@ size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, 
         }
     }
     return pubClients;
+}
+
+void DBServer::addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end)
+{
+    int64_t duration = end - start;
+    if (g_server_conf.slowlog_max_len == 0) return;
+    if (duration < g_server_conf.slowlog_log_slower_than) return;
+    Slowlog slowlog;
+    slowlog._id = _slowlogId++;
+    slowlog._time = start;
+    slowlog._duration = duration;
+    for (auto& it : cmdlist)
+        slowlog._args.emplace_back(it);
+    if (slowlogQueue().size() >= g_server_conf.slowlog_max_len)
+        slowlogQueue().pop_front();
+    slowlogQueue().emplace_back(std::move(slowlog));
 }
 
 int main(int argc, char *argv[])
