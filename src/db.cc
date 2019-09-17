@@ -100,7 +100,6 @@ DB::DB(DBServer *dbServer)
         { "PSYNC",      { -3, IS_READ,  BIND(psyncCommand) } },
         { "REPLCONF",   {  3, IS_READ,  BIND(replconfCommand) } },
         { "PING",       { -1, IS_READ,  BIND(pingCommand) } },
-        { "PONG",       { -1, IS_READ,  BIND(pongCommand) } },
         { "MULTI",      { -1, IS_READ,  BIND(multiCommand) } },
         { "EXEC",       { -1, IS_READ,  BIND(execCommand) } },
         { "DISCARD",    { -1, IS_READ,  BIND(discardCommand) } },
@@ -330,7 +329,9 @@ void DB::flushAllCommand(Context& con)
 {
     for (auto& db : _dbServer->dbs())
         db->hashMap().clear();
-    con.append(db_return_ok);
+    if (!g_server_conf.save_params.empty()) bgSaveCommand(con);
+    if (g_server_conf.enable_appendonly) bgRewriteAofCommand(con);
+    con.message().assign(db_return_ok);
 }
 
 void DB::slaveofCommand(Context& con)
@@ -338,9 +339,14 @@ void DB::slaveofCommand(Context& con)
     auto& cmdlist = con.commandList();
     int port = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, db_return_integer_err);
+    con.append(db_return_ok);
+    if (port == g_server_conf.port && cmdlist[1].compare(g_server_conf.addr) == 0) {
+        logWarn("try connect to self");
+        return;
+    }
+    logInfo("connect to %s:%d", cmdlist[1].c_str(), port);
     _dbServer->setMasterAddr(Angel::InetAddr(port, cmdlist[1].c_str()));
     _dbServer->connectMasterServer();
-    con.append(db_return_ok);
 }
 
 void DB::psyncCommand(Context& con)
@@ -409,22 +415,7 @@ void DB::replconfCommand(Context& con)
 
 void DB::pingCommand(Context& con)
 {
-    if (con.flag() & Context::SLAVE)
-        db_return(con, "*1\r\n$4\r\nPONG\r\n");
     con.append("+PONG\r\n");
-}
-
-void DB::pongCommand(Context& con)
-{
-    int64_t now = Angel::TimeStamp::now();
-    if (_dbServer->lastRecvHeartBeatTime() == 0) {
-        _dbServer->setLastRecvHeartBeatTime(now);
-        return;
-    }
-    if (now - _dbServer->lastRecvHeartBeatTime() > g_server_conf.repl_timeout) {
-        _dbServer->connectMasterServer();
-    } else
-        _dbServer->setLastRecvHeartBeatTime(now);
 }
 
 void DB::multiCommand(Context& con)

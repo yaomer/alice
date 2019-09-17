@@ -66,14 +66,6 @@ void Server::executeCommand(Context& con)
         con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
         goto err;
     }
-    // PONG只能由主服务器向从服务器发送，设置了Context::SLAVE标志的
-    // Context才能接受该回复
-    if (!(con.flag() & Context::SLAVE)) {
-        if (cmdlist[0].compare("PONG") == 0) {
-            con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
-            goto err;
-        }
-    }
     // 校验客户端是否有权限执行该命令
     if (!(con.perm() & it->second.perm())) {
         con.append("-ERR permission denied\r\n");
@@ -171,6 +163,7 @@ void Server::serverCron()
                 _dbServer.setFlag(DBServer::PSYNC);
                 _dbServer.rdb()->saveBackground();
             }
+            logInfo("DB saved on disk");
         }
     }
     // 服务器后台正在进行aof持久化
@@ -179,6 +172,7 @@ void Server::serverCron()
         if (pid > 0) {
             _dbServer.aof()->childPidReset();
             _dbServer.aof()->appendRewriteBufferToAof();
+            logInfo("Background AOF rewrite finished successfully");
         }
     }
     if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
@@ -191,8 +185,11 @@ void Server::serverCron()
     // 是否需要进行rdb持久化
     int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
     for (auto& it : g_server_conf.save_params) {
-        if (saveInterval >= std::get<0>(it) && _dbServer.dirty() >= std::get<1>(it)) {
+        int seconds = std::get<0>(it);
+        int changes = std::get<1>(it);
+        if (saveInterval >= seconds && _dbServer.dirty() >= changes) {
             if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
+                logInfo("%d changes in %d seconds. Saving...", changes, seconds);
                 _dbServer.rdb()->saveBackground();
                 _dbServer.setLastSaveTime(now);
                 _dbServer.dirtyReset();
@@ -420,10 +417,27 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
         } else if (context.flag() & Context::SYNC_FULL) {
             recvRdbfileFromMaster(conn, buf);
         } else if (context.flag() & Context::SYNC_COMMAND) {
+            if (strncasecmp(buf.peek(), "+PONG\r\n", 7) == 0) {
+                recvPingFromMaster();
+                buf.retrieve(7);
+            }
             g_server->onMessage(conn, buf);
             break;
         }
     }
+}
+
+void DBServer::recvPingFromMaster()
+{
+    int64_t now = Angel::TimeStamp::now();
+    if (lastRecvHeartBeatTime() == 0) {
+        setLastRecvHeartBeatTime(now);
+        return;
+    }
+    if (now - lastRecvHeartBeatTime() > g_server_conf.repl_timeout) {
+        connectMasterServer();
+    } else
+        setLastRecvHeartBeatTime(now);
 }
 
 // 从服务器接受来自主服务器的rdb快照

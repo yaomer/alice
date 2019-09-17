@@ -283,7 +283,6 @@ public:
     void psyncCommand(Context& con);
     void replconfCommand(Context& con);
     void pingCommand(Context& con);
-    void pongCommand(Context& con);
     void multiCommand(Context& con);
     void execCommand(Context& con);
     void discardCommand(Context& con);

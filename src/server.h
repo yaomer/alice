@@ -98,6 +98,7 @@ public:
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
     void recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
+    void recvPingFromMaster();
     void sendRdbfileToSlave();
     void sendSyncCommandToSlave(Context::CommandList& cmdlist);
     void sendAckToMaster(const Angel::TcpConnectionPtr& conn);

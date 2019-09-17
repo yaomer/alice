@@ -155,15 +155,15 @@ ssize_t DBServer::getProcMemory()
     task_info(task, TASK_BASIC_INFO, (task_info_t)&tbi, &count);
     return tbi.resident_size;
 #elif defined (__linux__)
-    char name[32] = { 0 };
+    char filename[32] = { 0 };
     char buf[1024] = { 0 };
     int vmrss = -1;
-    snprintf(name, sizeof(name), "/proc/%d/status", ::getpid());
-    FILE *fp = fopen(name, "r");
+    snprintf(filename, sizeof(filename), "/proc/%d/status", ::getpid());
+    FILE *fp = fopen(filename, "r");
     if (fp == nullptr) return -1;
     while (fgets(buf, sizeof(buf), fp)) {
         if (strncasecmp(buf, "vmrss:", 6) == 0) {
-            sscanf(buf, "%s %d", name, &vmrss);
+            sscanf(buf, "%*s %d", &vmrss);
             vmrss *= 1024;
             break;
         }

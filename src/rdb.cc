@@ -84,6 +84,7 @@ void Rdb::save()
 void Rdb::saveBackground()
 {
     _childPid = fork();
+    logInfo("Background saving started by pid %ld", _childPid);
     if (_childPid == 0) {
         childPidReset();
         save();

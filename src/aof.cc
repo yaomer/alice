@@ -96,6 +96,7 @@ void Aof::rewriteBackground()
     strcpy(tmpfile, "tmp.XXXXX");
     mktemp(tmpfile);
     _childPid = fork();
+    logInfo("Background AOF rewrite started by pid %ld", _childPid);
     if (_childPid == 0) {
         childPidReset();
         rewrite();
