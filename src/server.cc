@@ -319,7 +319,7 @@ void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
 // 从服务器向主服务器定时发送PING
 void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
 {
-    Context context(this, conn);
+    Context context(this, conn.get());
     context.setFlag(Context::SYNC_RECV_PING);
     conn->setContext(context);
     conn->send("*1\r\n$4\r\nPING\r\n");

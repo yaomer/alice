@@ -65,7 +65,7 @@ public:
         MASTER = 0x400, // for slave
         CON_BLOCK = 0x800,
     };
-    explicit Context(DBServer *db, const Angel::TcpConnectionPtr& conn)
+    explicit Context(DBServer *db, Angel::TcpConnection *conn)
         : _db(db),
         _conn(conn),
         _state(PARSING),
@@ -82,7 +82,7 @@ public:
     using BlockingKeys = std::vector<std::string>;
 
     DBServer *db() { return _db; }
-    const Angel::TcpConnectionPtr& conn() { return _conn; }
+    Angel::TcpConnection *conn() { return _conn; }
     Angel::InetAddr *slaveAddr() { return _slaveAddr.get(); }
     CommandList& commandList() { return _commandList; }
     TransactionList& transactionList() { return _transactionList; }
@@ -120,7 +120,7 @@ public:
     }
 private:
     DBServer *_db;
-    const Angel::TcpConnectionPtr _conn;
+    Angel::TcpConnection *_conn;
     // 请求命令表
     CommandList _commandList;
     // 事务队列
@@ -169,17 +169,17 @@ private:
 class Value {
 public:
     Value() : _value(0), _lru(_lru_cache) {  }
-    Value(std::any&& value) : _value(std::move(value)), _lru(_lru_cache)
+    Value(std::any&& value) : _value(value), _lru(_lru_cache)
     {
     }
-    Value& operator=(std::any&& value)
+    Value& operator=(std::any&& value) noexcept
     {
-        this->_value = std::move(value);
+        this->_value = value;
         this->_lru = _lru_cache;
         return *this;
     }
     std::any& value() { return _value; }
-    void setValue(std::any&& value) { _value = std::move(value); }
+    void setValue(std::any&& value) { _value = value; }
     int64_t lru() const { return _lru; }
     void updateLru() { _lru = _lru_cache; }
 private:

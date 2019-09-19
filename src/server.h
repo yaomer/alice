@@ -230,7 +230,7 @@ public:
     }
     void onConnection(const Angel::TcpConnectionPtr& conn)
     {
-        Context context(&_dbServer, conn);
+        Context context(&_dbServer, conn.get());
         if (_dbServer.flag() & DBServer::SLAVE)
             context.clearFlag(IS_WRITE);
         conn->setContext(context);
