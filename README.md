@@ -10,3 +10,11 @@
 + 发布订阅
 + 排序
 + 慢查询日志
++ 内存淘汰
+
+### 依赖
++ 网络模块使用[Angel](https://github.com/yaomer/Angel)
++ 客户端的命令提示使用[linenoise](https://github.com/antirez/linenoise)
+
+### 压测
++ 压测可使用[redis](https://github.com/antirez/redis)自带的benchmark
