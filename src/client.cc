@@ -163,6 +163,8 @@ int main(int argc, char *argv[])
     char *line = nullptr;
     while ((line = linenoise("Alice>> "))) {
         size_t len = strlen(line);
+        auto p = std::find_if_not(line, line + len, ::isspace);
+        if (p == line + len) continue; // 跳过空白行
         line[len] = '\n';
         int ret = parseLine(client.argv(), line, line + len + 1);
         if (ret < 0) {
