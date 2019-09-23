@@ -207,26 +207,28 @@ void DB::sinterCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    size_t minSet = 0, minSetIndex = 0;
+    size_t minSize = 0, minIter = 0;
+    // 挑选出元素最多的集合
     for (size_t i = 1; i < size; i++) {
         expireIfNeeded(cmdlist[i]);
         auto it = find(cmdlist[i]);
         if (!isFound(it)) db_return(con, db_return_nil);
         checkType(con, it, Set);
         Set& set = getSetValue(it);
-        if (minSet == 0)
-            minSet = set.size();
-        else if (minSet > set.size()) {
-            minSet = set.size();
-            minSetIndex = i;
+        if (minSize == 0) {
+            minSize = set.size();
+            minIter = i;
+        } else if (minSize > set.size()) {
+            minSize = set.size();
+            minIter = i;
         }
     }
     Set rset;
-    Set& set = getSetValue(find(cmdlist[minSetIndex]));
+    Set& set = getSetValue(find(cmdlist[minIter]));
     for (auto& it : set) {
         size_t i;
         for (i = 1; i < size; i++) {
-            if (i == minSetIndex)
+            if (i == minIter)
                 continue;
             Set& set = getSetValue(find(cmdlist[i]));
             if (set.find(it) == set.end())
@@ -245,26 +247,27 @@ void DB::sinterStoreCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
-    size_t minSet = 0, minSetIndex = 0;
+    size_t minSize = 0, minIter = 0;
     for (size_t i = 2; i < size; i++) {
         expireIfNeeded(cmdlist[i]);
         auto it = find(cmdlist[i]);
         if (!isFound(it)) db_return(con, db_return_0);
         checkType(con, it, Set);
         Set& set = getSetValue(it);
-        if (minSet == 0)
-            minSet = set.size();
-        else if (minSet > set.size()) {
-            minSet = set.size();
-            minSetIndex = i;
+        if (minSize == 0) {
+            minSize = set.size();
+            minIter = i;
+        } else if (minSize > set.size()) {
+            minSize = set.size();
+            minIter = i;
         }
     }
     Set rset;
-    Set& set = getSetValue(find(cmdlist[minSetIndex]));
+    Set& set = getSetValue(find(cmdlist[minIter]));
     for (auto& it : set) {
         size_t i;
         for (i = 2; i < size; i++) {
-            if (i == minSetIndex)
+            if (i == minIter)
                 continue;
             Set& set = getSetValue(find(cmdlist[i]));
             if (set.find(it) == set.end())
