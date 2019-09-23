@@ -137,7 +137,9 @@ void DB::rpoplpush(Context& con, int option)
         touchWatchKey(cmdlist[1]);
         touchWatchKey(cmdlist[2]);
     } else {
-        srclist.emplace_front(srclist.back());
+        List deslist;
+        deslist.emplace_front(srclist.back());
+        insert(cmdlist[2], deslist);
         touchWatchKey(cmdlist[1]);
     }
     srclist.pop_back();
