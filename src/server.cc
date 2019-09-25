@@ -674,6 +674,8 @@ int main(int argc, char *argv[])
         Angel::EventLoop loop;
         Angel::InetAddr listenAddr(g_sentinel_conf.port, g_sentinel_conf.addr.c_str());
         Sentinel sentinel(&loop, listenAddr);
+        logInfo("sentinel %s:%d runId is %s", g_sentinel_conf.addr.c_str(),
+                g_sentinel_conf.port, sentinel.server().dbServer().selfRunId());
         g_sentinel = &sentinel;
         sentinel.start();
         loop.run();
@@ -682,6 +684,8 @@ int main(int argc, char *argv[])
     Angel::EventLoop loop;
     Angel::InetAddr listenAddr(g_server_conf.port, g_server_conf.addr.c_str());
     Alice::Server server(&loop, listenAddr);
+    logInfo("server %s:%d runId is %s", g_server_conf.addr.c_str(),
+            g_server_conf.port, server.dbServer().selfRunId());
     g_server = &server;
     loop.runEvery(100, []{ g_server->serverCron(); });
     if (g_server_conf.enable_appendonly)

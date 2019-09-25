@@ -18,16 +18,19 @@ public:
     void init();
     uint64_t currentEpoch() const { return _currentEpoch; }
     SentinelInstance::SentinelInstanceMap& masters() { return *_masters; }
-    void sendPingToMasters();
-    void sendInfoToMasters();
-    void sendPubMessageToMasters();
+    void sendPingToServers();
+    void sendInfoToServers();
+    void sendPubMessageToServers();
+    void recvPubMessageFromServer(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void updateSentinels(const char *s, const char *es);
+    void subServer(const Angel::TcpConnectionPtr& conn);
     Angel::EventLoop *loop() { return _loop; }
     Alice::Server& server() { return _server; }
+    void sentinelCron();
     void infoCommand(Context& con);
     void sentinelCommand(Context& con);
-    void start() 
-    {  
+    void start()
+    {
         _server.start();
         init();
     }
@@ -42,4 +45,4 @@ extern Alice::Sentinel *g_sentinel;
 
 }
 
-#endif // _ALICE_SRC_SENTINEL_H
+#endif

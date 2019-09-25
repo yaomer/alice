@@ -73,7 +73,6 @@ public:
         setSelfRunId(_selfRunId);
         bzero(_masterRunId, sizeof(_masterRunId));
         bzero(_tmpfile, sizeof(_tmpfile));
-        _pid = getpid();
     }
     DBS& dbs() { return _dbs; }
     int curDbnum() const { return _curDbnum; }
@@ -133,7 +132,6 @@ public:
         _masterAddr.reset(new Angel::InetAddr(addr.inetAddr()));
     }
     void freeMemoryIfNeeded();
-    pid_t getpid() const { return _pid; }
     SlowlogQueue& slowlogQueue() { return _slowlogQueue; }
     void addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end);
     static ssize_t getProcMemory();
@@ -195,8 +193,6 @@ private:
     int _curCheckDb;
     // 保存所有执行阻塞命令阻塞的客户端
     BlockedClients _blockedClients;
-    // 服务器进程ID
-    pid_t _pid;
     // 记录慢查询日志
     SlowlogQueue _slowlogQueue;
     // 慢查询日志的ID

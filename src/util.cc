@@ -84,6 +84,7 @@ double str2f(const char *nptr)
 // 带空白符的字符串必须包含在双引号内
 // set key value -> [set] [key] [value]
 // set key "hello, wrold" -> [set] [key] [hello, world]
+// line必须至少包含一个非空字符
 int parseLine(std::vector<std::string>& argv, const char *line, const char *linep)
 {
     const char *start;

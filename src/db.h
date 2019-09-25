@@ -22,13 +22,13 @@ class Command;
 extern thread_local int64_t _lru_cache;
 
 enum CommandPerm {
-    IS_READ = 0x01,
-    IS_WRITE = 0x02,
+    IS_READ = 0x01,     // 可读命令
+    IS_WRITE = 0x02,    // 可写命令
 };
 
 enum ReturnCode {
-    C_OK,
-    C_ERR,
+    C_OK,   // 函数执行成功
+    C_ERR,  // 函数执行出错
 };
 
 // 一个Context表示一个客户端上下文
@@ -160,12 +160,16 @@ public:
     }
     int arity() const { return _arity; }
     int perm() const { return _perm; }
+    // 命令回调，指向具体的实现
     CommandCallback _commandCb;
 private:
+    // 命令的合法参数个数
     int _arity;
+    // 命令的执行权限
     int _perm;
 };
 
+// 表示一个键值对的值
 class Value {
 public:
     Value() : _value(0), _lru(_lru_cache) {  }
@@ -184,9 +188,13 @@ public:
     void updateLru() { _lru = _lru_cache; }
 private:
     std::any _value;
+    // 最近一次访问该键的时间，用于进行lru内存淘汰
     int64_t _lru;
 };
 
+// 有序集合的比较函数，对于对象l和r，如果l.score < r.score，就认为l < r
+// 否则如果l.score == r.score，就继续比较键值，如果l.key < r.key，
+// 就认为l < r，否则就认为l > r
 class _ZsetCompare {
 public:
     bool operator()(const std::tuple<double, std::string>& lhs,
@@ -220,6 +228,7 @@ struct SortObject {
     } _u;
 };
 
+// 一个数据库实例
 class DB {
 public:
     using Key = std::string;
@@ -230,11 +239,14 @@ public:
     using List = std::list<std::string>;
     using Set = std::unordered_set<std::string>;
     using Hash = std::unordered_map<std::string, std::string>;
+    // <分数，键值>
     using _Zset = std::multiset<std::tuple<double, std::string>, _ZsetCompare>;
     // 根据一个member可以在常数时间找到其score
     using _Zmap = std::unordered_map<std::string, double>;
     using Zset = std::tuple<_Zset, _Zmap>;
+    // <键，键的到期时间>
     using ExpireMap = std::unordered_map<Key, int64_t>;
+    // <键，监视该键的客户端列表>
     using WatchMap = std::unordered_map<Key, std::vector<size_t>>;
     // 因为排序结果集需要剪切，所以deque优于vector
     using SortObjectList = std::deque<SortObject>;
@@ -416,15 +428,15 @@ private:
     void slowlogGet(Context& con, Context::CommandList& cmdlist);
 
     DBServer *_dbServer;
-    HashMap _hashMap;
-    CommandMap _commandMap;
-    ExpireMap _expireMap;
-    WatchMap _watchMap;
-    BlockingKeys _blockingKeys;
+    HashMap _hashMap; // 存储所有数据
+    CommandMap _commandMap; // 命令表
+    ExpireMap _expireMap; // 存储所有过期键
+    WatchMap _watchMap; // 存储所有客户watch的键
+    BlockingKeys _blockingKeys; // 存储所有阻塞的键
 };
 };
 
-// type(it): DB::Iterator
+// it's type: HashMap::iterator
 #define isXXType(it, _type) \
     ((it)->second.value().type() == typeid(_type))
 #define checkType(con, it, _type) \

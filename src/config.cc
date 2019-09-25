@@ -149,16 +149,16 @@ void Alice::readSentinelConf()
             g_sentinel_conf.port = atoi(it[2].c_str());
             ASSERT(g_sentinel_conf.port > 0, "port");
         } else if (strcasecmp(it[1].c_str(), "monitor") == 0) {
-            SentinelInstance master;
-            master.setFlag(SentinelInstance::MASTER);
-            master.setName(it[2]);
-            master.setInetAddr(Angel::InetAddr(atoi(it[4].c_str()), it[3].c_str()));
-            master.setQuorum(atoi(it[5].c_str()));
-            g_sentinel_conf.masters[master.name()] = std::move(master);
+            auto master = new SentinelInstance;
+            master->setFlag(SentinelInstance::MASTER);
+            master->setName(it[2]);
+            master->setInetAddr(Angel::InetAddr(atoi(it[4].c_str()), it[3].c_str()));
+            master->setQuorum(atoi(it[5].c_str()));
+            g_sentinel_conf.masters.emplace(master->name(), master);
         } else if (strcasecmp(it[1].c_str(), "down-after-milliseconds") == 0) {
             auto master = g_sentinel_conf.masters.find(it[2]);
             ASSERT(master != g_sentinel_conf.masters.end(), "down-after-milliseconds");
-            master->second.setDownAfterPeriod(atoll(it[3].c_str()));
+            master->second->setDownAfterPeriod(atoll(it[3].c_str()));
         }
     }
 }

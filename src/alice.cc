@@ -143,6 +143,8 @@ protocolerr:
 void AliceContext::recvResponse()
 {
     _reply.clear();
+    _errStr.clear();
+    _err = 0;
     read();
 next:
     char *s = _buf.peek();

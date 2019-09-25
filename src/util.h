@@ -19,6 +19,7 @@ int parseLine(std::vector<std::string>& argv, const char *line, const char *line
 // Hash可以是unordered_map或unorderd_set
 // getRandHashKey()从Hash中挑选出一个随机元素，并返回这个元素
 // 所在的bucket以及bucket中的位置
+// 切记Hash不可为空，否则函数会陷入死循环!!!
 template <typename Hash>
 std::tuple<size_t, size_t> getRandHashKey(const Hash& h)
 {
