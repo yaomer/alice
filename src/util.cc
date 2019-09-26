@@ -116,4 +116,21 @@ err:
     return -1;
 }
 
+// if c == ','
+// for [a,b,c,d] return [a][b][c][d]
+void parseLineWithSeparator(std::vector<std::string>& argv,
+                            const char *s,
+                            const char *es,
+                            char c)
+{
+    const char *p;
+    while (true) {
+        p = std::find(s, es, c);
+        if (p == es) break;
+        argv.emplace_back(s, p);
+        s = p + 1;
+    }
+    argv.emplace_back(s, p);
+}
+
 }

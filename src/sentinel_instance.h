@@ -29,7 +29,8 @@ public:
         _downAfterPeriod(0),
         _quorum(0),
         _offset(0),
-        _lastHeartBeatTime(0)
+        _lastHeartBeatTime(Angel::TimeStamp::now()),
+        _downQuorum(0)
     {
         setSelfRunId(_runId);
     }
@@ -39,8 +40,7 @@ public:
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
     const std::string& name() const { return _name; }
-    void setName(const std::string& name)
-    { _name = std::move(name); }
+    void setName(const std::string& name) { _name = std::move(name); }
     void setRunId(const std::string& runId)
     { memcpy(_runId, runId.data(), 32); _runId[32] = '\0'; }
     const char *runId() const { return _runId; }
@@ -58,6 +58,11 @@ public:
     void setOffset(size_t offset) { _offset = offset; }
     int64_t lastHeartBeatTime() const { return _lastHeartBeatTime; }
     void setLastHeartBeatTime(int64_t time) { _lastHeartBeatTime = time; }
+    const std::string& masterName() const { return _masterName; }
+    void setMasterName(const std::string& name) { _masterName = std::move(name); }
+    int downQuorum() const { return _downQuorum; }
+    void downQuorumIncr() { _downQuorum++; }
+    void downQuorumReset() { _downQuorum = 0; }
     void creatCmdConnection();
     void creatPubConnection();
     void closeConnection(const Angel::TcpConnectionPtr& conn);
@@ -66,11 +71,13 @@ public:
     void parseInfoReplyFromMaster(const char *s, const char *es);
     void parseInfoReplyFromSlave(const char *s, const char *es);
     void updateSlaves(const char *s, const char *es);
+    void parseReplyFromSentinel(const char *s, const char *es);
     void setInetAddr(Angel::InetAddr inetAddr)
     {
         if (_inetAddr) _inetAddr.reset();
         _inetAddr.reset(new Angel::InetAddr(inetAddr.inetAddr()));
     }
+    void askMasterDownForOtherSentinels();
 private:
     int _flag;
     std::string _name;
@@ -84,6 +91,10 @@ private:
     SentinelInstanceMap _sentinels;
     size_t _offset;
     int64_t _lastHeartBeatTime;
+    // sentinel实例使用，记录它们所监视的主服务器名字
+    std::string _masterName;
+    // master实例使用，记录同意其主观下线的sentinel数目
+    int _downQuorum;
 };
 }
 

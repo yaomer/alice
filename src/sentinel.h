@@ -24,6 +24,8 @@ public:
     void recvPubMessageFromServer(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void updateSentinels(const char *s, const char *es);
     void subServer(const Angel::TcpConnectionPtr& conn);
+    void askToBeElectedLeaderByOtherSentinels();
+    bool getMasterDownState(const std::string& ip, int port);
     Angel::EventLoop *loop() { return _loop; }
     Alice::Server& server() { return _server; }
     void sentinelCron();
@@ -37,8 +39,8 @@ public:
 private:
     Angel::EventLoop *_loop;
     Alice::Server _server;
-    uint64_t _currentEpoch;
     SentinelInstance::SentinelInstanceMap *_masters;
+    uint64_t _currentEpoch;
 };
 
 extern Alice::Sentinel *g_sentinel;

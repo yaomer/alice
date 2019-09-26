@@ -32,6 +32,11 @@ std::tuple<size_t, size_t> getRandHashKey(const Hash& h)
     std::uniform_int_distribution<size_t> _u(0, h.bucket_size(bucketNumber) - 1);
     return std::make_tuple(bucketNumber, _u(e));
 }
+void parseLineWithSeparator(std::vector<std::string>& argv,
+                            const char *s,
+                            const char *es,
+                            char c);
+#define UNUSED(x) ((void)(x))
 
 }
 
