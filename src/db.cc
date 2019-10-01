@@ -139,34 +139,6 @@ const char *db_return_no_such_key = "-ERR no such key\r\n";
 const char *db_return_subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";
 const char *db_return_argnumber_err = "-ERR wrong number of arguments\r\n";
 
-void DB::appendReplyMulti(Context& con, size_t size)
-{
-    con.append("*");
-    con.append(convert(size));
-    con.append("\r\n");
-}
-
-void DB::appendReplyString(Context& con, const std::string& s)
-{
-    con.append("$");
-    con.append(convert(s.size()));
-    con.append("\r\n" + s + "\r\n");
-}
-
-void DB::appendReplyNumber(Context& con, int64_t number)
-{
-    con.append(":");
-    con.append(convert(number));
-    con.append("\r\n");
-}
-
-void DB::appendReplyDouble(Context& con, double number)
-{
-    con.append(":");
-    con.append(convert2f(number));
-    con.append("\r\n");
-}
-
 //////////////////////////////////////////////////////////////////
 
 void DB::selectCommand(Context& con)

@@ -19,8 +19,12 @@ void DBServer::freeMemoryIfNeeded()
     case EVICT_ALLKEYS_RANDOM: evictAllkeysWithRandom(); break;
     case EVICT_VOLATILE_RANDOM: evictVolatileWithRandom(); break;
     case EVICT_VOLATILE_TTL: evictVolatileWithTtl(); break;
+    case EVICT_NO: break;
     }
 }
+
+// 以下的内存淘汰都只是从当前操作的数据库中挑选出一个合适的淘汰对象
+// 更合理的方法应该是兼顾所有的数据库
 
 // 真正的lru算法需要一个双端链表来保存维护所有键的lru关系，这需要额外的内存，
 // 所以我们这里只是近似模拟一下lru算法

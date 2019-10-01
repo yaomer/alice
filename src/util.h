@@ -16,6 +16,8 @@ template <typename T>
 const char *convert(T value)
 {
     T v = value;
+    // 如果使用(v | bits)而不是(v |= bits)
+    // 那么对于较短的类型(char、short)就会发生整型提升
     bool isunsigned = ((v |= ((T)1 << (sizeof(T)*8-1))) > 0 ? true : false);
     const char *format = isunsigned ? "%llu" : "%lld";
     snprintf(convert_buf, sizeof(convert_buf), format, value);

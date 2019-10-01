@@ -388,10 +388,32 @@ public:
     void zremRangeByRankCommand(Context& con);
     void zremRangeByScoreCommand(Context& con);
 
-    static void appendReplyMulti(Context& con, size_t size);
-    static void appendReplyString(Context& con, const std::string& s);
-    static void appendReplyNumber(Context& con, int64_t number);
-    static void appendReplyDouble(Context& con, double number);
+    template <typename T>
+    static void appendReplyMulti(Context& con, T size)
+    {
+        con.append("*");
+        con.append(convert(size));
+        con.append("\r\n");
+    }
+    static void appendReplyString(Context& con, const std::string& s)
+    {
+        con.append("$");
+        con.append(convert(s.size()));
+        con.append("\r\n" + s + "\r\n");
+    }
+    template <typename T>
+    static void appendReplyNumber(Context& con, T number)
+    {
+        con.append(":");
+        con.append(convert(number));
+        con.append("\r\n");
+    }
+    static void appendReplyDouble(Context& con, double number)
+    {
+        con.append(":");
+        con.append(convert2f(number));
+        con.append("\r\n");
+    }
 private:
     Iterator find(const Key& key) { return _hashMap.find(key); }
     bool isFound(Iterator it) { return it != _hashMap.end(); }
