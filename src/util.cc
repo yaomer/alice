@@ -8,6 +8,7 @@
 
 namespace Alice {
 
+// buflen >= 33
 void setSelfRunId(char *buf)
 {
     struct timespec tsp;
@@ -18,13 +19,7 @@ void setSelfRunId(char *buf)
     snprintf(buf + 16, 17, "%lx", u(e));
 }
 
-thread_local char convert_buf[32];
-
-const char *convert(int64_t value)
-{
-    snprintf(convert_buf, sizeof(convert_buf), "%lld", value);
-    return convert_buf;
-}
+thread_local char convert_buf[64];
 
 const char *convert2f(double value)
 {
@@ -54,6 +49,8 @@ thread_local bool str2numerr;
         } \
     } while (0)
 
+// if str2l/ll/f convert error, return true
+// this func is thread-safe
 bool str2numberErr()
 {
     return str2numerr;
@@ -84,13 +81,17 @@ double str2f(const char *nptr)
 // 带空白符的字符串必须包含在双引号内
 // set key value -> [set] [key] [value]
 // set key "hello, wrold" -> [set] [key] [hello, world]
-// line必须至少包含一个非空字符
+// if this line is all whitespace or parse error, return -1; else return 0
 int parseLine(std::vector<std::string>& argv, const char *line, const char *linep)
 {
+    bool iter = false;
     const char *start;
     do {
         line = std::find_if_not(line, linep, ::isspace);
-        if (line == linep) break;
+        if (line == linep) {
+            if (iter) break;
+            else goto err;
+        }
         if (*line == '\"') {
             start = ++line;
 search:
@@ -109,6 +110,7 @@ search:
             if (line == linep) goto err;
             argv.emplace_back(start, line - start);
         }
+        iter = true;
     } while (1);
     return 0;
 err:

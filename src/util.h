@@ -9,7 +9,18 @@
 namespace Alice {
 
 void setSelfRunId(char *buf);
-const char *convert(int64_t value);
+
+extern thread_local char convert_buf[64];
+
+template <typename T>
+const char *convert(T value)
+{
+    T v = value;
+    bool isunsigned = ((v |= ((T)1 << (sizeof(T)*8-1))) > 0 ? true : false);
+    const char *format = isunsigned ? "%llu" : "%lld";
+    snprintf(convert_buf, sizeof(convert_buf), format, value);
+    return convert_buf;
+}
 const char *convert2f(double value);
 long str2l(const char *nptr);
 long long str2ll(const char *nptr);
