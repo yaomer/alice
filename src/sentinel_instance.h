@@ -22,6 +22,8 @@ public:
         // 并不需要和其他sentinel进行协商
         S_DOWN = 0x08,
         O_DOWN = 0x10,
+        FOLLOWER = 0x20,
+        HAVE_LEADER = 0x40,
     };
     SentinelInstance()
         : _flag(0),
@@ -30,7 +32,10 @@ public:
         _quorum(0),
         _offset(0),
         _lastHeartBeatTime(Angel::TimeStamp::now()),
-        _downQuorum(0)
+        _votes(0),
+        _leaderEpoch(0),
+        _failoverEpoch(0),
+        _electTimeoutTimerId(0)
     {
         setSelfRunId(_runId);
     }
@@ -39,18 +44,23 @@ public:
     int flag() const { return _flag; }
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
+    const std::string& master() const { return _master; }
+    void setMaster(const std::string& master) { _master = master; }
     const std::string& name() const { return _name; }
     void setName(const std::string& name) { _name = std::move(name); }
+    const char *runId() const { return _runId; }
     void setRunId(const std::string& runId)
     { memcpy(_runId, runId.data(), 32); _runId[32] = '\0'; }
-    const char *runId() const { return _runId; }
     void setConfigEpoch(uint64_t epoch) { _configEpoch = epoch; }
     uint64_t configEpoch() const { return _configEpoch; }
     Angel::InetAddr& inetAddr() { return *_inetAddr.get(); }
     int64_t downAfterPeriod() const { return _downAfterPeriod; }
     void setDownAfterPeriod(int64_t tv) { _downAfterPeriod = tv; }
-    int quorum() const { return _quorum; }
-    void setQuorum(int quorum) { _quorum = quorum; }
+    unsigned quorum() const { return _quorum; }
+    void setQuorum(unsigned quorum) { _quorum = quorum; }
+    unsigned votes() const { return _votes; }
+    void votesIncr() { _votes++; }
+    void votesReset() { _votes = 0; }
     std::unique_ptr<Angel::TcpClient> *clients() { return _clients; }
     SentinelInstanceMap& slaves() { return _slaves; }
     SentinelInstanceMap& sentinels() { return _sentinels; }
@@ -58,11 +68,6 @@ public:
     void setOffset(size_t offset) { _offset = offset; }
     int64_t lastHeartBeatTime() const { return _lastHeartBeatTime; }
     void setLastHeartBeatTime(int64_t time) { _lastHeartBeatTime = time; }
-    const std::string& masterName() const { return _masterName; }
-    void setMasterName(const std::string& name) { _masterName = std::move(name); }
-    int downQuorum() const { return _downQuorum; }
-    void downQuorumIncr() { _downQuorum++; }
-    void downQuorumReset() { _downQuorum = 0; }
     void creatCmdConnection();
     void creatPubConnection();
     void closeConnection(const Angel::TcpConnectionPtr& conn);
@@ -77,24 +82,39 @@ public:
         if (_inetAddr) _inetAddr.reset();
         _inetAddr.reset(new Angel::InetAddr(inetAddr.inetAddr()));
     }
-    void askMasterDownForOtherSentinels();
+    bool isThisMaster(const std::string& ip, int port);
+    void askForSentinels(const char *runid);
+    void askMasterStateForOtherSentinels();
+    void startFailover();
+    void setElectTimeoutTimer();
+    void electTimeout();
+    void cancelElectTimeoutTimer();
+    void noticeLeaderToOtherSentinels();
+    const std::string& leader() const { return _leader; }
+    void setLeader(const std::string& leader) { _leader = leader; }
+    uint64_t leaderEpoch() const { return _leaderEpoch; }
+    void setLeaderEpoch(uint64_t epoch) { _leaderEpoch = epoch; }
+    uint64_t failoverEpoch() const { return _failoverEpoch; }
+    void setFailoverEpoch(uint64_t epoch) { _failoverEpoch = epoch; }
 private:
     int _flag;
+    std::string _master; // for sentinel or slave
     std::string _name;
     char _runId[33];
     uint64_t _configEpoch;
     std::unique_ptr<Angel::InetAddr> _inetAddr;
     int64_t _downAfterPeriod;
-    int _quorum;
+    unsigned _quorum; // for master
     std::unique_ptr<Angel::TcpClient> _clients[2];
-    SentinelInstanceMap _slaves;
-    SentinelInstanceMap _sentinels;
+    SentinelInstanceMap _slaves; // for master
+    SentinelInstanceMap _sentinels; // for master
     size_t _offset;
     int64_t _lastHeartBeatTime;
-    // sentinel实例使用，记录它们所监视的主服务器名字
-    std::string _masterName;
-    // master实例使用，记录同意其主观下线的sentinel数目
-    int _downQuorum;
+    unsigned _votes; // for master
+    std::string _leader; // for master
+    uint64_t _leaderEpoch; // for master
+    uint64_t _failoverEpoch; // for master
+    size_t _electTimeoutTimerId; // for master
 };
 }
 
