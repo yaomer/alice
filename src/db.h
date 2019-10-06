@@ -493,5 +493,6 @@ extern const char *db_return_syntax_err;
 extern const char *db_return_no_such_key;
 extern const char *db_return_subcommand_err;
 extern const char *db_return_argnumber_err;
+extern const char *db_return_timeout_err;
 
 #endif

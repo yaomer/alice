@@ -138,6 +138,7 @@ const char *db_return_syntax_err = "-ERR syntax error\r\n";
 const char *db_return_no_such_key = "-ERR no such key\r\n";
 const char *db_return_subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";
 const char *db_return_argnumber_err = "-ERR wrong number of arguments\r\n";
+const char *db_return_timeout_err = "-ERR invalid expire timeout\r\n";
 
 //////////////////////////////////////////////////////////////////
 
@@ -210,6 +211,7 @@ void DB::expire(Context& con, int option)
     auto& cmdlist = con.commandList();
     int64_t expire = str2ll(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (expire <= 0) db_return(con, db_return_timeout_err);
     if (!isFound(find(cmdlist[1]))) db_return(con, db_return_0);
     if (option == EXPIRE) expire *= 1000;
     addExpireKey(cmdlist[1], expire);
@@ -365,8 +367,10 @@ void DB::replconfCommand(Context& con)
     auto& cmdlist = con.commandList();
     if (strcasecmp(cmdlist[1].c_str(), "port") == 0) {
         auto it = _dbServer->slaveIds().find(con.conn()->id());
-        if (it == _dbServer->slaveIds().end())
+        if (it == _dbServer->slaveIds().end()) {
+            logInfo("found a new slave %s:%s", cmdlist[4].c_str(), cmdlist[2].c_str());
             _dbServer->addSlaveId(con.conn()->id());
+        }
         con.setSlaveAddr(
                 Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[4].c_str()));
     } else if (strcasecmp(cmdlist[1].c_str(), "ack") == 0) {
@@ -486,7 +490,7 @@ void DB::subscribeCommand(Context& con)
     for (size_t i = 1; i < cmdlist.size(); i++) {
         _dbServer->subChannel(cmdlist[i], con.conn()->id());
         appendReplyMulti(con, 3);
-        con.append("$9\r\nsubscribe\r\n");
+        appendReplyString(con, "subscribe");
         appendReplyString(con, cmdlist[i]);
         appendReplyNumber(con, i);
     }
@@ -521,6 +525,7 @@ void DB::infoCommand(Context& con)
             i++;
         }
     }
+    // 一个无意义的填充字段，方便以\r\n结尾
     con.append("xxx:yyy\r\n");
 }
 

@@ -91,7 +91,7 @@ public:
     void dirtyReset() { _dirty = 0; }
     void connectMasterServer();
     void slaveClientCloseCb(const Angel::TcpConnectionPtr& conn);
-    void setSlaveToReadonly();
+    void setAllSlavesToReadonly();
     void sendPingToMaster(const Angel::TcpConnectionPtr& conn);
     void sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn);
     void sendSyncToMaster(const Angel::TcpConnectionPtr& conn);
@@ -102,8 +102,8 @@ public:
     void sendSyncCommandToSlave(Context::CommandList& cmdlist);
     void sendAckToMaster(const Angel::TcpConnectionPtr& conn);
     void doWriteCommand(Context::CommandList& cmdlist);
-    static void appendCommand(std::string& buffer, Context::CommandList& cmdlist,
-            bool repl_set);
+    static void appendCommand(std::string& buffer, const Context::CommandList& cmdlist,
+            bool split_expire);
     void appendWriteCommand(Context::CommandList& cmdlist);
     std::set<size_t>& slaveIds() { return _slaveIds; }
     void addSlaveId(size_t id) { _slaveIds.insert(id); }
@@ -242,6 +242,7 @@ public:
                     return;
                 break;
             case Context::PROTOCOLERR:
+                logInfo("conn %d protocol error", conn->id());
                 conn->close();
                 return;
             case Context::SUCCEED:

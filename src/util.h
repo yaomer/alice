@@ -49,6 +49,8 @@ void parseLineWithSeparator(std::vector<std::string>& argv,
                             const char *s,
                             const char *es,
                             char c);
+void writeToFile(int fd, const char *buf, size_t nbytes);
+
 #define UNUSED(x) ((void)(x))
 
 }

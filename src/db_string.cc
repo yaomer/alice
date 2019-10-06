@@ -34,6 +34,7 @@ void DB::setCommand(Context& con)
             if (i + 1 >= len) goto syntax_err;
             expire = str2ll(cmdlist[++i].c_str());
             if (str2numberErr()) db_return(con, db_return_integer_err);
+            if (expire <= 0) db_return(con, db_return_timeout_err);
             if (op->second == SET_EX)
                 expire *= 1000;
             break;

@@ -408,7 +408,7 @@ void Rdb::append(const void *data, size_t len)
 
 void Rdb::flush()
 {
-    write(_fd, _buffer.data(), _buffer.size());
+    writeToFile(_fd, _buffer.data(), _buffer.size());
     _buffer.clear();
 }
 

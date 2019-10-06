@@ -94,14 +94,15 @@ void Server::executeCommand(Context& con)
             goto end;
         }
     }
-    if (it->second.perm() & IS_WRITE) {
-        _dbServer.freeMemoryIfNeeded();
-        _dbServer.doWriteCommand(cmdlist);
-    }
+    if (it->second.perm() & IS_WRITE) _dbServer.freeMemoryIfNeeded();
     start = Angel::TimeStamp::nowUs();
     it->second._commandCb(con);
     end = Angel::TimeStamp::nowUs();
     _dbServer.addSlowlogIfNeeded(cmdlist, start, end);
+    // 命令执行未出错
+    if ((it->second.perm() & IS_WRITE) && (con.message()[0] != '-')) {
+        _dbServer.doWriteCommand(cmdlist);
+    }
     goto end;
 err:
     if (con.flag() & Context::EXEC_MULTI) {
@@ -213,6 +214,7 @@ void Server::serverCron()
     _dbServer.aof()->appendAof(now);
 }
 
+// 随机删除一定数量的过期键
 void DBServer::checkExpireCycle(int64_t now)
 {
     int dbnums = g_server_conf.expire_check_dbnums;
@@ -274,7 +276,7 @@ void DBServer::removeBlockedClient(size_t id)
 }
 
 // 将目前已连接的所有客户端设置为只读
-void DBServer::setSlaveToReadonly()
+void DBServer::setAllSlavesToReadonly()
 {
     auto& maps = g_server->server().connectionMaps();
     for (auto& it : maps) {
@@ -355,7 +357,7 @@ void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
     if (!(_flag & SLAVE)) {
         // slave -> master: 第一次复制
         setFlag(SLAVE);
-        setSlaveToReadonly();
+        setAllSlavesToReadonly();
         const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
         conn->send(sync);
     } else {
@@ -562,46 +564,56 @@ void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
         appendCopyBacklogBuffer(cmdlist);
 }
 
-// 将解析后的命令转换成redis协议形式的命令
-void DBServer::appendCommand(std::string& buffer, Context::CommandList& cmdlist,
-        bool repl_set)
+static void appendCommandArg(std::string& buffer, const std::string& s1,
+        const std::string& s2)
+{
+    buffer += "$";
+    buffer += s1 + "\r\n" + s2 + "\r\n";
+}
+
+static void appendTimeStamp(std::string& buffer, int64_t timeval, bool is_seconds)
+{
+    if (is_seconds) timeval *= 1000;
+    int64_t milliseconds = timeval + Angel::TimeStamp::now();
+    appendCommandArg(buffer, convert(strlen(convert(milliseconds))), convert(milliseconds));
+}
+
+// 将解析后的命令转换成REPL形式的命令
+// 如果split_expire为真, 则需要将涉及到(P)EXPIRE命令的超时值改为一个unix timestamp
+// EXPIRE命令将被转换为PEXPIRE
+void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cmdlist,
+        bool split_expire)
 {
     size_t size = cmdlist.size();
-    bool set6 = false;
-    if (repl_set && strncasecmp(cmdlist[0].c_str(), "SET", 3) == 0) {
-        if (size == 5 || size == 6) {
-            if (size == 6) set6 = true;
-            buffer += "*3\r\n$7\r\nPEXPIRE\r\n$";
-            buffer += convert(cmdlist[1].size());
-            buffer += "\r\n";
-            buffer += cmdlist[1] + "\r\n$";
-            int64_t milliseconds = atoll(cmdlist[4].c_str()) + Angel::TimeStamp::now();
-            buffer += convert(strlen(convert(milliseconds)));
-            buffer += "\r\n";
-            buffer += convert(milliseconds);
-            buffer += "\r\n";
-            size -= 2;
-        }
-    }
     buffer += "*";
     buffer += convert(size);
     buffer += "\r\n";
-    for (auto& it : cmdlist) {
-        buffer += "$";
-        buffer += convert(it.size());
-        buffer += "\r\n";
-        buffer += it;
-        buffer += "\r\n";
-        if (--size == 1 && set6) {
-            buffer += "$";
-            buffer += convert(cmdlist[5].size());
-            buffer += "\r\n";
-            buffer += cmdlist[5];
-            buffer += "\r\n";
-            break;
+    if (!split_expire) {
+        for (auto& it : cmdlist) {
+            appendCommandArg(buffer, convert(it.size()), it);
         }
-        if (size == 0)
-            break;
+    } else if (strcasecmp(cmdlist[0].c_str(), "SET") == 0 && size >= 5) {
+        for (size_t i = 0; i < size; i++) {
+            if (i > 3 && strcasecmp(cmdlist[i-1].c_str(), "EX") == 0) {
+                appendTimeStamp(buffer, atoll(cmdlist[i].c_str()), true);
+            } else if (i > 3 && strcasecmp(cmdlist[i-1].c_str(), "PX") == 0) {
+                appendTimeStamp(buffer, atoll(cmdlist[i].c_str()), false);
+            } else {
+                appendCommandArg(buffer, convert(cmdlist[i].size()), cmdlist[i]);
+            }
+        }
+    } else if (strcasecmp(cmdlist[0].c_str(), "EXPIRE") == 0) {
+        appendCommandArg(buffer, "7", "PEXPIRE");
+        appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
+        appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), true);
+    } else if (strcasecmp(cmdlist[0].c_str(), "PEXPIRE") == 0) {
+        appendCommandArg(buffer, "7", "PEXPIRE");
+        appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
+        appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), false);
+    } else {
+        for (auto& it : cmdlist) {
+            appendCommandArg(buffer, convert(it.size()), it);
+        }
     }
 }
 

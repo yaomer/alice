@@ -1,5 +1,6 @@
 #include <time.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <errno.h>
 #include <random>
 #include <vector>
@@ -133,6 +134,17 @@ void parseLineWithSeparator(std::vector<std::string>& argv,
         s = p + 1;
     }
     argv.emplace_back(s, p);
+}
+
+void writeToFile(int fd, const char *buf, size_t nbytes)
+{
+    while (nbytes > 0) {
+        ssize_t n = ::write(fd, buf, nbytes);
+        // 由于是向文件中写，所以几乎不可能出错
+        if (n < 0) break;
+        nbytes -= n;
+        buf += n;
+    }
 }
 
 }

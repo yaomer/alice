@@ -38,7 +38,7 @@ void Aof::appendAof(int64_t now)
     if (_buffer.empty()) return;
     int64_t syncInterval = now - _lastSyncTime;
     int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
-    write(fd, _buffer.data(), _buffer.size());
+    writeToFile(fd, _buffer.data(), _buffer.size());
     _buffer.clear();
     if (g_server_conf.aof_mode == AOF_ALWAYS) {
         fsync(fd);
@@ -52,6 +52,21 @@ void Aof::appendAof(int64_t now)
     close(fd);
 }
 
+static void aofSetCommand(Context::CommandList& cmdlist, int64_t now)
+{
+    for (size_t i = 1; i < cmdlist.size(); i++) {
+        if (strcasecmp(cmdlist[i].c_str(), "EX") == 0) {
+            int64_t timeval = atoll(cmdlist[i+1].c_str()) - now;
+            cmdlist[i+1] = convert(timeval / 1000);
+            break;
+        } else if (strcasecmp(cmdlist[i].c_str(), "PX") == 0) {
+            int64_t timeval = atoll(cmdlist[i+1].c_str()) - now;
+            cmdlist[i+1] = convert(timeval);
+            break;
+        }
+    }
+}
+
 void Aof::load()
 {
     Context pseudoClient(_dbServer, nullptr);
@@ -62,6 +77,7 @@ void Aof::load()
         if (fp) fclose(fp);
         return;
     }
+    int64_t now = Angel::TimeStamp::now();
     char *line = nullptr;
     size_t len = 0;
     ssize_t n;
@@ -76,12 +92,13 @@ void Aof::load()
         if (pseudoClient.state() == Context::SUCCEED) {
             auto& cmdlist = pseudoClient.commandList();
             auto it = _dbServer->db()->commandMap().find(cmdlist[0]);
-            if (strcasecmp(cmdlist[0].c_str(), "PEXPIRE") == 0)
-                _dbServer->db()->expireMap().emplace(cmdlist[1], atoll(cmdlist[2].c_str()));
-            else if (strcasecmp(cmdlist[0].c_str(), "SET") == 0)
-                _dbServer->db()->hashMap().emplace(cmdlist[1], cmdlist[2]);
-            else
-                it->second._commandCb(pseudoClient);
+            if (cmdlist[0].compare("PEXPIRE") == 0) {
+                int64_t timeval = atoll(cmdlist[2].c_str()) - now;
+                cmdlist[2] = convert(timeval);
+            } else if (cmdlist[0].compare("SET") == 0 && cmdlist.size() >= 5) {
+                aofSetCommand(cmdlist, now);
+            }
+            it->second._commandCb(pseudoClient);
             cmdlist.clear();
             pseudoClient.setState(Context::PARSING);
         }
@@ -151,7 +168,7 @@ void Aof::appendRewriteBufferToAof()
 {
     if (_rewriteBuffer.empty()) return;
     int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
-    write(fd, _rewriteBuffer.data(), _rewriteBuffer.size());
+    writeToFile(fd, _rewriteBuffer.data(), _rewriteBuffer.size());
     _rewriteBuffer.clear();
     fsync(fd);
     close(fd);
@@ -283,7 +300,7 @@ void Aof::append(const std::string& s)
 
 void Aof::flush()
 {
-    write(_fd, _buffer.data(), _buffer.size());
+    writeToFile(_fd, _buffer.data(), _buffer.size());
     _buffer.clear();
 }
 

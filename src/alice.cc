@@ -29,13 +29,7 @@ void AliceContext::sendRequest()
         message += "\r\n";
     }
     _argv.clear();
-    size_t remainBytes = message.size();
-    const char *data = message.data();
-    while (remainBytes > 0) {
-        ssize_t n = write(_fd, data, remainBytes);
-        remainBytes -= n;
-        data += n;
-    }
+    writeToFile(_fd, message.data(), message.size());
 }
 
 void AliceContext::executor(const char *fmt, ...)

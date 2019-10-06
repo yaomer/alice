@@ -25,13 +25,7 @@ void Client::send()
             _flag = PUBSUB;
     }
     _argv.clear();
-    size_t remainBytes = _message.size();
-    const char *data = _message.data();
-    while (remainBytes > 0) {
-        ssize_t n = write(_fd, data, remainBytes);
-        remainBytes -= n;
-        data += n;
-    }
+    writeToFile(_fd, _message.data(), _message.size());
     _message.clear();
 }
 
