@@ -15,8 +15,12 @@ namespace Alice {
 
 static void parseConf(ConfParamList& confParamList, const char *filename)
 {
-    FILE *fp = fopen(filename, "r");
     char buf[1024];
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        fprintf(stderr, "can't open %s\n", filename);
+        abort();
+    }
     while (fgets(buf, sizeof(buf), fp)) {
         const char *s = buf;
         const char *es = buf + strlen(buf);
@@ -63,10 +67,10 @@ static ssize_t humanSizeToBytes(const char *s)
     return bytes;
 }
 
-void Alice::readServerConf()
+void Alice::readServerConf(const char *server_conf_file)
 {
     ConfParamList paramlist;
-    parseConf(paramlist, "alice.conf");
+    parseConf(paramlist, server_conf_file);
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "port") == 0) {
             g_server_conf.port = atoi(it[1].c_str());
@@ -142,10 +146,10 @@ void Alice::readServerConf()
     }
 }
 
-void Alice::readSentinelConf()
+void Alice::readSentinelConf(const char *sentinel_conf_file)
 {
     ConfParamList paramlist;
-    parseConf(paramlist, "sentinel.conf");
+    parseConf(paramlist, sentinel_conf_file);
     for(auto& it : paramlist) {
         if (strcasecmp(it[1].c_str(), "ip") == 0) {
             g_sentinel_conf.addr = it[2];

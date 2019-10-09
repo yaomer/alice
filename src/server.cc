@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <getopt.h>
 #include <algorithm>
 #include <vector>
 #include <string>
@@ -687,12 +688,32 @@ void DBServer::addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, 
     slowlogQueue().emplace_back(std::move(slowlog));
 }
 
+static struct option opts[] = {
+    { "serverconf", 1, NULL, 'a' },
+    { "sentinel", 0, NULL, 'b' },
+    { "sentinelconf", 1, NULL, 'c' },
+};
+
 int main(int argc, char *argv[])
 {
+    int c;
+    bool startup_sentinel = false;
+    std::string server_conf_file;
+    std::string sentinel_conf_file;
+    while ((c = getopt_long(argc, argv, "a:bc:", opts, NULL)) != -1) {
+        switch (c) {
+        case 'a': server_conf_file = optarg; break;
+        case 'b': startup_sentinel = true; break;
+        case 'c': startup_sentinel = true; sentinel_conf_file = optarg; break;
+        }
+    }
+    if (server_conf_file.empty()) server_conf_file = "alice.conf";
+    if (sentinel_conf_file.empty()) sentinel_conf_file = "sentinel.conf";
+
     Angel::setLoggerLevel(Angel::Logger::INFO);
-    Alice::readServerConf();
-    if (argv[1] && strcasecmp(argv[1], "--sentinel") == 0) {
-        Alice::readSentinelConf();
+    Alice::readServerConf(server_conf_file.c_str());
+    if (startup_sentinel) {
+        Alice::readSentinelConf(sentinel_conf_file.c_str());
         Angel::EventLoop loop;
         Angel::InetAddr listenAddr(g_sentinel_conf.port, g_sentinel_conf.addr.c_str());
         Sentinel sentinel(&loop, listenAddr);

@@ -90,6 +90,7 @@ public:
     void dirtyIncr() { _dirty++; }
     void dirtyReset() { _dirty = 0; }
     void connectMasterServer();
+    void disconnectMasterServer();
     void slaveClientCloseCb(const Angel::TcpConnectionPtr& conn);
     void setAllSlavesToReadonly();
     void sendPingToMaster(const Angel::TcpConnectionPtr& conn);
@@ -128,7 +129,6 @@ public:
     void removeBlockedClient(size_t id);
     void setMasterAddr(Angel::InetAddr addr)
     {
-        if (_masterAddr) _masterAddr.reset();
         _masterAddr.reset(new Angel::InetAddr(addr.inetAddr()));
     }
     void freeMemoryIfNeeded();

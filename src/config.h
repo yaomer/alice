@@ -10,8 +10,8 @@
 
 namespace Alice {
 
-void readServerConf();
-void readSentinelConf();
+void readServerConf(const char *server_conf_file);
+void readSentinelConf(const char *sentinel_conf_file);
 
 #define AOF_ALWAYS 1
 #define AOF_EVERYSEC 2
