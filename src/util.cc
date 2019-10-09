@@ -66,7 +66,7 @@ long str2l(const char *nptr)
 
 long long str2ll(const char *nptr)
 {
-    long llval;
+    long long llval;
     str2number(nptr, llval, STR2LLONG);
     return llval;
 }

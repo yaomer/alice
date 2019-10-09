@@ -134,6 +134,10 @@ void Alice::readServerConf()
         } else if (strcasecmp(it[0].c_str(), "slowlog-max-len") == 0) {
             g_server_conf.slowlog_max_len = atoi(it[1].c_str());
             ASSERT(g_server_conf.slowlog_max_len >= 0, "slowlog-max-len");
+        } else if (strcasecmp(it[0].c_str(), "rdb-file") == 0) {
+            g_server_conf.rdb_file = it[1];
+        } else if (strcasecmp(it[0].c_str(), "appendonly-file") == 0) {
+            g_server_conf.appendonly_file = it[1];
         }
     }
 }

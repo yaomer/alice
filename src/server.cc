@@ -291,12 +291,7 @@ void DBServer::setAllSlavesToReadonly()
 // 从服务器创建向主服务器的连接
 void DBServer::connectMasterServer()
 {
-    if (_client) {
-        if (_heartBeatTimerId > 0)
-            g_server->loop()->cancelTimer(_heartBeatTimerId);
-        _client->quit();
-        _client.reset();
-    }
+    disconnectMasterServer();
     _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get(), "slave"));
     _client->notExitLoop();
     _client->setConnectionCb(
@@ -310,6 +305,17 @@ void DBServer::connectMasterServer()
     _client->setCloseCb(
             std::bind(&DBServer::slaveClientCloseCb, this, _1));
     _client->start();
+}
+
+void DBServer::disconnectMasterServer()
+{
+    if (_client) {
+        if (_heartBeatTimerId > 0)
+            g_server->loop()->cancelTimer(_heartBeatTimerId);
+        _client->quit();
+        _client.reset();
+    }
+    clearFlag(SLAVE);
 }
 
 // 在主从服务器之间的连接断开时，取消向主服务器发送心跳包的定时器
@@ -471,7 +477,7 @@ next:
         fsync(_syncFd);
         close(_syncFd);
         _syncFd = -1;
-        rename(_tmpfile, "dump.rdb");
+        rename(_tmpfile, g_server_conf.rdb_file.c_str());
         db()->hashMap().clear();
         rdb()->load();
         context.clearFlag(Context::SYNC_FULL);
@@ -486,7 +492,11 @@ jump:
 // 主服务器将生成的rdb快照发送给从服务器
 void DBServer::sendRdbfileToSlave()
 {
-    int fd = open("dump.rdb", O_RDONLY);
+    int fd = open(g_server_conf.rdb_file.c_str(), O_RDONLY);
+    if (fd < 0) {
+        logError("can't open %s:%s", g_server_conf.rdb_file.c_str(), Angel::strerrno());
+        return;
+    }
     Angel::Buffer buf;
     while (buf.readFd(fd) > 0) {
     }

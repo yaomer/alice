@@ -78,7 +78,7 @@ void Rdb::save()
     if (_buffer.size() > 0) flush();
     fsync(_fd);
     close(_fd);
-    rename(tmpfile, "dump.rdb");
+    rename(tmpfile, g_server_conf.rdb_file.c_str());
 }
 
 void Rdb::saveBackground()
@@ -216,7 +216,7 @@ void Rdb::saveZset(Iterator it)
 
 void Rdb::load()
 {
-    int fd = open("dump.rdb", O_RDONLY);
+    int fd = open(g_server_conf.rdb_file.c_str(), O_RDONLY);
     struct stat st;
     fstat(fd, &st);
     size_t size = st.st_size;

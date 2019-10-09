@@ -37,6 +37,8 @@ struct ServerConf {
     bool enable_appendonly = false;
     // aof持久化的模式
     int aof_mode = AOF_EVERYSEC;
+    std::string rdb_file = "dump.rdb";
+    std::string appendonly_file = "appendonly.aof";
     // master-slave连接超时时间
     int repl_timeout = 60 * 1000;
     // 从服务器向主服务器发送PING的周期

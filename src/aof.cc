@@ -37,7 +37,7 @@ void Aof::appendAof(int64_t now)
 {
     if (_buffer.empty()) return;
     int64_t syncInterval = now - _lastSyncTime;
-    int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
+    int fd = open(g_server_conf.appendonly_file.c_str(), O_RDWR | O_APPEND | O_CREAT, 0660);
     writeToFile(fd, _buffer.data(), _buffer.size());
     _buffer.clear();
     if (g_server_conf.aof_mode == AOF_ALWAYS) {
@@ -71,7 +71,7 @@ void Aof::load()
 {
     Context pseudoClient(_dbServer, nullptr);
     Angel::Buffer buf;
-    FILE *fp = fopen("appendonly.aof", "r");
+    FILE *fp = fopen(g_server_conf.appendonly_file.c_str(), "r");
     if (!fp || getFilesize(fileno(fp)) == 0) {
         rewriteSelectDb(0);
         if (fp) fclose(fp);
@@ -160,14 +160,14 @@ void Aof::rewrite()
     if (_buffer.size() > 0) flush();
     fsync(_fd);
     close(_fd);
-    rename(tmpfile, "appendonly.aof");
+    rename(tmpfile, g_server_conf.appendonly_file.c_str());
 }
 
 // 将aof重写缓冲区中的命令写到文件中
 void Aof::appendRewriteBufferToAof()
 {
     if (_rewriteBuffer.empty()) return;
-    int fd = open("appendonly.aof", O_RDWR | O_APPEND | O_CREAT, 0660);
+    int fd = open(g_server_conf.appendonly_file.c_str(), O_RDWR | O_APPEND | O_CREAT, 0660);
     writeToFile(fd, _rewriteBuffer.data(), _rewriteBuffer.size());
     _rewriteBuffer.clear();
     fsync(fd);
