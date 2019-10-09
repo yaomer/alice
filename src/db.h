@@ -115,7 +115,6 @@ public:
     }
     void setSlaveAddr(Angel::InetAddr slaveAddr)
     {
-        if (_slaveAddr) _slaveAddr.reset();
         _slaveAddr.reset(new Angel::InetAddr(slaveAddr.inetAddr()));
     }
 private:

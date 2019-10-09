@@ -311,6 +311,11 @@ void DB::flushAllCommand(Context& con)
 void DB::slaveofCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
+    if (strcasecmp(cmdlist[1].c_str(), "no") == 0
+            && strcasecmp(cmdlist[2].c_str(), "one") == 0) {
+        _dbServer->disconnectMasterServer();
+        db_return(con, db_return_ok);
+    }
     int port = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, db_return_integer_err);
     con.append(db_return_ok);
