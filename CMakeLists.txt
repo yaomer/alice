@@ -29,6 +29,11 @@ set (CLI_SRC_FILES
     ${PROJECT_SRC_DIR}/util.cc
 )
 
+set (PROXY_SRC_FILES
+    ${PROJECT_SRC_DIR}/proxy.cc
+    ${PROJECT_SRC_DIR}/util.cc
+)
+
 set (ALICE_FILES
     ${PROJECT_SRC_DIR}/alice.cc
     ${PROJECT_SRC_DIR}/util.cc
@@ -45,6 +50,9 @@ target_link_libraries(alice-server angel)
 
 add_executable(alice-cli ${CLI_SRC_FILES})
 target_link_libraries(alice-cli angel linenoise)
+
+add_executable(alice-proxy ${PROXY_SRC_FILES})
+target_link_libraries(alice-proxy angel)
 
 add_library(alice STATIC ${ALICE_FILES})
 target_link_libraries(alice angel)

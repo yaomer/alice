@@ -51,6 +51,9 @@ void parseLineWithSeparator(std::vector<std::string>& argv,
                             char c);
 void writeToFile(int fd, const char *buf, size_t nbytes);
 
+using ConfParamList = std::vector<std::vector<std::string>>;
+void parseConf(ConfParamList& confParamList, const char *filename);
+
 #define UNUSED(x) ((void)(x))
 
 }

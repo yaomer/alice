@@ -147,4 +147,34 @@ void writeToFile(int fd, const char *buf, size_t nbytes)
     }
 }
 
+void parseConf(ConfParamList& confParamList, const char *filename)
+{
+    char buf[1024];
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        fprintf(stderr, "can't open %s\n", filename);
+        abort();
+    }
+    while (fgets(buf, sizeof(buf), fp)) {
+        const char *s = buf;
+        const char *es = buf + strlen(buf);
+        std::vector<std::string> param;
+        s = std::find_if(s, es, [](char c){ return !isspace(c); });
+        if (s == es || s[0] == '#') continue;
+next:
+        const char *p = std::find(s, es, ':');
+        if (p == es)  {
+            p = std::find_if(s, es, isspace);
+            if (p == es) continue;
+            param.emplace_back(s, p);
+            confParamList.emplace_back(std::move(param));
+            continue;
+        }
+        param.emplace_back(s, p);
+        s = p + 1;
+        goto next;
+    }
+    fclose(fp);
+}
+
 }

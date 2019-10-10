@@ -6,4 +6,5 @@ dump.rdb
 appendonly.aof
 alice-server
 alice-cli
+alice-proxy
 libalice.a

@@ -698,8 +698,8 @@ int main(int argc, char *argv[])
 {
     int c;
     bool startup_sentinel = false;
-    std::string server_conf_file;
-    std::string sentinel_conf_file;
+    std::string server_conf_file = "alice.conf";
+    std::string sentinel_conf_file = "sentinel.conf";
     while ((c = getopt_long(argc, argv, "a:bc:", opts, NULL)) != -1) {
         switch (c) {
         case 'a': server_conf_file = optarg; break;
@@ -707,8 +707,6 @@ int main(int argc, char *argv[])
         case 'c': startup_sentinel = true; sentinel_conf_file = optarg; break;
         }
     }
-    if (server_conf_file.empty()) server_conf_file = "alice.conf";
-    if (sentinel_conf_file.empty()) sentinel_conf_file = "sentinel.conf";
 
     Angel::setLoggerLevel(Angel::Logger::INFO);
     Alice::readServerConf(server_conf_file.c_str());
