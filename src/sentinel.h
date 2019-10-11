@@ -36,7 +36,7 @@ public:
     void sentinelCommand(Context& con);
     void start()
     {
-        _server.start();
+        _server.server().start();
         init();
     }
 private:
