@@ -53,7 +53,7 @@ void Proxy::delNode(const std::string& name)
         vname += "#";
         vname += Alice::convert(vindex++);
         auto it = _nodes.find(hash(vname));
-        if (it == _nodes.end()) return;
+        if (it == _nodes.end()) continue;
         _nodes.erase(it);
     }
 }
