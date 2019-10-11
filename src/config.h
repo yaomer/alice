@@ -57,6 +57,9 @@ struct ServerConf {
     int maxmemory_samples = 5;
     int slowlog_log_slower_than = 10000;
     int slowlog_max_len = 128;
+    // 将要去复制的主服务器
+    std::string master_ip;
+    int master_port = 0;
 };
 
 struct SentinelConf {

@@ -261,7 +261,7 @@ public:
     void executeCommand(Context& con);
     void replyResponse(const Angel::TcpConnectionPtr& conn);
     void execError(const Angel::TcpConnectionPtr& conn);
-    void start() { _server.start(); }
+    void start();
     DBServer& dbServer() { return _dbServer; }
     Angel::TcpServer& server() { return _server; }
     Angel::EventLoop *loop() { return _loop; }

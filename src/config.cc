@@ -111,6 +111,10 @@ void Alice::readServerConf(const char *server_conf_file)
             g_server_conf.rdb_file = it[1];
         } else if (strcasecmp(it[0].c_str(), "appendonly-file") == 0) {
             g_server_conf.appendonly_file = it[1];
+        } else if (strcasecmp(it[0].c_str(), "slaveof") == 0) {
+            g_server_conf.master_ip = it[1];
+            g_server_conf.master_port = atoi(it[2].c_str());
+            ASSERT(g_server_conf.master_port > 0, "slaveof");
         }
     }
 }

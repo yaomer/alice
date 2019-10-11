@@ -688,6 +688,30 @@ void DBServer::addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, 
     slowlogQueue().emplace_back(std::move(slowlog));
 }
 
+void Server::start()
+{
+    _loop->runEvery(100, []{ g_server->serverCron(); });
+    Angel::addSignal(SIGINT, []{
+            g_server->dbServer().rdb()->save();
+            g_server->dbServer().aof()->rewriteBackground();
+            g_server->loop()->quit();
+            });
+    if (g_server_conf.enable_appendonly)
+        _dbServer.aof()->load();
+    else
+        _dbServer.rdb()->load();
+    // 服务器以从服务器方式运行
+    if (g_server_conf.master_port > 0) {
+        Context con(nullptr, nullptr);
+        auto& cmdlist = con.commandList();
+        cmdlist.emplace_back("SLAVEOF");
+        cmdlist.emplace_back(g_server_conf.master_ip);
+        cmdlist.emplace_back(convert(g_server_conf.master_port));
+        executeCommand(con);
+    }
+    _server.start();
+}
+
 static struct option opts[] = {
     { "serverconf", 1, NULL, 'a' },
     { "sentinel", 0, NULL, 'b' },
@@ -728,16 +752,6 @@ int main(int argc, char *argv[])
     logInfo("server %s:%d runId is %s", g_server_conf.addr.c_str(),
             g_server_conf.port, server.dbServer().selfRunId());
     g_server = &server;
-    loop.runEvery(100, []{ g_server->serverCron(); });
-    if (g_server_conf.enable_appendonly)
-        server.dbServer().aof()->load();
-    else
-        server.dbServer().rdb()->load();
-    Angel::addSignal(SIGINT, []{
-            g_server->dbServer().rdb()->save();
-            g_server->dbServer().aof()->rewriteBackground();
-            g_server->loop()->quit();
-            });
     server.start();
     loop.run();
 }
