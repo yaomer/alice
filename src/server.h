@@ -62,6 +62,7 @@ public:
         _syncFd(-1),
         _lastRecvHeartBeatTime(0),
         _heartBeatTimerId(0),
+        _replTimeoutTimerId(0),
         _curCheckDb(0),
         _slowlogId(0)
     {
@@ -187,6 +188,7 @@ private:
     int64_t _lastRecvHeartBeatTime;
     // 发送心跳包的定时器ID
     size_t _heartBeatTimerId;
+    size_t _replTimeoutTimerId;
     // 保存所有频道的订阅关系
     PubsubChannels _pubsubChannels;
     // 记录过期键删除进度

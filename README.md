@@ -6,6 +6,7 @@
 + rdb持久化
 + aof持久化
 + 主从复制
++ sentinel
 + proxy
 + 事务
 + 发布订阅

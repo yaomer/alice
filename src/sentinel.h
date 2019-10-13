@@ -28,7 +28,6 @@ public:
     void recvPubMessageFromServer(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void updateSentinels(const char *s, const char *es);
     void subServer(const Angel::TcpConnectionPtr& conn);
-    void askToBeElectedLeaderByOtherSentinels();
     Angel::EventLoop *loop() { return _loop; }
     Alice::Server& server() { return _server; }
     void sentinelCron();

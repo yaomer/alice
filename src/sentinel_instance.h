@@ -24,6 +24,7 @@ public:
         O_DOWN = 0x10,
         FOLLOWER = 0x20,
         HAVE_LEADER = 0x40,
+        DELETE = 0x80,
     };
     SentinelInstance()
         : _flag(0),
@@ -79,10 +80,8 @@ public:
     void parseReplyFromSentinel(const char *s, const char *es);
     void setInetAddr(Angel::InetAddr inetAddr)
     {
-        if (_inetAddr) _inetAddr.reset();
         _inetAddr.reset(new Angel::InetAddr(inetAddr.inetAddr()));
     }
-    bool isThisMaster(const std::string& ip, int port);
     void askForSentinels(const char *runid);
     void askMasterStateForOtherSentinels();
     void startFailover();
@@ -90,6 +89,10 @@ public:
     void electTimeout();
     void cancelElectTimeoutTimer();
     void noticeLeaderToOtherSentinels();
+    void selectNewMaster(); // call by master
+    void stopToReplicateMaster(); // call by slave
+    void replicateMaster(Angel::InetAddr& masterAddr); // call by slave
+    void convertSlaveToMaster(SentinelInstance *slave); // call by master
     const std::string& leader() const { return _leader; }
     void setLeader(const std::string& leader) { _leader = leader; }
     uint64_t leaderEpoch() const { return _leaderEpoch; }

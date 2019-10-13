@@ -313,26 +313,29 @@ void DBServer::disconnectMasterServer()
     if (_client) {
         if (_heartBeatTimerId > 0)
             g_server->loop()->cancelTimer(_heartBeatTimerId);
-        _client->quit();
+        if (_replTimeoutTimerId > 0)
+            g_server->loop()->cancelTimer(_replTimeoutTimerId);
         _client.reset();
     }
     clearFlag(SLAVE);
 }
 
-// 在主从服务器之间的连接断开时，取消向主服务器发送心跳包的定时器
 void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
 {
     g_server->loop()->cancelTimer(_heartBeatTimerId);
+    g_server->loop()->cancelTimer(_replTimeoutTimerId);
 }
 
-// 从服务器向主服务器定时发送PING
 void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
 {
     Context context(this, conn.get());
     context.setFlag(Context::SYNC_RECV_PING);
     conn->setContext(context);
     conn->send("*1\r\n$4\r\nPING\r\n");
-    g_server->loop()->runAfter(g_server_conf.repl_timeout, [this, &context]{
+    // 从服务器向主服务器发送完PING之后，如果repl_timeout时间后没有收到
+    // 有效回复，就会认为此次复制失败，然后会重连主服务器
+    _replTimeoutTimerId = g_server->loop()->runAfter(g_server_conf.repl_timeout,
+            [this, &context]{
             if (context.flag() & Context::SYNC_RECV_PING)
                 this->connectMasterServer();
             });
