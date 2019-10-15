@@ -58,27 +58,18 @@ public:
     // real node nums -> virtual node nums
     using RVMap = std::map<size_t, size_t>;
 
-    enum State { PARSING, PROTOCOLERR, SUCCEED };
-
     Proxy(Angel::EventLoop *loop, Angel::InetAddr& inetAddr);
-    void onConnection(const Angel::TcpConnectionPtr& conn)
-    {
-        int state = PARSING;
-        conn->setContext(state);
-    }
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
         std::string key;
-        int& state = std::any_cast<int&>(conn->getContext());
-        while (state == PARSING) {
-            ssize_t n = parseRequest(state, buf, key);
-            if (state == PARSING) return;
-            if (state == PROTOCOLERR) {
+        while (true) {
+            ssize_t n = parseRequest(buf, key);
+            if (n == 0) return;
+            if (n < 0) {
                 logInfo("conn %d protocol error", conn->id());
                 conn->close();
                 return;
             }
-            state = PARSING;
             if (key.empty()) {
                 conn->send("-ERR unknown command\r\n");
                 buf.retrieve(n);
@@ -101,7 +92,8 @@ public:
         }
         return hashval;
     }
-    ssize_t parseRequest(int& state, Angel::Buffer& buf, std::string& key);
+    static ssize_t parseRequest(Angel::Buffer& buf, std::string& key);
+    static ssize_t parseResponse(Angel::Buffer& buf);
     Node *findNode(const std::string& key)
     {
         auto it = _nodes.lower_bound(hash(key));

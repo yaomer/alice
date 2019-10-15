@@ -2,15 +2,13 @@
 #include "proxy.h"
 
 //
-// 分布式集群解决方案
+// 分布式集群解决方案，使用一致性哈希
 //
 
 Proxy::Proxy(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
     : _loop(loop),
     _server(loop, inetAddr)
 {
-    _server.setConnectionCb(
-            std::bind(&Proxy::onConnection, this, _1));
     _server.setMessageCb(
             std::bind(&Proxy::onMessage, this, _1, _2));
     _nodeNums = g_proxy_conf.nodes.size();
@@ -77,41 +75,49 @@ void Node::forwardRequestToServer(size_t id, Angel::Buffer& buf, size_t n)
 void Node::forwardResponseToClient(const Angel::TcpConnectionPtr& conn,
                                    Angel::Buffer& buf)
 {
-    // if response is ok
+    ssize_t n = Proxy::parseResponse(buf);
+    if (n < 0) {
+        buf.retrieveAll();
+        return;
+    }
+    if (n == 0) return;
     size_t id = _idQueue.front();
     _idQueue.pop();
     auto& maps = g_proxy->server().connectionMaps();
     auto it = maps.find(id);
     if (it == maps.end()) return;
-    it->second->send(buf.peek(), buf.readable());
-    buf.retrieveAll();
+    it->second->send(buf.peek(), n);
+    buf.retrieve(n);
 }
 
-ssize_t Proxy::parseRequest(int& state, Angel::Buffer& buf, std::string& key)
+// if parse error, return -1
+// if not enough data, return 0
+// else return length of response
+ssize_t Proxy::parseRequest(Angel::Buffer& buf, std::string& key)
 {
     bool cmderr = false;
     const char *s = buf.peek();
     const char *es = s + buf.readable();
     const char *ps = s;
-    size_t l, argc, len;
+    size_t l, argc;
     // 解析命令个数
     const char *next = std::find(s, es, '\n');
     if (next == es) return 0;
-    if (s[0] != '*' || next[-1] != '\r') goto err;
+    if (s[0] != '*' || next[-1] != '\r') return -1;
     s += 1;
     l = argc = atol(s);
     s = std::find_if_not(s, es, ::isnumber);
-    if (s[0] != '\r' || s[1] != '\n') goto err;
+    if (s[0] != '\r' || s[1] != '\n') return -1;
     s += 2;
     // 解析各个命令
     while (argc > 0) {
         next = std::find(s, es, '\n');
         if (next == es) return 0;
-        if (s[0] != '$' || next[-1] != '\r') goto err;
-        len = atol(s + 1);
+        if (s[0] != '$' || next[-1] != '\r') return -1;
+        int len = atol(s + 1);
         s = next + 1;
         if (es - s < len + 2) return 0;
-        if (s[len] != '\r' || s[len+1] != '\n') goto err;
+        if (s[len] != '\r' || s[len+1] != '\n') return -1;
         if (argc == l) {
             std::string cmd(len, 0);
             std::transform(s, s + len, cmd.begin(), ::toupper);
@@ -123,11 +129,65 @@ ssize_t Proxy::parseRequest(int& state, Angel::Buffer& buf, std::string& key)
         s += len + 2;
         argc--;
     }
-    state = SUCCEED;
     return s - ps;
-err:
-    state = PROTOCOLERR;
-    return -1;
+}
+
+static ssize_t parseSingle(Angel::Buffer& buf, size_t pos)
+{
+    int crlf = buf.findStr(buf.peek() + pos, "\r\n");
+    return crlf >= 0 ? crlf + 2 : 0;
+}
+
+static ssize_t parseBulk(Angel::Buffer& buf, size_t pos)
+{
+    char *s = buf.peek() + pos;
+    const char *es = buf.peek() + buf.readable();
+    int crlf = buf.findStr(s, "\r\n");
+    if (crlf < 0) return 0;
+    int len = atoi(s + 1);
+    if (len < 0 && len != -1) return -1;
+    if (len == 0 || len == -1) return crlf + 2;
+    s += crlf + 2;
+    if (es - s < len + 2) return 0;
+    return crlf + 2 + len + 2;
+}
+
+static ssize_t parseMultiBulk(Angel::Buffer& buf, size_t curpos)
+{
+    char *s = buf.peek() + curpos;
+    int i = buf.findStr(s, "\r\n");
+    int pos = 0;
+    if (i < 0) return 0;
+    int len = atoi(s + 1);
+    if (len < 0 && len != -1) return -1;
+    if (len == 0 || len == -1) return i + 2;
+    s += i + 2;
+    pos += i + 2;
+    while (len-- > 0) {
+        switch (s[0]) {
+        case '+': case '-': case ':': i = parseSingle(buf, pos); break;
+        case '$': i = parseBulk(buf, pos); break;
+        case '*': i = parseMultiBulk(buf, pos); break;
+        default: return -1;
+        }
+        if (i < 0) return -1;
+        if (i == 0) return 0;
+        pos += i;
+    }
+    return pos;
+}
+
+// if parse error, return -1
+// if not enough data, return 0
+// else return length of response
+ssize_t Proxy::parseResponse(Angel::Buffer& buf)
+{
+    switch (buf[0]) {
+    case '+': case '-': case ':': return parseSingle(buf, 0);
+    case '$': return parseBulk(buf, 0);
+    case '*': return parseMultiBulk(buf, 0);
+    default: return -1;
+    }
 }
 
 void Proxy::readConf(const char *proxy_conf_file)
