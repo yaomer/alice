@@ -16,6 +16,13 @@
 using std::placeholders::_1;
 using std::placeholders::_2;
 
+struct ProxyConf {
+    int port;
+    std::string ip;
+    // all nodes <ip:name, <ip, port>>
+    std::map<std::string, std::tuple<std::string, int>> nodes;
+} g_proxy_conf;
+
 class Node {
 public:
     using IdQueue = std::queue<size_t>;
@@ -38,6 +45,8 @@ public:
     Node *rnode() { return _rnode; }
     const std::string& name() const { return _name; }
     void setRNodeForVNode(Node *node) { _rnode = node; }
+    size_t vnodes() const { return _vnodes; }
+    void setVNodes(size_t vnodes) { _vnodes = vnodes; }
     void forwardRequestToServer(size_t id, Angel::Buffer& buf, size_t n);
     void forwardResponseToClient(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void removeNode(const Angel::TcpConnectionPtr& conn);
@@ -45,6 +54,7 @@ public:
 private:
     bool _isVNode; // 是否是虚拟节点
     Node *_rnode; // 指向真实节点的指针
+    size_t _vnodes; // 虚节点数目
     std::string _name;
     std::unique_ptr<Angel::TcpClient> _client;
     IdQueue _idQueue;
@@ -85,14 +95,16 @@ public:
                 continue;
             }
             Node *node = findNode(cmdlist[1]);
-            std::cout << cmdlist[1] << "\t->\t" << node->name() << "\n";
-            if (node) node->forwardRequestToServer(conn->id(), buf, n);
+            if (node) {
+                std::cout << cmdlist[1] << "\t->\t" << node->name() << "\n";
+                node->forwardRequestToServer(conn->id(), buf, n);
+            }
             buf.retrieve(n);
         }
     }
     uint32_t hash(const std::string& key)
     {
-        return murmurHash2(key.data(), key.size(), clock());
+        return murmurHash2(key.data(), key.size());
     }
     static ssize_t parseRequest(Angel::Buffer& buf, CommandList& cmdlist);
     static ssize_t parseResponse(Angel::Buffer& buf);
@@ -110,12 +122,11 @@ public:
     }
     void addNode(const std::string& ip, int port);
     void delNode(const std::string& name);
-    size_t nodeNums() const { return _nodeNums; }
-    size_t getVNodeNums()
+    size_t nodeNums() const { return g_proxy_conf.nodes.size(); }
+    size_t getVNodesPerNode()
     {
-        auto it = rvMap.lower_bound(_nodeNums);
-        if (it != rvMap.end()) return it->second;
-        else return 0;
+        auto it = rvMap.lower_bound(g_proxy_conf.nodes.size());
+        return it != rvMap.end() ? it->second : 0;
     }
     Angel::EventLoop *loop() { return _loop; }
     Angel::TcpServer& server() { return _server; }
@@ -127,20 +138,16 @@ public:
     static CommandTable commandTable;
     static RVMap rvMap;
 private:
-    static uint32_t murmurHash2(const void *key, size_t len, uint32_t seed);
+    static uint32_t murmurHash2(const void *key, size_t len);
+    void addNode(std::string s1, const std::string& s,
+                 const std::string& sep, Node *node, int& index);
+    size_t delNode(std::string s1, const std::string& s,
+                   const std::string& sep, int& index);
 
     Angel::EventLoop *_loop;
     Angel::TcpServer _server;
     NodeMaps _nodes;
-    size_t _nodeNums;
 };
-
-struct ProxyConf {
-    int port;
-    std::string ip;
-    // all nodes <ip, port>
-    std::vector<std::tuple<std::string, int>> nodes;
-} g_proxy_conf;
 
 extern Proxy *g_proxy;
 

@@ -12,9 +12,21 @@ Proxy::Proxy(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
 {
     _server.setMessageCb(
             std::bind(&Proxy::onMessage, this, _1, _2));
-    _nodeNums = g_proxy_conf.nodes.size();
     for (auto& node : g_proxy_conf.nodes) {
-        addNode(std::get<0>(node), std::get<1>(node));
+        addNode(std::get<0>(node.second), std::get<1>(node.second));
+    }
+}
+
+void Proxy::addNode(std::string s1, const std::string& s,
+                    const std::string& sep, Node *node, int& index)
+{
+    // 实际上发生冲突的概率是很小的
+    while (true) {
+        auto it = _nodes.emplace(hash(s1), node);
+        if (it.second) break;
+        s1 = s;
+        s1 += sep;
+        s1 += Alice::convert(index++);
     }
 }
 
@@ -25,36 +37,59 @@ void Proxy::addNode(const std::string& ip, int port)
     name += ":";
     name += Alice::convert(port);
     Angel::InetAddr inetAddr(port, ip.c_str());
+    size_t vnodes = getVNodesPerNode();
     auto node = new Node(_loop, inetAddr, name);
-    _nodes.emplace(hash(name), node);
-    size_t vnodes = getVNodeNums();
+    node->setVNodes(vnodes);
+    int index = 1;
+    addNode(name, name, ":", node, index);
+    std::string vname;
     int vindex = 1;
     while (vnodes-- > 0) {
-        std::string vname;
-        vname += name;
+        vname = name;
         vname += "#";
         vname += Alice::convert(vindex++);
         auto vnode = new Node(nullptr, inetAddr, vname);
         vnode->setRNodeForVNode(node);
-        _nodes.emplace(hash(vname), vnode);
+        addNode(vname, name, "#", vnode, vindex);
+    }
+    auto it = g_proxy_conf.nodes.find(name);
+    if (it == g_proxy_conf.nodes.end())
+        g_proxy_conf.nodes.emplace(name, std::make_tuple(ip, port));
+}
+
+size_t Proxy::delNode(std::string s1, const std::string& s,
+                      const std::string& sep, int& index)
+{
+    while (true) {
+        auto it = _nodes.find(hash(s1));
+        if (it != _nodes.end()) {
+            size_t vnodes = it->second->vnodes();
+            _nodes.erase(it);
+            return vnodes;
+        }
+        s1 = s;
+        s1 += sep;
+        s1 += Alice::convert(index++);
     }
 }
 
 void Proxy::delNode(const std::string& name)
 {
-    auto it = _nodes.find(hash(name));
-    if (it == _nodes.end()) return;
-    size_t vnodes = getVNodeNums();
+    auto it = g_proxy_conf.nodes.find(name);
+    if (it == g_proxy_conf.nodes.end()) return;
+    int index = 1;
+    size_t vnodes = delNode(name, name, ":", index);
+    std::string vname;
     int vindex = 1;
     while (vnodes-- > 0) {
-        std::string vname;
-        vname += name;
+        vname = name;
         vname += "#";
         vname += Alice::convert(vindex++);
-        auto it = _nodes.find(hash(vname));
-        if (it == _nodes.end()) continue;
-        _nodes.erase(it);
+        delNode(vname, name, "#", vindex);
     }
+    auto iter = g_proxy_conf.nodes.find(name);
+    if (iter != g_proxy_conf.nodes.end())
+        g_proxy_conf.nodes.erase(iter);
 }
 
 void Node::removeNode(const Angel::TcpConnectionPtr& conn)
@@ -193,7 +228,9 @@ void Proxy::readConf(const char *proxy_conf_file)
         } else if (strcasecmp(it[0].c_str(), "port") == 0) {
             g_proxy_conf.port = atoi(it[1].c_str());
         } else if (strcasecmp(it[0].c_str(), "node") == 0) {
-            g_proxy_conf.nodes.emplace_back(it[1], atoi(it[2].c_str()));
+            std::string name = it[1] + ":" + it[2];
+            auto tuple = std::make_tuple(it[1], atoi(it[2].c_str()));
+            g_proxy_conf.nodes.emplace(name, tuple);
         }
     }
 }
@@ -218,14 +255,14 @@ void Proxy::proxyCommand(const Angel::TcpConnectionPtr& conn,
         conn->send("-ERR subcommand error\r\n");
 }
 
-uint32_t Proxy::murmurHash2(const void *key, size_t len, uint32_t seed)
+uint32_t Proxy::murmurHash2(const void *key, size_t len)
 {
     // 'm' and 'r' are mixing constants generated offline.
     // They're not really 'magic', they just happen to work well.
     const uint32_t m = 0x5bd1e995;
     const int r = 24;
     // Initialize the hash to a 'random' value
-    uint32_t h = seed ^ len;
+    uint32_t h = 0 ^ len;
     // Mix 4 bytes at a time into the hash
     const unsigned char *data = (const unsigned char*)key;
 
@@ -272,11 +309,12 @@ Proxy::CommandTable Proxy::commandTable = {
 Proxy::RVMap Proxy::rvMap = {
     { 5,    500 },
     { 10,   200 },
-    { 20,   50 },
-    { 50,   20 },
-    { 100,  10 },
-    { 200,  5 },
-    { 500,  2 },
+    { 20,   100 },
+    { 50,   50  },
+    { 100,  20  },
+    { 200,  10  },
+    { 500,  5   },
+    { 1000, 2   },
 };
 
 Proxy *g_proxy;
