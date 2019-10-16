@@ -57,42 +57,44 @@ public:
     using CommandTable = std::unordered_set<std::string>;
     // real node nums -> virtual node nums
     using RVMap = std::map<size_t, size_t>;
+    using CommandList = std::vector<std::string>;
 
     Proxy(Angel::EventLoop *loop, Angel::InetAddr& inetAddr);
     void onMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {
-        std::string key;
+        CommandList cmdlist;
         while (true) {
-            ssize_t n = parseRequest(buf, key);
+            cmdlist.clear();
+            // FIXME: avoid saving parsed commands
+            ssize_t n = parseRequest(buf, cmdlist);
             if (n == 0) return;
             if (n < 0) {
                 logInfo("conn %d protocol error", conn->id());
                 conn->close();
                 return;
             }
-            if (key.empty()) {
+            std::transform(cmdlist[0].begin(), cmdlist[0].end(), cmdlist[0].begin(), ::toupper);
+            if (cmdlist[0].compare("PROXY") == 0) {
+                proxyCommand(conn, cmdlist);
+                buf.retrieve(n);
+                continue;
+            }
+            if (commandTable.find(cmdlist[0]) == commandTable.end()) {
                 conn->send("-ERR unknown command\r\n");
                 buf.retrieve(n);
                 continue;
             }
-            Node *node = findNode(key);
-            std::cout << key << "\t->\t" << node->name() << "\n";
+            Node *node = findNode(cmdlist[1]);
+            std::cout << cmdlist[1] << "\t->\t" << node->name() << "\n";
             if (node) node->forwardRequestToServer(conn->id(), buf, n);
             buf.retrieve(n);
         }
     }
     uint32_t hash(const std::string& key)
     {
-        // FNV-1a 32-bits hash
-        uint32_t hashval = 2166136261;
-        uint32_t fnv_prime = 16777619;
-        for (unsigned char c : key) {
-            hashval ^= c;
-            hashval *= fnv_prime;
-        }
-        return hashval;
+        return murmurHash2(key.data(), key.size(), clock());
     }
-    static ssize_t parseRequest(Angel::Buffer& buf, std::string& key);
+    static ssize_t parseRequest(Angel::Buffer& buf, CommandList& cmdlist);
     static ssize_t parseResponse(Angel::Buffer& buf);
     Node *findNode(const std::string& key)
     {
@@ -119,10 +121,14 @@ public:
     Angel::TcpServer& server() { return _server; }
     void start() { _server.start(); }
     static void readConf(const char *proxy_conf_file);
+    void proxyCommand(const Angel::TcpConnectionPtr& conn,
+                      const CommandList& cmdlist);
 
     static CommandTable commandTable;
     static RVMap rvMap;
 private:
+    static uint32_t murmurHash2(const void *key, size_t len, uint32_t seed);
+
     Angel::EventLoop *_loop;
     Angel::TcpServer _server;
     NodeMaps _nodes;

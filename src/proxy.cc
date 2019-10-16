@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 #include "proxy.h"
 
 //
@@ -93,9 +94,8 @@ void Node::forwardResponseToClient(const Angel::TcpConnectionPtr& conn,
 // if parse error, return -1
 // if not enough data, return 0
 // else return length of response
-ssize_t Proxy::parseRequest(Angel::Buffer& buf, std::string& key)
+ssize_t Proxy::parseRequest(Angel::Buffer& buf, CommandList& cmdlist)
 {
-    bool cmderr = false;
     const char *s = buf.peek();
     const char *es = s + buf.readable();
     const char *ps = s;
@@ -118,14 +118,7 @@ ssize_t Proxy::parseRequest(Angel::Buffer& buf, std::string& key)
         s = next + 1;
         if (es - s < len + 2) return 0;
         if (s[len] != '\r' || s[len+1] != '\n') return -1;
-        if (argc == l) {
-            std::string cmd(len, 0);
-            std::transform(s, s + len, cmd.begin(), ::toupper);
-            if (commandTable.find(cmd) == commandTable.end()) {
-                cmderr = true;
-            }
-        }
-        if (argc == l - 1 && !cmderr) key.assign(s, len);
+        cmdlist.emplace_back(s, len);
         s += len + 2;
         argc--;
     }
@@ -203,6 +196,63 @@ void Proxy::readConf(const char *proxy_conf_file)
             g_proxy_conf.nodes.emplace_back(it[1], atoi(it[2].c_str()));
         }
     }
+}
+
+// PROXY [add | del] <node-ip> <node-port>
+void Proxy::proxyCommand(const Angel::TcpConnectionPtr& conn,
+                         const CommandList& cmdlist)
+{
+    if (cmdlist.size() != 4) {
+        conn->send("-ERR wrong number of arguments\r\n");
+        return;
+    }
+    auto& ip = cmdlist[2];
+    const char *port = cmdlist[3].c_str();
+    if (strcasecmp(cmdlist[1].c_str(), "add") == 0) {
+        addNode(ip, atoi(port));
+        conn->send("+OK\r\n");
+    } else if (strcasecmp(cmdlist[1].c_str(), "del") == 0) {
+        delNode(ip + std::string(":") + port);
+        conn->send("+OK\r\n");
+    } else
+        conn->send("-ERR subcommand error\r\n");
+}
+
+uint32_t Proxy::murmurHash2(const void *key, size_t len, uint32_t seed)
+{
+    // 'm' and 'r' are mixing constants generated offline.
+    // They're not really 'magic', they just happen to work well.
+    const uint32_t m = 0x5bd1e995;
+    const int r = 24;
+    // Initialize the hash to a 'random' value
+    uint32_t h = seed ^ len;
+    // Mix 4 bytes at a time into the hash
+    const unsigned char *data = (const unsigned char*)key;
+
+    while(len >= 4) {
+        uint32_t k = *(uint32_t*)data;
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+        h *= m;
+        h ^= k;
+        data += 4;
+        len -= 4;
+    }
+    // Handle the last few bytes of the input array
+    switch(len) {
+    case 3: h ^= data[2] << 16;
+    case 2: h ^= data[1] << 8;
+    case 1: h ^= data[0];
+    h *= m;
+    };
+    // Do a few final mixes of the hash to ensure the last few
+    // bytes are well-incorporated.
+    h ^= h >> 13;
+    h *= m;
+    h ^= h >> 15;
+
+    return h;
 }
 
 // now, only exec single-key command
