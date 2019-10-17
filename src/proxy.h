@@ -27,10 +27,9 @@ class Node {
 public:
     using IdQueue = std::queue<size_t>;
 
-    Node(Angel::EventLoop *loop, Angel::InetAddr& inetAddr, const std::string& name)
+    Node(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
         : _isVNode(false),
-        _rnode(nullptr),
-        _name(name)
+        _rnode(nullptr)
     {
         if (!loop) { _isVNode = true; return; }
         _client.reset(new Angel::TcpClient(loop, inetAddr));
@@ -44,6 +43,7 @@ public:
     bool isVNode() const { return _isVNode; }
     Node *rnode() { return _rnode; }
     const std::string& name() const { return _name; }
+    void setName(const std::string& name) { _name = name; }
     void setRNodeForVNode(Node *node) { _rnode = node; }
     size_t vnodes() const { return _vnodes; }
     void setVNodes(size_t vnodes) { _vnodes = vnodes; }
@@ -121,6 +121,7 @@ public:
             return it->second.get();
     }
     void addNode(const std::string& ip, int port);
+    void delNode(const std::string& ip, int port);
     void delNode(const std::string& name);
     size_t nodeNums() const { return g_proxy_conf.nodes.size(); }
     size_t getVNodesPerNode()

@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include "proxy.h"
 
 //
@@ -23,7 +24,10 @@ void Proxy::addNode(std::string s1, const std::string& s,
     // 实际上发生冲突的概率是很小的
     while (true) {
         auto it = _nodes.emplace(hash(s1), node);
-        if (it.second) break;
+        if (it.second) {
+            node->setName(s1);
+            break;
+        }
         s1 = s;
         s1 += sep;
         s1 += Alice::convert(index++);
@@ -38,7 +42,7 @@ void Proxy::addNode(const std::string& ip, int port)
     name += Alice::convert(port);
     Angel::InetAddr inetAddr(port, ip.c_str());
     size_t vnodes = getVNodesPerNode();
-    auto node = new Node(_loop, inetAddr, name);
+    auto node = new Node(_loop, inetAddr);
     node->setVNodes(vnodes);
     int index = 1;
     addNode(name, name, ":", node, index);
@@ -48,7 +52,7 @@ void Proxy::addNode(const std::string& ip, int port)
         vname = name;
         vname += "#";
         vname += Alice::convert(vindex++);
-        auto vnode = new Node(nullptr, inetAddr, vname);
+        auto vnode = new Node(nullptr, inetAddr);
         vnode->setRNodeForVNode(node);
         addNode(vname, name, "#", vnode, vindex);
     }
@@ -62,7 +66,8 @@ size_t Proxy::delNode(std::string s1, const std::string& s,
 {
     while (true) {
         auto it = _nodes.find(hash(s1));
-        if (it != _nodes.end()) {
+        assert(it != _nodes.end());
+        if (it->second->name() == s1) {
             size_t vnodes = it->second->vnodes();
             _nodes.erase(it);
             return vnodes;
@@ -73,10 +78,20 @@ size_t Proxy::delNode(std::string s1, const std::string& s,
     }
 }
 
+void Proxy::delNode(const std::string& ip, int port)
+{
+    std::string name;
+    name += ip;
+    name += ":";
+    name += Alice::convert(port);
+    delNode(name);
+}
+
 void Proxy::delNode(const std::string& name)
 {
     auto it = g_proxy_conf.nodes.find(name);
     if (it == g_proxy_conf.nodes.end()) return;
+    g_proxy_conf.nodes.erase(it);
     int index = 1;
     size_t vnodes = delNode(name, name, ":", index);
     std::string vname;
@@ -87,9 +102,6 @@ void Proxy::delNode(const std::string& name)
         vname += Alice::convert(vindex++);
         delNode(vname, name, "#", vindex);
     }
-    auto iter = g_proxy_conf.nodes.find(name);
-    if (iter != g_proxy_conf.nodes.end())
-        g_proxy_conf.nodes.erase(iter);
 }
 
 void Node::removeNode(const Angel::TcpConnectionPtr& conn)
@@ -134,13 +146,13 @@ ssize_t Proxy::parseRequest(Angel::Buffer& buf, CommandList& cmdlist)
     const char *s = buf.peek();
     const char *es = s + buf.readable();
     const char *ps = s;
-    size_t l, argc;
+    size_t argc;
     // 解析命令个数
     const char *next = std::find(s, es, '\n');
     if (next == es) return 0;
     if (s[0] != '*' || next[-1] != '\r') return -1;
     s += 1;
-    l = argc = atol(s);
+    argc = atol(s);
     s = std::find_if_not(s, es, ::isnumber);
     if (s[0] != '\r' || s[1] != '\n') return -1;
     s += 2;
@@ -244,12 +256,16 @@ void Proxy::proxyCommand(const Angel::TcpConnectionPtr& conn,
         return;
     }
     auto& ip = cmdlist[2];
-    const char *port = cmdlist[3].c_str();
+    int port = Alice::str2l(cmdlist[3].c_str());
+    if (Alice::str2numberErr()) {
+        conn->send("-ERR value is not an integer or out of range\r\n");
+        return;
+    }
     if (strcasecmp(cmdlist[1].c_str(), "add") == 0) {
-        addNode(ip, atoi(port));
+        addNode(ip, port);
         conn->send("+OK\r\n");
     } else if (strcasecmp(cmdlist[1].c_str(), "del") == 0) {
-        delNode(ip + std::string(":") + port);
+        delNode(ip, port);
         conn->send("+OK\r\n");
     } else
         conn->send("-ERR subcommand error\r\n");
