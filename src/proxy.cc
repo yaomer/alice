@@ -243,6 +243,8 @@ void Proxy::readConf(const char *proxy_conf_file)
             std::string name = it[1] + ":" + it[2];
             auto tuple = std::make_tuple(it[1], atoi(it[2].c_str()));
             g_proxy_conf.nodes.emplace(name, tuple);
+        } else if (strcasecmp(it[0].c_str(), "vnodes") == 0) {
+            g_proxy_conf.vnodes = atoi(it[1].c_str());
         }
     }
 }
@@ -310,27 +312,17 @@ uint32_t Proxy::murmurHash2(const void *key, size_t len)
 
 // now, only exec single-key command
 Proxy::CommandTable Proxy::commandTable = {
-    "SET", "SETNX", "GET", "GETSET", "APPEND", "STRLEN",
-    "INCR", "INCRBY", "DECR", "DECRBY", "SETRANGE", "GETRANGE", "LPUSH",
+    "SET", "SETNX", "GET", "GETSET", "APPEND", "STRLEN", "INCR",
+    "INCRBY", "DECR", "DECRBY", "SETRANGE", "GETRANGE", "LPUSH",
     "LPUSHX", "RPUSH", "RPUSHX", "LPOP", "RPOP", "LREM", "LLEN",
     "LINDEX", "LSET", "LRANGE", "LTRIM", "BLPOP", "BRPOP", "SADD",
     "SISMEMBER", "SPOP", "SRANDMEMBER", "SREM", "SCARD", "SMEMBERS",
-    "HSET", "HSETNX", "HGET", "HEXISTS", "HDEL", "HLEN", "HSTRLEN", "HINCRBY",
-    "HMSET", "HMGET", "HKEYS", "HVALS", "HGETALL", "ZADD", "ZSCORE", "ZINCRBY",
-    "ZCARD", "ZCOUNT", "ZRANGE", "ZREVRANGE", "ZRANK", "ZREVRANK", "ZREM", "EXISTS",
-    "TYPE", "TTL", "PTTL", "EXPIRE", "PEXPIRE", "MOVE", "LRU", "ZRANGEBYSCORE",
+    "HSET", "HSETNX", "HGET", "HEXISTS", "HDEL", "HLEN", "HSTRLEN",
+    "HINCRBY", "HMSET", "HMGET", "HKEYS", "HVALS", "HGETALL", "ZADD",
+    "ZSCORE", "ZINCRBY", "ZCARD", "ZCOUNT", "ZRANGE", "ZREVRANGE",
+    "ZRANK", "ZREVRANK", "ZREM", "EXISTS", "TYPE", "TTL", "PTTL",
+    "EXPIRE", "PEXPIRE", "MOVE", "LRU", "ZRANGEBYSCORE",
     "ZREVRANGEBYSCORE", "ZREMRANGEBYRANK", "ZREMRANGEBYSCORE",
-};
-
-Proxy::RVMap Proxy::rvMap = {
-    { 5,    500 },
-    { 10,   200 },
-    { 20,   100 },
-    { 50,   50  },
-    { 100,  20  },
-    { 200,  10  },
-    { 500,  5   },
-    { 1000, 2   },
 };
 
 Proxy *g_proxy;

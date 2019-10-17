@@ -21,6 +21,7 @@ struct ProxyConf {
     std::string ip;
     // all nodes <ip:name, <ip, port>>
     std::map<std::string, std::tuple<std::string, int>> nodes;
+    size_t vnodes;
 } g_proxy_conf;
 
 class Node {
@@ -65,8 +66,6 @@ class Proxy {
 public:
     using NodeMaps = std::map<uint32_t, std::unique_ptr<Node>>;
     using CommandTable = std::unordered_set<std::string>;
-    // real node nums -> virtual node nums
-    using RVMap = std::map<size_t, size_t>;
     using CommandList = std::vector<std::string>;
 
     Proxy(Angel::EventLoop *loop, Angel::InetAddr& inetAddr);
@@ -124,11 +123,7 @@ public:
     void delNode(const std::string& ip, int port);
     void delNode(const std::string& name);
     size_t nodeNums() const { return g_proxy_conf.nodes.size(); }
-    size_t getVNodesPerNode()
-    {
-        auto it = rvMap.lower_bound(g_proxy_conf.nodes.size());
-        return it != rvMap.end() ? it->second : 0;
-    }
+    size_t getVNodesPerNode() const { return g_proxy_conf.vnodes; }
     Angel::EventLoop *loop() { return _loop; }
     Angel::TcpServer& server() { return _server; }
     void start() { _server.start(); }
@@ -137,7 +132,6 @@ public:
                       const CommandList& cmdlist);
 
     static CommandTable commandTable;
-    static RVMap rvMap;
 private:
     static uint32_t murmurHash2(const void *key, size_t len);
     void addNode(std::string s1, const std::string& s,
