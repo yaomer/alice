@@ -54,6 +54,28 @@ void writeToFile(int fd, const char *buf, size_t nbytes);
 using ConfParamList = std::vector<std::vector<std::string>>;
 void parseConf(ConfParamList& confParamList, const char *filename);
 
+// 判断n是否是2的整数次幂
+bool inline is_power_of_2(unsigned n)
+{
+    return n > 0 && (n & (n - 1)) == 0;
+}
+
+#define MAX_POWER_OF_2 (1u << 31)
+
+// 返回不小于n的最小二次幂
+unsigned inline round_up_power_of_2(unsigned n)
+{
+    if (n == 0) return 2;
+    if (n >= MAX_POWER_OF_2) return MAX_POWER_OF_2;
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    return n + 1;
+}
+
 #define UNUSED(x) ((void)(x))
 
 }

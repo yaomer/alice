@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <tuple>
+
 #include "server.h"
 #include "sentinel.h"
 #include "db.h"
@@ -18,7 +19,10 @@
 
 using namespace Alice;
 
-void Server::parseRequest(Context& con, Angel::Buffer& buf)
+// if parse error, return -1
+// if not enough data, return 0
+// else return length of response
+ssize_t Server::parseRequest(Context& con, Angel::Buffer& buf)
 {
     const char *s = buf.peek();
     const char *es = s + buf.readable();
@@ -26,13 +30,10 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
     size_t argc, len;
     // 解析命令个数
     const char *next = std::find(s, es, '\n');
-    if (next == es) return;
+    if (next == es) goto clr;
     if (s[0] != '*' || next[-1] != '\r') goto err;
-    s += 1;
-    argc = atol(s);
-    s = std::find_if_not(s, es, ::isnumber);
-    if (s[0] != '\r' || s[1] != '\n') goto err;
-    s += 2;
+    argc = atol(s + 1);
+    s = next + 1;
     // 解析各个命令
     while (argc > 0) {
         next = std::find(s, es, '\n');
@@ -46,17 +47,15 @@ void Server::parseRequest(Context& con, Angel::Buffer& buf)
         s += len + 2;
         argc--;
     }
-    buf.retrieve(s - ps);
-    con.setState(Context::SUCCEED);
-    return;
+    return s - ps;
 clr:
     con.commandList().clear();
-    return;
+    return 0;
 err:
-    con.setState(Context::PROTOCOLERR);
+    return -1;
 }
 
-void Server::executeCommand(Context& con)
+void Server::executeCommand(Context& con, const char *query, size_t len)
 {
     int arity;
     int64_t start, end;
@@ -102,7 +101,7 @@ void Server::executeCommand(Context& con)
     _dbServer.addSlowlogIfNeeded(cmdlist, start, end);
     // 命令执行未出错
     if ((it->second.perm() & IS_WRITE) && (con.message()[0] != '-')) {
-        _dbServer.doWriteCommand(cmdlist);
+        _dbServer.doWriteCommand(cmdlist, query, len);
     }
     goto end;
 err:
@@ -111,7 +110,6 @@ err:
         con.setFlag(Context::EXEC_MULTI_ERR);
     }
 end:
-    con.setState(Context::REPLY);
     cmdlist.clear();
 }
 
@@ -122,19 +120,25 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
     if (!(context.flag() & Context::MASTER))
         conn->send(context.message());
     context.message().clear();
-    context.setState(Context::PARSING);
 }
 
-void DBServer::doWriteCommand(Context::CommandList& cmdlist)
+// [query, len]是REPL形式的请求字符串，如果query为真，则使用[query, len]，这样可以避免许多低效的拷贝；
+// 如果query为假，则使用cmdlist，然后将其转换为REPL形式的字符串，不过这种情况很少见
+void DBServer::doWriteCommand(const Context::CommandList& cmdlist,
+                              const char *query, size_t len)
 {
     dirtyIncr();
-    appendWriteCommand(cmdlist);
-    sendSyncCommandToSlave(cmdlist);
-    // 更新从服务器的复制偏移量
+    appendWriteCommand(cmdlist, query, len);
+    if (!_slaves.empty()) {
+        if (!query) {
+            std::string buffer;
+            appendCommand(buffer, cmdlist);
+            sendSyncCommandToSlave(buffer.data(), buffer.size());
+        } else
+            sendSyncCommandToSlave(query, len);
+    }
     if (flag() & SLAVE) {
-        std::string buffer;
-        appendCommand(buffer, cmdlist, false);
-        slaveOffsetIncr(buffer.size());
+        slaveOffsetIncr(len);
     }
 }
 
@@ -208,6 +212,12 @@ void Server::serverCron()
         }
     }
 
+    // 如果slave与master意外断开连接，则slave会尝试重连master
+    if (_dbServer.flag() & DBServer::CONNECT_RESET_BY_MASTER) {
+        _dbServer.clearFlag(DBServer::CONNECT_RESET_BY_MASTER);
+        _dbServer.connectMasterServer();
+    }
+
     _dbServer.checkBlockedClients(now);
 
     _dbServer.checkExpireCycle(now);
@@ -272,8 +282,9 @@ void DBServer::checkBlockedClients(int64_t now)
 
 void DBServer::removeBlockedClient(size_t id)
 {
-    for (auto c = _blockedClients.begin(); c != _blockedClients.end(); ++c)
-        if (*c == id) break;
+    for (auto c : _blockedClients)
+        if (c == id)
+            break;
 }
 
 // 将目前已连接的所有客户端设置为只读
@@ -293,7 +304,7 @@ void DBServer::setAllSlavesToReadonly()
 void DBServer::connectMasterServer()
 {
     disconnectMasterServer();
-    _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get(), "slave"));
+    _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get()));
     _client->notExitLoop();
     _client->setConnectionCb(
             std::bind(&DBServer::sendPingToMaster, this, _1));
@@ -324,6 +335,7 @@ void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
 {
     g_server->loop()->cancelTimer(_heartBeatTimerId);
     g_server->loop()->cancelTimer(_replTimeoutTimerId);
+    _flag |= CONNECT_RESET_BY_MASTER;
 }
 
 void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
@@ -387,21 +399,21 @@ void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
 // +CONTINUE\r\n
 // <rdbfilesize>\r\n\r\n<rdbfile>
 // <sync command>
+// SYNC_RECV_PING -> SYNC_WAIT -> SYNC_FULL -> SYNC_COMMAND
+//                             -> SYNC_COMMAND
 void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
 {
     auto& context = std::any_cast<Context&>(conn->getContext());
     while (true) {
         if (context.flag() & Context::SYNC_RECV_PING) {
-            if (strncasecmp(buf.c_str(), "+PONG\r\n", 7) == 0) {
-                buf.retrieve(7);
-                context.clearFlag(Context::SYNC_RECV_PING);
-                context.setFlag(Context::SYNC_WAIT);
-                sendInetAddrToMaster(conn);
-                sendSyncToMaster(conn);
-                break;
-            }
+            if (!buf.strcasecmp("+PONG\r\n")) return;
+            buf.retrieve(7);
+            context.clearFlag(Context::SYNC_RECV_PING);
+            context.setFlag(Context::SYNC_WAIT);
+            sendInetAddrToMaster(conn);
+            sendSyncToMaster(conn);
         } else if (context.flag() & Context::SYNC_WAIT) {
-            if (strncasecmp(buf.c_str(), "+FULLRESYNC\r\n", 13) == 0) {
+            if (buf.strcasecmp("+FULLRESYNC\r\n")) {
                 char *s = buf.peek();
                 const char *ps = s;
                 s += 13;
@@ -416,24 +428,20 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
                 buf.retrieve(s - ps);
                 context.clearFlag(Context::SYNC_WAIT);
                 context.setFlag(Context::SYNC_FULL);
-            } else if (strncasecmp(buf.c_str(), "+CONTINUE\r\n", 11) == 0) {
+            } else if (buf.strcasecmp("+CONTINUE\r\n")) {
                 buf.retrieve(11);
                 context.clearFlag(Context::SYNC_WAIT);
                 context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
+                _client->conn()->setMessageCb(
+                        std::bind(&Server::slaveOnMessage, g_server, _1, _2));
                 setHeartBeatTimer(conn);
             } else
                 break;
-        } else if (context.flag() & Context::SYNC_OK){
-            context.clearFlag(Context::SYNC_OK);
-            break;
         } else if (context.flag() & Context::SYNC_FULL) {
             recvRdbfileFromMaster(conn, buf);
+            break;
         } else if (context.flag() & Context::SYNC_COMMAND) {
-            if (strncasecmp(buf.peek(), "+PONG\r\n", 7) == 0) {
-                recvPingFromMaster();
-                buf.retrieve(7);
-            }
-            g_server->onMessage(conn, buf);
+            g_server->slaveOnMessage(conn, buf);
             break;
         }
     }
@@ -458,39 +466,36 @@ void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel:
     auto& context = std::any_cast<Context&>(conn->getContext());
     if (_syncRdbFilesize == 0) {
         int crlf = buf.findStr("\r\n\r\n");
-        if (crlf <= 0) goto jump;
+        if (crlf <= 0) return;
         _syncRdbFilesize = atoll(buf.peek());
         buf.retrieve(crlf + 4);
         strcpy(_tmpfile, "tmp.XXXXX");
         mktemp(_tmpfile);
         _syncFd = open(_tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
-        if (buf.readable() == 0) goto jump;
-        goto next;
-    } else {
-next:
-        size_t writeBytes = buf.readable();
-        if (writeBytes >= _syncRdbFilesize) {
-            writeBytes = _syncRdbFilesize;
-            _syncRdbFilesize = 0;
-        } else {
-            _syncRdbFilesize -= writeBytes;
-        }
-        ssize_t n = write(_syncFd, buf.peek(), writeBytes);
-        if (n > 0) buf.retrieve(n);
-        if (_syncRdbFilesize > 0) goto jump;
-        fsync(_syncFd);
-        close(_syncFd);
-        _syncFd = -1;
-        rename(_tmpfile, g_server_conf.rdb_file.c_str());
-        db()->hashMap().clear();
-        rdb()->load();
-        context.clearFlag(Context::SYNC_FULL);
-        context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
-        setHeartBeatTimer(conn);
+        if (buf.readable() == 0) return;
     }
-    return;
-jump:
-    context.setFlag(Context::SYNC_OK);
+    size_t writeBytes = buf.readable();
+    if (writeBytes >= _syncRdbFilesize) {
+        writeBytes = _syncRdbFilesize;
+        _syncRdbFilesize = 0;
+    } else {
+        _syncRdbFilesize -= writeBytes;
+    }
+    ssize_t n = write(_syncFd, buf.peek(), writeBytes);
+    if (n > 0) buf.retrieve(n);
+    if (_syncRdbFilesize > 0) return;
+    fsync(_syncFd);
+    close(_syncFd);
+    _syncFd = -1;
+    rename(_tmpfile, g_server_conf.rdb_file.c_str());
+    for (auto& db : dbs())
+        db->hashMap().clear();
+    rdb()->load();
+    context.clearFlag(Context::SYNC_FULL);
+    context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
+    _client->conn()->setMessageCb(
+            std::bind(&Server::slaveOnMessage, g_server, _1, _2));
+    setHeartBeatTimer(conn);
 }
 
 // 主服务器将生成的rdb快照发送给从服务器
@@ -505,8 +510,8 @@ void DBServer::sendRdbfileToSlave()
     while (buf.readFd(fd) > 0) {
     }
     auto& maps = g_server->server().connectionMaps();
-    for (auto& id : slaveIds()) {
-        auto conn = maps.find(id);
+    for (auto& it : slaves()) {
+        auto conn = maps.find(it.first);
         if (conn != maps.end()) {
             auto& context = std::any_cast<Context&>(conn->second->getContext());
             if (context.flag() & Context::SYNC_RDB_FILE) {
@@ -525,17 +530,15 @@ void DBServer::sendRdbfileToSlave()
 }
 
 // 主服务器将写命令传播给所有从服务器
-void DBServer::sendSyncCommandToSlave(Context::CommandList& cmdlist)
+void DBServer::sendSyncCommandToSlave(const char *query, size_t len)
 {
-    std::string buffer;
-    appendCommand(buffer, cmdlist, false);
     auto& maps = g_server->server().connectionMaps();
-    for (auto& id : slaveIds()) {
-        auto conn = maps.find(id);
+    for (auto& it : _slaves) {
+        auto conn = maps.find(it.first);
         if (conn != maps.end()) {
             auto& context = std::any_cast<Context&>(conn->second->getContext());
             if (context.flag() & Context::SYNC_COMMAND)
-                conn->second->send(buffer);
+                conn->second->send(query, len);
         }
     }
 }
@@ -553,29 +556,49 @@ void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
 }
 
 // 主服务器将命令写入到复制积压缓冲区中
-void DBServer::appendCopyBacklogBuffer(Context::CommandList& cmdlist)
+void DBServer::appendCopyBacklogBuffer(const char *query, size_t len)
 {
-    std::string buffer;
-    appendCommand(buffer, cmdlist, false);
-    masterOffsetIncr(buffer.size());
-    size_t remainBytes = g_server_conf.repl_backlog_size - _copyBacklogBuffer.size();
-    if (remainBytes < buffer.size()) {
-        size_t popsize = buffer.size() - remainBytes;
-        _copyBacklogBuffer.erase(0, popsize);
-    }
-    _copyBacklogBuffer.append(buffer);
+    masterOffsetIncr(len);
+    _copyBacklogBuffer.push(query, len);
 }
 
-void DBServer::appendWriteCommand(Context::CommandList& cmdlist)
+void DBServer::appendPartialResyncData(Context& con, size_t off)
+{
+    unsigned size = _copyBacklogBuffer.size();
+    unsigned index = _copyBacklogBuffer.index();
+    const char *front = _copyBacklogBuffer.front();
+    if (index + off <= size) {
+        con.append(front, off);
+    } else {
+        con.append(front, size - index);
+        con.append(front - index, off - (size - index));
+    }
+}
+
+void DBServer::appendWriteCommand(const Context::CommandList& cmdlist,
+                                  const char *query, size_t len)
 {
     if (g_server_conf.enable_appendonly)
-        aof()->append(cmdlist);
+        aof()->append(cmdlist, query, len);
     if (aof()->childPid() != -1)
-        aof()->appendRewriteBuffer(cmdlist);
+        aof()->appendRewriteBuffer(cmdlist, query, len);
     if (flag() & DBServer::PSYNC)
-        rdb()->appendSyncBuffer(cmdlist);
-    if (!slaveIds().empty())
-        appendCopyBacklogBuffer(cmdlist);
+        rdb()->appendSyncBuffer(cmdlist, query, len);
+    if (!slaves().empty()) {
+        if (!query) {
+            std::string buffer;
+            appendCommand(buffer, cmdlist);
+            appendCopyBacklogBuffer(buffer.data(), buffer.size());
+        } else
+            appendCopyBacklogBuffer(query, len);
+    }
+}
+
+static void appendCommandHead(std::string& buffer, size_t len)
+{
+    buffer += "*";
+    buffer += convert(len);
+    buffer += "\r\n";
 }
 
 static void appendCommandArg(std::string& buffer, const std::string& s1,
@@ -593,20 +616,23 @@ static void appendTimeStamp(std::string& buffer, int64_t timeval, bool is_second
 }
 
 // 将解析后的命令转换成REPL形式的命令
+void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cmdlist)
+{
+    appendCommandHead(buffer, cmdlist.size());
+    for (auto& it : cmdlist) {
+        appendCommandArg(buffer, convert(it.size()), it);
+    }
+}
+
+// 将解析后的命令转换成REPL形式的命令
 // 如果split_expire为真, 则需要将涉及到(P)EXPIRE命令的超时值改为一个unix timestamp
 // EXPIRE命令将被转换为PEXPIRE
 void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cmdlist,
-        bool split_expire)
+                             const char *query, size_t len)
 {
     size_t size = cmdlist.size();
-    buffer += "*";
-    buffer += convert(size);
-    buffer += "\r\n";
-    if (!split_expire) {
-        for (auto& it : cmdlist) {
-            appendCommandArg(buffer, convert(it.size()), it);
-        }
-    } else if (strcasecmp(cmdlist[0].c_str(), "SET") == 0 && size >= 5) {
+    if (strcasecmp(cmdlist[0].c_str(), "SET") == 0 && size >= 5) {
+        appendCommandHead(buffer, size);
         for (size_t i = 0; i < size; i++) {
             if (i > 3 && strcasecmp(cmdlist[i-1].c_str(), "EX") == 0) {
                 appendTimeStamp(buffer, atoll(cmdlist[i].c_str()), true);
@@ -617,17 +643,18 @@ void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cm
             }
         }
     } else if (strcasecmp(cmdlist[0].c_str(), "EXPIRE") == 0) {
+        appendCommandHead(buffer, size);
         appendCommandArg(buffer, "7", "PEXPIRE");
         appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
         appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), true);
     } else if (strcasecmp(cmdlist[0].c_str(), "PEXPIRE") == 0) {
+        appendCommandHead(buffer, size);
         appendCommandArg(buffer, "7", "PEXPIRE");
         appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
         appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), false);
     } else {
-        for (auto& it : cmdlist) {
-            appendCommandArg(buffer, convert(it.size()), it);
-        }
+        if (!query) appendCommand(buffer, cmdlist);
+        else buffer.append(query, len);
     }
 }
 
@@ -710,7 +737,7 @@ void Server::start()
         cmdlist.emplace_back("SLAVEOF");
         cmdlist.emplace_back(g_server_conf.master_ip);
         cmdlist.emplace_back(convert(g_server_conf.master_port));
-        executeCommand(con);
+        executeCommand(con, nullptr, 0);
     }
     _server.start();
 }

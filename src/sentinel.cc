@@ -37,8 +37,8 @@
 // note: term <==> epoch
 //
 
-#include <Angel/TcpClient.h>
 #include <assert.h>
+
 #include "sentinel.h"
 
 // 选举领头和投票时设置的超时定时器的基值
@@ -88,10 +88,8 @@ void Sentinel::init()
 // 向(master slave or sentinel)创建一条命令连接
 void SentinelInstance::creatCmdConnection()
 {
-    std::string name(inetAddr().toIpAddr() +
-            std::string(":") + convert(inetAddr().toIpPort()) + "-cmd");
     _clients[0].reset(
-            new Angel::TcpClient(g_sentinel->loop(), inetAddr(), name.c_str()));
+            new Angel::TcpClient(g_sentinel->loop(), inetAddr()));
     _clients[0]->setMessageCb(
             std::bind(&SentinelInstance::recvReplyFromServer, this, _1, _2));
     _clients[0]->setCloseCb(
@@ -103,10 +101,8 @@ void SentinelInstance::creatCmdConnection()
 // 向(master slave or sentinel)创建一条订阅连接
 void SentinelInstance::creatPubConnection()
 {
-    std::string name(inetAddr().toIpAddr()
-            + std::string(":") + convert(inetAddr().toIpPort()) + "-sub");
     _clients[1].reset(
-            new Angel::TcpClient(g_sentinel->loop(), inetAddr(), name.c_str()));
+            new Angel::TcpClient(g_sentinel->loop(), inetAddr()));
     _clients[1]->setConnectionCb(
             std::bind(&Sentinel::subServer, g_sentinel, _1));
     _clients[1]->setMessageCb(
@@ -131,7 +127,7 @@ void SentinelInstance::askForSentinels(const char *runid)
     cmdlist.emplace_back(convert(inetAddr().toIpPort()));
     cmdlist.emplace_back(convert(g_sentinel->currentEpoch()));
     cmdlist.emplace_back(runid);
-    DBServer::appendCommand(message, cmdlist, false);
+    DBServer::appendCommand(message, cmdlist);
     for (auto& sentinel : sentinels()) {
         auto& cli = sentinel.second->clients()[0];
         if (cli->isConnected()) {
@@ -299,11 +295,11 @@ void SentinelInstance::recvReplyFromServer(const Angel::TcpConnectionPtr& conn,
     while (buf.readable() >= 2) {
         int crlf = buf.findCrlf();
         if (crlf >= 0) {
-            if (strncasecmp(buf.peek(), "+PONG\r\n", 7) == 0) {
+            if (buf.strcasecmp("+PONG\r\n")) {
                 setLastHeartBeatTime(Angel::TimeStamp::now());
-            } else if (strncasecmp(buf.peek(), "+LOADING\r\n", 10) == 0) {
+            } else if (buf.strcasecmp("+LOADING\r\n")) {
                 setLastHeartBeatTime(Angel::TimeStamp::now());
-            } else if (strncasecmp(buf.peek(), "+MASTERDOWN\r\n", 13) == 0) {
+            } else if (buf.strcasecmp("+MASTERDOWN\r\n")) {
                 setLastHeartBeatTime(Angel::TimeStamp::now());
             } else {
                 const char *s = buf.peek();
@@ -506,20 +502,24 @@ void Sentinel::recvPubMessageFromServer(const Angel::TcpConnectionPtr& conn,
 {
     Context context(nullptr, nullptr);
     while (buf.readable() >= 2) {
-        int crlf = buf.findCrlf();
-        if (crlf >= 0) {
-            // skip subscribe's reply
-            if (buf[0] == '+') {
+        // skip subscribe's reply
+        if (buf[0] == '+') {
+            int crlf = buf.findCrlf();
+            if (crlf >= 0) {
                 buf.retrieve(crlf + 2);
                 continue;
-            }
-            Server::parseRequest(context, buf);
-            if (context.state() == Context::PARSING)
+            } else
                 break;
-            auto& message = context.commandList()[2];
-            updateSentinels(message.data(), message.data() + message.size());
-            buf.retrieve(crlf + 2);
         }
+        ssize_t n = Server::parseRequest(context, buf);
+        if (n == 0) break;
+        if (n < 0) {
+            buf.retrieveAll();
+            break;
+        }
+        auto& message = context.commandList()[2];
+        updateSentinels(message.data(), message.data() + message.size());
+        buf.retrieve(n);
     }
 }
 

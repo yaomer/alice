@@ -21,15 +21,17 @@ Aof::Aof(DBServer *dbServer)
 }
 
 // 保存服务器执行的所有写命令
-void Aof::append(Context::CommandList& cmdlist)
+void Aof::append(const Context::CommandList& cmdlist,
+                 const char *query, size_t len)
 {
-    DBServer::appendCommand(_buffer, cmdlist, true);
+    DBServer::appendCommand(_buffer, cmdlist, query, len);
 }
 
 // 保存aof重写过程中执行的所有写命令
-void Aof::appendRewriteBuffer(Context::CommandList& cmdlist)
+void Aof::appendRewriteBuffer(const Context::CommandList& cmdlist,
+                              const char *query, size_t len)
 {
-    DBServer::appendCommand(_rewriteBuffer, cmdlist, true);
+    DBServer::appendCommand(_rewriteBuffer, cmdlist, query, len);
 }
 
 // 将缓冲区中的命令flush到文件中
@@ -86,10 +88,9 @@ void Aof::load()
         free(line);
         line = nullptr;
         len = 0;
-        Server::parseRequest(pseudoClient, buf);
-        if (pseudoClient.state() == Context::PARSING)
-            continue;
-        if (pseudoClient.state() == Context::SUCCEED) {
+        ssize_t n = Server::parseRequest(pseudoClient, buf);
+        if (n == 0) continue;
+        if (n > 0) {
             auto& cmdlist = pseudoClient.commandList();
             auto it = _dbServer->db()->commandMap().find(cmdlist[0]);
             if (cmdlist[0].compare("PEXPIRE") == 0) {
@@ -100,7 +101,7 @@ void Aof::load()
             }
             it->second._commandCb(pseudoClient);
             cmdlist.clear();
-            pseudoClient.setState(Context::PARSING);
+            buf.retrieve(n);
         }
         pseudoClient.message().clear();
     }

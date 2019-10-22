@@ -27,7 +27,7 @@ public:
     void childPidReset() { _childPid = -1; }
     void load();
     std::string& syncBuffer() { return _syncBuffer; }
-    void appendSyncBuffer(Context::CommandList& cmdlist);
+    void appendSyncBuffer(const Context::CommandList& cmdlist, const char *query, size_t len);
 private:
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);

@@ -18,8 +18,8 @@ public:
     static const size_t rewrite_rate = 2;
 
     explicit Aof(DBServer *dbServer);
-    void append(Context::CommandList& cmdlist);
-    void appendRewriteBuffer(Context::CommandList& cmdlist);
+    void append(const Context::CommandList& cmdlist, const char *query, size_t len);
+    void appendRewriteBuffer(const Context::CommandList& cmdlist, const char *query, size_t len);
     void appendAof(int64_t now);
     void appendRewriteBufferToAof();
     void load();

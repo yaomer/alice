@@ -151,11 +151,8 @@ ssize_t Proxy::parseRequest(Angel::Buffer& buf, CommandList& cmdlist)
     const char *next = std::find(s, es, '\n');
     if (next == es) return 0;
     if (s[0] != '*' || next[-1] != '\r') return -1;
-    s += 1;
-    argc = atol(s);
-    s = std::find_if_not(s, es, ::isnumber);
-    if (s[0] != '\r' || s[1] != '\n') return -1;
-    s += 2;
+    argc = atol(s + 1);
+    s = next + 1;
     // 解析各个命令
     while (argc > 0) {
         next = std::find(s, es, '\n');

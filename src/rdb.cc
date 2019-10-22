@@ -412,7 +412,9 @@ void Rdb::flush()
     _buffer.clear();
 }
 
-void Rdb::appendSyncBuffer(Context::CommandList& cmdlist)
+void Rdb::appendSyncBuffer(const Context::CommandList& cmdlist,
+                           const char *query, size_t len)
 {
-    DBServer::appendCommand(_syncBuffer, cmdlist, false);
+    if (query) _syncBuffer.append(query, len);
+    else DBServer::appendCommand(_syncBuffer, cmdlist);
 }

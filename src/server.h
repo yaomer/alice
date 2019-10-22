@@ -13,11 +13,13 @@
 #include <set>
 #include <string>
 #include <memory>
+
 #include "db.h"
 #include "rdb.h"
 #include "aof.h"
 #include "config.h"
 #include "util.h"
+#include "ring_buffer.h"
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -26,7 +28,7 @@ namespace Alice {
 
 struct Slowlog {
     Slowlog() = default;
-    int _id;
+    size_t _id;
     int64_t _time;
     int64_t _duration;
     std::vector<std::string> _args;
@@ -39,6 +41,8 @@ public:
     using PubsubChannels = std::unordered_map<Key, std::vector<size_t>>;
     using BlockedClients = std::list<size_t>;
     using SlowlogQueue = std::list<Slowlog>;
+    // <conn_id, slave_offset>
+    using Slaves = std::unordered_map<size_t, size_t>;
     enum FLAG {
         // 有rewriteaof请求被延迟
         REWRITEAOF_DELAY = 0x02,
@@ -48,6 +52,7 @@ public:
         SLAVE = 0x08,
         // 有psync请求被延迟
         PSYNC_DELAY = 0x10,
+        CONNECT_RESET_BY_MASTER = 0x20,
     };
     DBServer()
         : _curDbnum(0),
@@ -56,6 +61,7 @@ public:
         _flag(0),
         _lastSaveTime(Angel::TimeStamp::now()),
         _dirty(0),
+        _copyBacklogBuffer(g_server_conf.repl_backlog_size),
         _masterOffset(0),
         _slaveOffset(0),
         _syncRdbFilesize(0),
@@ -70,7 +76,6 @@ public:
             std::unique_ptr<DB> db(new DB(this));
             _dbs.push_back(std::move(db));
         }
-        _copyBacklogBuffer.reserve(g_server_conf.repl_backlog_size);
         setSelfRunId(_selfRunId);
         bzero(_masterRunId, sizeof(_masterRunId));
         bzero(_tmpfile, sizeof(_tmpfile));
@@ -101,22 +106,23 @@ public:
     void recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf);
     void recvPingFromMaster();
     void sendRdbfileToSlave();
-    void sendSyncCommandToSlave(Context::CommandList& cmdlist);
+    void sendSyncCommandToSlave(const char *query, size_t len);
     void sendAckToMaster(const Angel::TcpConnectionPtr& conn);
-    void doWriteCommand(Context::CommandList& cmdlist);
+    void doWriteCommand(const Context::CommandList& cmdlist, const char *query, size_t len);
+    static void appendCommand(std::string& buffer, const Context::CommandList& cmdlist);
     static void appendCommand(std::string& buffer, const Context::CommandList& cmdlist,
-            bool split_expire);
-    void appendWriteCommand(Context::CommandList& cmdlist);
-    std::set<size_t>& slaveIds() { return _slaveIds; }
-    void addSlaveId(size_t id) { _slaveIds.insert(id); }
+                              const char *query, size_t len);
+    void appendWriteCommand(const Context::CommandList& cmdlist, const char *query, size_t len);
+    Slaves& slaves() { return _slaves; }
     size_t masterOffset() const { return _masterOffset; }
     void masterOffsetIncr(ssize_t incr) { _masterOffset += incr; }
     size_t slaveOffset() const { return _slaveOffset; }
     void slaveOffsetIncr(ssize_t incr) { _slaveOffset += incr; }
     int64_t lastRecvHeartBeatTime() const { return _lastRecvHeartBeatTime; }
     void setLastRecvHeartBeatTime(int64_t tv) { _lastRecvHeartBeatTime = tv; }
-    std::string& copyBacklogBuffer() { return _copyBacklogBuffer; }
-    void appendCopyBacklogBuffer(Context::CommandList& cmdlist);
+    const RingBuffer& copyBacklogBuffer() { return _copyBacklogBuffer; }
+    void appendCopyBacklogBuffer(const char *query, size_t len);
+    void appendPartialResyncData(Context& con, size_t off);
     const char *selfRunId() const { return _selfRunId; }
     const char *masterRunId() const { return _masterRunId; }
     void setMasterRunId(const char *s)
@@ -132,6 +138,7 @@ public:
     {
         _masterAddr.reset(new Angel::InetAddr(addr.inetAddr()));
     }
+    Angel::TcpClient *client() { return _client.get(); }
     void freeMemoryIfNeeded();
     SlowlogQueue& slowlogQueue() { return _slowlogQueue; }
     void addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end);
@@ -168,10 +175,10 @@ private:
     std::unique_ptr<Angel::InetAddr> _masterAddr;
     // 服务器作为从服务器时，与主服务器的连接
     std::unique_ptr<Angel::TcpClient> _client;
-    // 服务器作为主服务器运行时，与之同步的所有从服务器id
-    std::set<size_t> _slaveIds;
+    // 服务器作为主服务器运行时，与之同步的所有从服务器
+    Slaves _slaves;
     // 复制积压缓冲区
-    std::string _copyBacklogBuffer;
+    RingBuffer _copyBacklogBuffer;
     // 服务器作为主服务器运行时的复制偏移量
     size_t _masterOffset;
     // 服务器作为从服务器运行时的复制偏移量
@@ -198,7 +205,7 @@ private:
     // 记录慢查询日志
     SlowlogQueue _slowlogQueue;
     // 慢查询日志的ID
-    int _slowlogId;
+    size_t _slowlogId;
 };
 
 class Server {
@@ -216,9 +223,9 @@ public:
     }
     void onClose(const Angel::TcpConnectionPtr& conn)
     {
-        auto it = _dbServer.slaveIds().find(conn->id());
-        if (it != _dbServer.slaveIds().end())
-            _dbServer.slaveIds().erase(conn->id());
+        auto it = _dbServer.slaves().find(conn->id());
+        if (it != _dbServer.slaves().end())
+            _dbServer.slaves().erase(conn->id());
         auto& context = std::any_cast<Context&>(conn->getContext());
         if (context.flag() & Context::CON_BLOCK) {
             DB *db = _dbServer.selectDb(context.blockDbnum());
@@ -237,30 +244,42 @@ public:
     {
         auto& context = std::any_cast<Context&>(conn->getContext());
         while (true) {
-            switch (context.state()) {
-            case Context::PARSING:
-                parseRequest(context, buf);
-                if (context.state() == Context::PARSING)
-                    return;
-                break;
-            case Context::PROTOCOLERR:
-                logInfo("conn %d protocol error", conn->id());
+            ssize_t n = parseRequest(context, buf);
+            if (n < 0) {
+                logWarn("conn %d protocol error: %s", conn->id(), buf.c_str());
                 conn->close();
                 return;
-            case Context::SUCCEED:
-                executeCommand(context);
-                break;
-            case Context::REPLY:
-                replyResponse(conn);
-                if (buf.readable() == 0)
-                    return;
-                break;
             }
+            if (n == 0) return;
+            executeCommand(context, buf.peek(), n);
+            buf.retrieve(n);
+            replyResponse(conn);
+        }
+    }
+    void slaveOnMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
+    {
+        auto& context = std::any_cast<Context&>(conn->getContext());
+        while (true) {
+            while (true) {
+                if (!buf.strcasecmp("+PONG\r\n")) break;
+                _dbServer.recvPingFromMaster();
+                buf.retrieve(7);
+            }
+            ssize_t n = parseRequest(context, buf);
+            if (n < 0) {
+                logWarn("conn %d protocol error: %s", conn->id(), buf.c_str());
+                conn->close();
+                return;
+            }
+            if (n == 0) return;
+            executeCommand(context, buf.peek(), n);
+            buf.retrieve(n);
+            replyResponse(conn);
         }
     }
     void serverCron();
-    static void parseRequest(Context& con, Angel::Buffer& buf);
-    void executeCommand(Context& con);
+    static ssize_t parseRequest(Context& con, Angel::Buffer& buf);
+    void executeCommand(Context& con, const char *query, size_t n);
     void replyResponse(const Angel::TcpConnectionPtr& conn);
     void execError(const Angel::TcpConnectionPtr& conn);
     void start();

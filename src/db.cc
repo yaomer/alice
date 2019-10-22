@@ -352,18 +352,14 @@ sync:
     } else {
         if (cmdlist[1].compare(_dbServer->selfRunId()))
             goto sync;
-        size_t offset = atoll(cmdlist[2].c_str());
-        ssize_t lastoffset = _dbServer->masterOffset() - offset;
-        if (lastoffset < 0 || lastoffset > g_server_conf.repl_backlog_size)
+        size_t slaveoff = atoll(cmdlist[2].c_str());
+        size_t off = _dbServer->masterOffset() - slaveoff;
+        if (off > 0 && off <= _dbServer->copyBacklogBuffer().size())
             goto sync;
         // 执行部分重同步
         con.setFlag(Context::SYNC_COMMAND);
         con.append("+CONTINUE\r\n");
-        if (lastoffset > 0) {
-            size_t start = g_server_conf.repl_backlog_size - lastoffset;
-            con.append(std::string(
-                        &_dbServer->copyBacklogBuffer()[start], lastoffset));
-        }
+        _dbServer->appendPartialResyncData(con, off);
     }
 }
 
@@ -371,26 +367,17 @@ void DB::replconfCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     if (strcasecmp(cmdlist[1].c_str(), "port") == 0) {
-        auto it = _dbServer->slaveIds().find(con.conn()->id());
-        if (it == _dbServer->slaveIds().end()) {
+        auto it = _dbServer->slaves().find(con.conn()->id());
+        if (it == _dbServer->slaves().end()) {
             logInfo("found a new slave %s:%s", cmdlist[4].c_str(), cmdlist[2].c_str());
-            _dbServer->addSlaveId(con.conn()->id());
+            _dbServer->slaves().emplace(con.conn()->id(), _dbServer->masterOffset());
         }
         con.setSlaveAddr(
                 Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[4].c_str()));
     } else if (strcasecmp(cmdlist[1].c_str(), "ack") == 0) {
-        size_t offset = atoll(cmdlist[2].c_str());
-        ssize_t lastoffset = _dbServer->masterOffset() - offset;
-        if (lastoffset > 0) {
-            if (lastoffset > g_server_conf.repl_backlog_size) {
-                // TODO: 重新同步
-            } else {
-                // 重传丢失的命令
-                size_t start = g_server_conf.repl_backlog_size - lastoffset;
-                con.append(std::string(
-                            &_dbServer->copyBacklogBuffer()[start], lastoffset));
-            }
-        }
+        size_t slaveoff = atoll(cmdlist[2].c_str());
+        auto it = _dbServer->slaves().find(con.conn()->id());
+        it->second = slaveoff;
     }
 }
 
@@ -416,18 +403,18 @@ void DB::execCommand(Context& con)
     }
     if (multiIsWrite) {
         _dbServer->freeMemoryIfNeeded();
-        _dbServer->doWriteCommand(tlist);
+        _dbServer->doWriteCommand(tlist, nullptr, 0);
     }
     for (auto& cmdlist : con.transactionList()) {
         auto command = _commandMap.find(cmdlist[0]);
         con.commandList().swap(cmdlist);
         command->second._commandCb(con);
         if (multiIsWrite)
-            _dbServer->doWriteCommand(con.commandList());
+            _dbServer->doWriteCommand(con.commandList(), nullptr, 0);
     }
     if (multiIsWrite) {
         tlist = { "EXEC" };
-        _dbServer->doWriteCommand(tlist);
+        _dbServer->doWriteCommand(tlist, nullptr, 0);
         con.clearFlag(Context::EXEC_MULTI_WRITE);
     }
     unwatchKeys(con);
@@ -511,11 +498,11 @@ void DB::infoCommand(Context& con)
     if (_dbServer->flag() & DBServer::SLAVE) db_return(con, "slave\r\n");
     con.append("master\n");
     con.append("connected_slaves:");
-    con.append(convert(_dbServer->slaveIds().size()));
+    con.append(convert(_dbServer->slaves().size()));
     con.append("\n");
     auto& maps = g_server->server().connectionMaps();
-    for (auto& id : _dbServer->slaveIds()) {
-        auto conn = maps.find(id);
+    for (auto& it : _dbServer->slaves()) {
+        auto conn = maps.find(it.first);
         if (conn != maps.end()) {
             auto& context = std::any_cast<Context&>(conn->second->getContext());
             con.append("slave");
@@ -525,7 +512,7 @@ void DB::infoCommand(Context& con)
             con.append(",port=");
             con.append(convert(context.slaveAddr()->toIpPort()));
             con.append(",offset=");
-            con.append(convert(_dbServer->slaveOffset()));
+            con.append(convert(it.second));
             con.append("\n");
             i++;
         }
@@ -547,7 +534,7 @@ void DB::expireIfNeeded(const Key& key)
     if (it->second > now) return;
     delKeyWithExpire(key);
     Context::CommandList cmdlist = { "DEL", key };
-    _dbServer->appendWriteCommand(cmdlist);
+    _dbServer->appendWriteCommand(cmdlist, nullptr, 0);
 }
 
 void DB::watchKeyForClient(const Key& key, size_t id)

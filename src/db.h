@@ -2,6 +2,8 @@
 #define _ALICE_SRC_DB_H
 
 #include <Angel/TcpServer.h>
+#include <Angel/TimeStamp.h>
+
 #include <unordered_map>
 #include <string>
 #include <functional>
@@ -34,12 +36,6 @@ enum ReturnCode {
 // 一个Context表示一个客户端上下文
 class Context {
 public:
-    enum ParseState {
-        PARSING,        // 正在解析命令请求
-        PROTOCOLERR,    // 协议错误
-        SUCCEED,        // 解析完成
-        REPLY,          // 发送响应
-    };
     enum Flag{
         // 主服务器中设置该标志的连接表示与从服务器相连
         SLAVE = 0x001, // for master
@@ -53,7 +49,6 @@ public:
         SYNC_WAIT = 0x008, // for slave
         // 将要进行完全重同步
         SYNC_FULL = 0x010, // for slave
-        SYNC_OK = 0x020, // for slave
         // 客户端正在执行事务
         EXEC_MULTI = 0x040,
         // 事务的安全性被破坏
@@ -68,7 +63,6 @@ public:
     explicit Context(DBServer *db, Angel::TcpConnection *conn)
         : _db(db),
         _conn(conn),
-        _state(PARSING),
         _flag(0),
         _perm(IS_READ | IS_WRITE),
         _blockStartTime(-1),
@@ -89,11 +83,11 @@ public:
     WatchKeys& watchKeys() { return _watchKeys; }
     void append(const std::string& s)
     { _buffer.append(s); }
+    void append(const char *s, size_t len)
+    { _buffer.append(s, len); }
     void assign(const std::string& s)
     { _buffer.assign(s); }
     std::string& message() { return _buffer; }
-    int state() const { return _state; }
-    void setState(int state) { _state = state; }
     int flag() const { return _flag; }
     void setFlag(int flag) { _flag |= flag; }
     void clearFlag(int flag) { _flag &= ~flag; }
@@ -127,7 +121,6 @@ private:
     WatchKeys _watchKeys;
     // 发送缓冲区
     std::string _buffer;
-    int _state;
     int _flag;
     // 能执行的命令的权限
     int _perm;

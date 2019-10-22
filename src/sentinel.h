@@ -3,6 +3,7 @@
 
 #include <Angel/TcpClient.h>
 #include <Angel/EventLoop.h>
+#include <Angel/InetAddr.h>
 
 #include <unordered_map>
 

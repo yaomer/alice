@@ -139,7 +139,7 @@ void DBServer::evictKey(const std::string& key)
 {
     Context::CommandList clist = { "DEL", key };
     db()->delKeyWithExpire(key);
-    appendWriteCommand(clist);
+    appendWriteCommand(clist, nullptr, 0);
 }
 
 #if defined (__APPLE__)
