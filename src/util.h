@@ -8,6 +8,8 @@
 
 namespace Alice {
 
+#define RUNID_LEN 33
+
 void setSelfRunId(char *buf);
 
 extern thread_local char convert_buf[64];

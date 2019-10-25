@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
-#include <random>
 #include <vector>
 #include <string>
+
 #include "util.h"
 
 namespace Alice {

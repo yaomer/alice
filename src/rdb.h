@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <string>
+
 #include "db.h"
 
 namespace Alice {

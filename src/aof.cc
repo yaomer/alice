@@ -1,7 +1,9 @@
+#include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <string.h>
+
 #include "aof.h"
 #include "db.h"
 #include "server.h"
@@ -93,6 +95,10 @@ void Aof::load()
         if (n > 0) {
             auto& cmdlist = pseudoClient.commandList();
             auto it = _dbServer->db()->commandMap().find(cmdlist[0]);
+            if (it == _dbServer->db()->commandMap().end()) {
+                fprintf(stderr, "unknown command `%s`\n", cmdlist[0].c_str());
+                abort();
+            }
             if (cmdlist[0].compare("PEXPIRE") == 0) {
                 int64_t timeval = atoll(cmdlist[2].c_str()) - now;
                 cmdlist[2] = convert(timeval);

@@ -103,7 +103,7 @@ private:
     int _flag;
     std::string _master; // for sentinel or slave
     std::string _name;
-    char _runId[33];
+    char _runId[RUNID_LEN];
     uint64_t _configEpoch;
     std::unique_ptr<Angel::InetAddr> _inetAddr;
     int64_t _downAfterPeriod;

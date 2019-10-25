@@ -2,7 +2,9 @@
 #define _ALICE_SRC_AOF_H
 
 #include <Angel/TimeStamp.h>
+
 #include <string>
+
 #include "db.h"
 
 namespace Alice {

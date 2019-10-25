@@ -1,10 +1,10 @@
 #ifndef _ALICE_SRC_ALICE_H
 #define _ALICE_SRC_ALICE_H
 
+#include <Angel/Buffer.h>
+
 #include <string>
 #include <vector>
-
-#include <Angel/Buffer.h>
 
 namespace Alice {
 

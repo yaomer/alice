@@ -2,6 +2,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <unistd.h>
+
 #include "db.h"
 #include "server.h"
 #include "config.h"
@@ -314,6 +315,7 @@ void DB::slaveofCommand(Context& con)
     if (strcasecmp(cmdlist[1].c_str(), "no") == 0
             && strcasecmp(cmdlist[2].c_str(), "one") == 0) {
         _dbServer->disconnectMasterServer();
+        _dbServer->clearFlag(Context::SLAVE);
         db_return(con, db_return_ok);
     }
     int port = str2l(cmdlist[2].c_str());
@@ -595,7 +597,7 @@ void DB::renamenxCommand(Context& con)
 void DB::moveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    int dbnum = str2f(cmdlist[2].c_str());
+    int dbnum = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, db_return_integer_err);
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
         db_return(con, "-ERR DB index out of range\r\n");

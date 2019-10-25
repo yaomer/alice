@@ -6,11 +6,9 @@
 #include <sys/stat.h>
 #include <stdint.h>
 #include <arpa/inet.h>
-#include <string.h>
-#include <string>
 #include <tuple>
+
 #include "rdb.h"
-#include "db.h"
 #include "server.h"
 
 using namespace Alice;

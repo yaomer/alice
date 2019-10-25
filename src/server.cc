@@ -1,21 +1,13 @@
-#include <Angel/EventLoop.h>
-#include <Angel/TcpServer.h>
-#include <Angel/TcpClient.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <getopt.h>
 #include <algorithm>
 #include <vector>
-#include <string>
 #include <tuple>
 
 #include "server.h"
 #include "sentinel.h"
-#include "db.h"
-#include "util.h"
-#include "config.h"
 
 using namespace Alice;
 
@@ -308,10 +300,6 @@ void DBServer::connectMasterServer()
     _client->notExitLoop();
     _client->setConnectionCb(
             std::bind(&DBServer::sendPingToMaster, this, _1));
-    _client->setConnectTimeoutCb([this]{
-            if (!this->_client->isConnected())
-                this->connectMasterServer();
-            });
     _client->setMessageCb(
             std::bind(&DBServer::recvSyncFromMaster, this, _1, _2));
     _client->setCloseCb(
@@ -328,7 +316,6 @@ void DBServer::disconnectMasterServer()
             g_server->loop()->cancelTimer(_replTimeoutTimerId);
         _client.reset();
     }
-    clearFlag(SLAVE);
 }
 
 void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
@@ -488,8 +475,7 @@ void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel:
     close(_syncFd);
     _syncFd = -1;
     rename(_tmpfile, g_server_conf.rdb_file.c_str());
-    for (auto& db : dbs())
-        db->hashMap().clear();
+    clear();
     rdb()->load();
     context.clearFlag(Context::SYNC_FULL);
     context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
@@ -718,11 +704,19 @@ void DBServer::addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, 
     slowlogQueue().emplace_back(std::move(slowlog));
 }
 
+void DBServer::clear()
+{
+    for (auto& db : dbs()) {
+        db->hashMap().clear();
+        db->expireMap().clear();
+    }
+}
+
 void Server::start()
 {
     _loop->runEvery(100, []{ g_server->serverCron(); });
     Angel::addSignal(SIGINT, []{
-            g_server->dbServer().rdb()->save();
+            g_server->dbServer().rdb()->saveBackground();
             g_server->dbServer().aof()->rewriteBackground();
             g_server->loop()->quit();
             });

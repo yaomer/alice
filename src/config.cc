@@ -1,6 +1,5 @@
 #include <stdio.h>
-#include <vector>
-#include <string>
+
 #include "db.h"
 #include "config.h"
 

@@ -3,6 +3,7 @@
 
 #include <Angel/TcpServer.h>
 #include <Angel/TcpClient.h>
+#include <Angel/LogStream.h>
 
 #include <vector>
 #include <queue>
@@ -95,7 +96,7 @@ public:
             }
             Node *node = findNode(cmdlist[1]);
             if (node) {
-                std::cout << cmdlist[1] << "\t->\t" << node->name() << "\n";
+                logDebug("%s -> %s", cmdlist[1].c_str(), node->name().c_str());
                 node->forwardRequestToServer(conn->id(), buf, n);
             }
             buf.retrieve(n);

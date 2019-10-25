@@ -142,6 +142,7 @@ public:
     void freeMemoryIfNeeded();
     SlowlogQueue& slowlogQueue() { return _slowlogQueue; }
     void addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end);
+    void clear();
     static ssize_t getProcMemory();
 private:
     void evictAllkeysWithLru();
@@ -184,9 +185,9 @@ private:
     // 服务器作为从服务器运行时的复制偏移量
     size_t _slaveOffset;
     // 服务器自身的运行ID
-    char _selfRunId[33];
+    char _selfRunId[RUNID_LEN];
     // 服务器作为从服务器去复制主服务器时的主服务器运行ID
-    char _masterRunId[33];
+    char _masterRunId[RUNID_LEN];
     // 要发送给从服务器的rdb文件大小
     size_t _syncRdbFilesize;
     char _tmpfile[16];
