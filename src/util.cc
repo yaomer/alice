@@ -121,10 +121,10 @@ err:
 
 // if c == ','
 // for [a,b,c,d] return [a][b][c][d]
-void parseLineWithSeparator(std::vector<std::string>& argv,
-                            const char *s,
-                            const char *es,
-                            char c)
+void splitLine(std::vector<std::string>& argv,
+               const char *s,
+               const char *es,
+               char c)
 {
     const char *p;
     while (true) {

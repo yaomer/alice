@@ -420,7 +420,7 @@ void SentinelInstance::parseReplyFromSentinel(const char *s, const char *es)
     auto half = (master->second->sentinels().size() + 1) / 2 + 1;
 
     std::vector<std::string> argv;
-    parseLineWithSeparator(argv, s + 1, es, ',');
+    splitLine(argv, s + 1, es, ',');
     auto& down_state = argv[0], &leader_runid = argv[1];
     uint64_t leader_epoch = atoll(argv[2].c_str());
 
@@ -526,7 +526,7 @@ void Sentinel::recvPubMessageFromServer(const Angel::TcpConnectionPtr& conn,
 void Sentinel::updateSentinels(const char *s, const char *es)
 {
     std::vector<std::string> argv;
-    parseLineWithSeparator(argv, s, es, ',');
+    splitLine(argv, s, es, ',');
     auto& s_ip = argv[0], &s_port = argv[1], &s_runid = argv[2], &s_epoch = argv[3];
     auto& m_name = argv[4], &m_ip = argv[5], &m_port = argv[6], &m_epoch = argv[7];
     UNUSED(m_ip);
