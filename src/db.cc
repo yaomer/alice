@@ -502,22 +502,20 @@ void DB::infoCommand(Context& con)
     con.append("connected_slaves:");
     con.append(convert(_dbServer->slaves().size()));
     con.append("\n");
-    auto& maps = g_server->server().connectionMaps();
     for (auto& it : _dbServer->slaves()) {
-        auto conn = maps.find(it.first);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            con.append("slave");
-            con.append(convert(i));
-            con.append(":ip=");
-            con.append(context.slaveAddr()->toIpAddr());
-            con.append(",port=");
-            con.append(convert(context.slaveAddr()->toIpPort()));
-            con.append(",offset=");
-            con.append(convert(it.second));
-            con.append("\n");
-            i++;
-        }
+        auto conn = g_server->server().getConnection(it.first);
+        if (!conn) continue;
+        auto& context = std::any_cast<Context&>(conn->getContext());
+        con.append("slave");
+        con.append(convert(i));
+        con.append(":ip=");
+        con.append(context.slaveAddr()->toIpAddr());
+        con.append(",port=");
+        con.append(convert(context.slaveAddr()->toIpPort()));
+        con.append(",offset=");
+        con.append(convert(it.second));
+        con.append("\n");
+        i++;
     }
     // 一个无意义的填充字段，方便以\r\n结尾
     con.append("xxx:yyy\r\n");
@@ -554,13 +552,11 @@ void DB::touchWatchKey(const Key& key)
 {
     auto clist = _watchMap.find(key);
     if (clist == _watchMap.end()) return;
-    auto& maps = g_server->server().connectionMaps();
     for (auto& id : clist->second) {
-        auto conn = maps.find(id);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            context.setFlag(Context::EXEC_MULTI_ERR);
-        }
+        auto conn = g_server->server().getConnection(id);
+        if (!conn) continue;
+        auto& context = std::any_cast<Context&>(conn->getContext());
+        context.setFlag(Context::EXEC_MULTI_ERR);
     }
 }
 

@@ -452,12 +452,11 @@ void DB::blockingPop(const std::string& key)
     unsigned bops = 0;
     Context other(_dbServer, nullptr);
     int64_t now = Angel::TimeStamp::now();
-    auto& maps = g_server->server().connectionMaps();
     auto& value = getListValue(find(key));
 
-    auto conn = maps.find(*cl->second.begin());
-    if (conn == maps.end()) return;
-    auto& context = std::any_cast<Context&>(conn->second->getContext());
+    auto conn = g_server->server().getConnection(*cl->second.begin());
+    if (!conn) return;
+    auto& context = std::any_cast<Context&>(conn->getContext());
     bops = getLastcmd(context.lastcmd());
     DB::appendReplyMulti(other, 2);
     DB::appendReplyString(other, key);
@@ -466,11 +465,11 @@ void DB::blockingPop(const std::string& key)
     other.append("+(");
     other.append(convert2f(seconds));
     other.append("s)\r\n");
-    conn->second->send(other.message());
+    conn->send(other.message());
     other.message().clear();
 
     clearBlockingKeysForContext(context);
-    _dbServer->removeBlockedClient(conn->second->id());
+    _dbServer->removeBlockedClient(conn->id());
     if (bops == BLOCK_RPOPLPUSH) {
         blockMoveSrcToDes(value.back(), context.des());
     }

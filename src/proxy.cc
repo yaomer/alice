@@ -132,10 +132,9 @@ void Node::forwardResponseToClient(const Angel::TcpConnectionPtr& conn,
     if (n == 0) return;
     size_t id = _idQueue.front();
     _idQueue.pop();
-    auto& maps = g_proxy->server().connectionMaps();
-    auto it = maps.find(id);
-    if (it == maps.end()) return;
-    it->second->send(buf.peek(), n);
+    auto node = g_proxy->server().getConnection(id);
+    if (!node) return;
+    node->send(buf.peek(), n);
     buf.retrieve(n);
 }
 

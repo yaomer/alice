@@ -252,19 +252,18 @@ void DBServer::checkExpireCycle(int64_t now)
 void DBServer::checkBlockedClients(int64_t now)
 {
     std::string message;
-    auto& maps = g_server->server().connectionMaps();
     for (auto it = _blockedClients.begin(); it != _blockedClients.end(); ) {
         auto e = it++;
-        auto conn = maps.find(*e);
-        if (conn == maps.end()) continue;
-        auto& context = std::any_cast<Context&>(conn->second->getContext());
+        auto conn = g_server->server().getConnection(*e);
+        if (!conn) continue;
+        auto& context = std::any_cast<Context&>(conn->getContext());
         DB *db = selectDb(context.blockDbnum());
         if (context.blockTimeout() != 0 && context.blockStartTime() + context.blockTimeout() <= now) {
             message.append("*-1\r\n+(");
             double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
             message.append(convert2f(seconds));
             message.append("s)\r\n");
-            conn->second->send(message);
+            conn->send(message);
             message.clear();
             _blockedClients.erase(e);
             db->clearBlockingKeysForContext(context);
@@ -495,20 +494,18 @@ void DBServer::sendRdbfileToSlave()
     Angel::Buffer buf;
     while (buf.readFd(fd) > 0) {
     }
-    auto& maps = g_server->server().connectionMaps();
     for (auto& it : slaves()) {
-        auto conn = maps.find(it.first);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            if (context.flag() & Context::SYNC_RDB_FILE) {
-                conn->second->send(convert(buf.readable()));
-                conn->second->send("\r\n\r\n");
-                conn->second->send(buf.peek(), buf.readable());
-                if (rdb()->syncBuffer().size() > 0)
-                    conn->second->send(rdb()->syncBuffer());
-                context.clearFlag(Context::SYNC_RDB_FILE);
-                context.setFlag(Context::SYNC_COMMAND);
-            }
+        auto conn = g_server->server().getConnection(it.first);
+        if (!conn) continue;
+        auto& context = std::any_cast<Context&>(conn->getContext());
+        if (context.flag() & Context::SYNC_RDB_FILE) {
+            conn->send(convert(buf.readable()));
+            conn->send("\r\n\r\n");
+            conn->send(buf.peek(), buf.readable());
+            if (rdb()->syncBuffer().size() > 0)
+                conn->send(rdb()->syncBuffer());
+            context.clearFlag(Context::SYNC_RDB_FILE);
+            context.setFlag(Context::SYNC_COMMAND);
         }
     }
     rdb()->syncBuffer().clear();
@@ -518,14 +515,12 @@ void DBServer::sendRdbfileToSlave()
 // 主服务器将写命令传播给所有从服务器
 void DBServer::sendSyncCommandToSlave(const char *query, size_t len)
 {
-    auto& maps = g_server->server().connectionMaps();
     for (auto& it : _slaves) {
-        auto conn = maps.find(it.first);
-        if (conn != maps.end()) {
-            auto& context = std::any_cast<Context&>(conn->second->getContext());
-            if (context.flag() & Context::SYNC_COMMAND)
-                conn->second->send(query, len);
-        }
+        auto conn = g_server->server().getConnection(it.first);
+        if (!conn) continue;
+        auto& context = std::any_cast<Context&>(conn->getContext());
+        if (context.flag() & Context::SYNC_COMMAND)
+            conn->send(query, len);
     }
 }
 
@@ -669,21 +664,19 @@ size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, 
     if (idlist == _pubsubChannels.end()) return 0;
     std::string buffer;
     size_t pubClients = 0;
-    auto& maps = g_server->server().connectionMaps();
     for (auto& id : idlist->second) {
-        auto conn = maps.find(id);
-        if (conn != maps.end()) {
-            buffer.append("*3\r\n$7\r\nmessage\r\n$");
-            buffer.append(convert(channel.size()));
-            buffer.append("\r\n" + channel + "\r\n$");
-            buffer.append(convert(msg.size()));
-            buffer.append("\r\n");
-            conn->second->send(buffer);
-            conn->second->send(msg);
-            conn->second->send("\r\n");
-            buffer.clear();
-            pubClients++;
-        }
+        auto conn = g_server->server().getConnection(id);
+        if (!conn) continue;
+        buffer.append("*3\r\n$7\r\nmessage\r\n$");
+        buffer.append(convert(channel.size()));
+        buffer.append("\r\n" + channel + "\r\n$");
+        buffer.append(convert(msg.size()));
+        buffer.append("\r\n");
+        conn->send(buffer);
+        conn->send(msg);
+        conn->send("\r\n");
+        buffer.clear();
+        pubClients++;
     }
     return pubClients;
 }
