@@ -29,7 +29,7 @@ class Node {
 public:
     using IdQueue = std::queue<size_t>;
 
-    Node(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
+    Node(Angel::EventLoop *loop, Angel::InetAddr inetAddr)
         : _isVNode(false),
         _rnode(nullptr)
     {

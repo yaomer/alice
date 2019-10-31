@@ -211,7 +211,7 @@ private:
 
 class Server {
 public:
-    Server(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
+    Server(Angel::EventLoop *loop, Angel::InetAddr inetAddr)
         : _loop(loop),
         _server(loop, inetAddr)
     {
