@@ -189,7 +189,7 @@ void DB::ttl(Context& con, int option)
     if (!isFound(find(cmdlist[1]))) db_return(con, ":-2\r\n");
     auto expire = expireMap().find(cmdlist[1]);
     if (expire == expireMap().end()) db_return(con, ":-1\r\n");
-    int64_t milliseconds = expire->second - Angel::TimeStamp::now();
+    int64_t milliseconds = expire->second - Angel::nowMs();
     if (option == TTL) milliseconds /= 1000;
     appendReplyNumber(con, milliseconds);
 }
@@ -257,7 +257,7 @@ void DB::saveCommand(Context& con)
     if (_dbServer->rdb()->childPid() != -1) return;
     _dbServer->rdb()->save();
     con.append(db_return_ok);
-    _dbServer->setLastSaveTime(Angel::TimeStamp::now());
+    _dbServer->setLastSaveTime(Angel::nowMs());
     _dbServer->dirtyReset();
 }
 
@@ -270,7 +270,7 @@ void DB::bgSaveCommand(Context& con)
     if (_dbServer->rdb()->childPid() != -1) return;
     _dbServer->rdb()->saveBackground();
     con.append("+Background saving started\r\n");
-    _dbServer->setLastSaveTime(Angel::TimeStamp::now());
+    _dbServer->setLastSaveTime(Angel::nowMs());
     _dbServer->dirtyReset();
 }
 
@@ -286,7 +286,7 @@ void DB::bgRewriteAofCommand(Context& con)
     if (_dbServer->aof()->childPid() != -1) return;
     _dbServer->aof()->rewriteBackground();
     con.append("+Background append only file rewriting started\r\n");
-    _dbServer->setLastSaveTime(Angel::TimeStamp::now());
+    _dbServer->setLastSaveTime(Angel::nowMs());
 }
 
 void DB::lastSaveCommand(Context& con)

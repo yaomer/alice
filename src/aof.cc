@@ -81,7 +81,7 @@ void Aof::load()
         if (fp) fclose(fp);
         return;
     }
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     char *line = nullptr;
     size_t len = 0;
     ssize_t n;
@@ -133,7 +133,7 @@ void Aof::rewrite()
     _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
     _lastRewriteFilesize = getFilesize(_fd);
     _buffer.clear();
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     int index = 0;
     for (auto& db : _dbServer->dbs()) {
         if (db->hashMap().empty()) {

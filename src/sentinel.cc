@@ -296,11 +296,11 @@ void SentinelInstance::recvReplyFromServer(const Angel::TcpConnectionPtr& conn,
         int crlf = buf.findCrlf();
         if (crlf >= 0) {
             if (buf.strcasecmp("+PONG\r\n")) {
-                setLastHeartBeatTime(Angel::TimeStamp::now());
+                setLastHeartBeatTime(Angel::nowMs());
             } else if (buf.strcasecmp("+LOADING\r\n")) {
-                setLastHeartBeatTime(Angel::TimeStamp::now());
+                setLastHeartBeatTime(Angel::nowMs());
             } else if (buf.strcasecmp("+MASTERDOWN\r\n")) {
-                setLastHeartBeatTime(Angel::TimeStamp::now());
+                setLastHeartBeatTime(Angel::nowMs());
             } else {
                 const char *s = buf.peek();
                 const char *es = s + crlf + 2;
@@ -569,7 +569,7 @@ static void checkSubjectiveDown(const std::unique_ptr<SentinelInstance>& si, int
 
 void Sentinel::sentinelCron()
 {
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     for (auto& master : masters()) {
         checkSubjectiveDown(master.second, now);
         for (auto& slave : master.second->slaves()) {

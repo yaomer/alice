@@ -32,7 +32,7 @@ public:
         _downAfterPeriod(0),
         _quorum(0),
         _offset(0),
-        _lastHeartBeatTime(Angel::TimeStamp::now()),
+        _lastHeartBeatTime(Angel::nowMs()),
         _votes(0),
         _leaderEpoch(0),
         _failoverEpoch(0),

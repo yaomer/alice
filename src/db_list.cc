@@ -451,7 +451,7 @@ void DB::blockingPop(const std::string& key)
     if (cl == _blockingKeys.end()) return;
     unsigned bops = 0;
     Context other(_dbServer, nullptr);
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     auto& value = getListValue(find(key));
 
     auto conn = g_server->server().getConnection(*cl->second.begin());

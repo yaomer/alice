@@ -2,7 +2,7 @@
 #define _ALICE_SRC_DB_H
 
 #include <Angel/TcpServer.h>
-#include <Angel/TimeStamp.h>
+#include <Angel/util.h>
 
 #include <unordered_map>
 #include <string>
@@ -104,7 +104,7 @@ public:
     std::string& des() { return _des; }
     void setBlockTimeout(int timeout)
     {
-        _blockStartTime = Angel::TimeStamp::now();
+        _blockStartTime = Angel::nowMs();
         _blockTimeout = timeout * 1000;
     }
     void setSlaveAddr(Angel::InetAddr slaveAddr)
@@ -254,7 +254,7 @@ public:
 
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
-    { _expireMap[key] = expire + Angel::TimeStamp::now(); }
+    { _expireMap[key] = expire + Angel::nowMs(); }
     void delExpireKey(const Key& key) { _expireMap.erase(key); }
     void expireIfNeeded(const Key& key);
 

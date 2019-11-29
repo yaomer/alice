@@ -37,7 +37,7 @@ void Rdb::save()
     mktemp(tmpfile);
     _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
     append(magic, 5);
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     int index = 0;
     for (auto& db : _dbServer->dbs()) {
         if (db->hashMap().empty()) {

@@ -59,7 +59,7 @@ public:
         _rdb(new Rdb(this)),
         _aof(new Aof(this)),
         _flag(0),
-        _lastSaveTime(Angel::TimeStamp::now()),
+        _lastSaveTime(Angel::nowMs()),
         _dirty(0),
         _copyBacklogBuffer(g_server_conf.repl_backlog_size),
         _masterOffset(0),

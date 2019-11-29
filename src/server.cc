@@ -87,9 +87,9 @@ void Server::executeCommand(Context& con, const char *query, size_t len)
         }
     }
     if (it->second.perm() & IS_WRITE) _dbServer.freeMemoryIfNeeded();
-    start = Angel::TimeStamp::nowUs();
+    start = Angel::nowUs();
     it->second._commandCb(con);
-    end = Angel::TimeStamp::nowUs();
+    end = Angel::nowUs();
     _dbServer.addSlowlogIfNeeded(cmdlist, start, end);
     // 命令执行未出错
     if ((it->second.perm() & IS_WRITE) && (con.message()[0] != '-')) {
@@ -137,14 +137,14 @@ void DBServer::doWriteCommand(const Context::CommandList& cmdlist,
 namespace Alice {
 
     // 键的空转时间不需要十分精确
-    thread_local int64_t _lru_cache = Angel::TimeStamp::now();
+    thread_local int64_t _lru_cache = Angel::nowMs();
     Alice::Server *g_server;
     Alice::Sentinel *g_sentinel;
 }
 
 void Server::serverCron()
 {
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     _lru_cache = now;
 
     // 服务器后台正在进行rdb持久化
@@ -435,7 +435,7 @@ void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Bu
 
 void DBServer::recvPingFromMaster()
 {
-    int64_t now = Angel::TimeStamp::now();
+    int64_t now = Angel::nowMs();
     if (lastRecvHeartBeatTime() == 0) {
         setLastRecvHeartBeatTime(now);
         return;
@@ -592,7 +592,7 @@ static void appendCommandArg(std::string& buffer, const std::string& s1,
 static void appendTimeStamp(std::string& buffer, int64_t timeval, bool is_seconds)
 {
     if (is_seconds) timeval *= 1000;
-    int64_t milliseconds = timeval + Angel::TimeStamp::now();
+    int64_t milliseconds = timeval + Angel::nowMs();
     appendCommandArg(buffer, convert(strlen(convert(milliseconds))), convert(milliseconds));
 }
 
