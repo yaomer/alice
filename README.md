@@ -29,6 +29,9 @@
 + 多线程
 ![](https://github.com/yaomer/pictures/blob/master/alice_bench1.png?raw=true)
 
+### 和Alice一起玩
+![](https://github.com/yaomer/pictures/blob/master/alice_play.png?raw=true)
+
 ### 用户API
 我提供了一个简单的同步API，使用方法如下：
 ```cpp
