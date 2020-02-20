@@ -29,6 +29,10 @@
 + 多线程
 ![](https://github.com/yaomer/pictures/blob/master/alice_bench1.png?raw=true)
 
++ 功能性测试
+![](https://github.com/yaomer/pictures/blob/master/redis-bench-all.png?raw=true)
+![](https://github.com/yaomer/pictures/blob/master/alice-bench-all.png?raw=true)
+
 ### 和Alice一起玩
 ![](https://github.com/yaomer/pictures/blob/master/alice_play.png?raw=true)
 
