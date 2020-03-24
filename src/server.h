@@ -251,11 +251,11 @@ public:
                 conn->close();
                 return;
             }
-            if (n == 0) return;
+            if (n == 0) break;
             executeCommand(context, buf.peek(), n);
             buf.retrieve(n);
-            replyResponse(conn);
         }
+        replyResponse(conn);
     }
     void slaveOnMessage(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
     {

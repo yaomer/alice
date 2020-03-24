@@ -266,9 +266,9 @@ void SentinelInstance::pubMessage(const Angel::TcpConnectionPtr& conn)
     std::string buffer, message;
     Server& server = g_sentinel->server();
     conn->send("*3\r\n$7\r\nPUBLISH\r\n$18\r\n__sentinel__:hello\r\n$");
-    buffer += server.server().inetAddr()->toIpAddr();
+    buffer += server.server().listenAddr()->toIpAddr();
     buffer += ",";
-    buffer += convert(server.server().inetAddr()->toIpPort());
+    buffer += convert(server.server().listenAddr()->toIpPort());
     buffer += ",";
     buffer += server.dbServer().selfRunId();
     buffer += ",";

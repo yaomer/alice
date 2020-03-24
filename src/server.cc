@@ -343,7 +343,7 @@ void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
 void DBServer::sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn)
 {
     std::string buffer;
-    Angel::InetAddr *inetAddr = g_server->server().inetAddr();
+    Angel::InetAddr *inetAddr = g_server->server().listenAddr();
     buffer += "*5\r\n$8\r\nreplconf\r\n$4\r\nport\r\n$";
     buffer += convert(strlen(convert(inetAddr->toIpPort())));
     buffer += "\r\n";
