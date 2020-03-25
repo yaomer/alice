@@ -32,11 +32,11 @@ public:
 private:
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);
-    void saveString(Iterator it);
-    void saveList(Iterator it);
-    void saveSet(Iterator it);
-    void saveHash(Iterator it);
-    void saveZset(Iterator it);
+    void saveString(const Iterator& it);
+    void saveList(const Iterator& it);
+    void saveSet(const Iterator& it);
+    void saveHash(const Iterator& it);
+    void saveZset(const Iterator& it);
     char *loadString(char *ptr, int64_t *tvptr);
     char *loadList(char *ptr, int64_t *tvptr);
     char *loadSet(char *ptr, int64_t *tvptr);

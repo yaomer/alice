@@ -145,7 +145,7 @@ int Rdb::loadLen(char *ptr, uint64_t *lenptr)
     return readBytes;
 }
 
-void Rdb::saveString(Iterator it)
+void Rdb::saveString(const Iterator& it)
 {
     saveLen(string_type);
     saveLen(it->first.size());
@@ -155,7 +155,7 @@ void Rdb::saveString(Iterator it)
     append(string);
 }
 
-void Rdb::saveList(Iterator it)
+void Rdb::saveList(const Iterator& it)
 {
     saveLen(list_type);
     saveLen(it->first.size());
@@ -168,7 +168,7 @@ void Rdb::saveList(Iterator it)
     }
 }
 
-void Rdb::saveSet(Iterator it)
+void Rdb::saveSet(const Iterator& it)
 {
     saveLen(set_type);
     saveLen(it->first.size());
@@ -181,7 +181,7 @@ void Rdb::saveSet(Iterator it)
     }
 }
 
-void Rdb::saveHash(Iterator it)
+void Rdb::saveHash(const Iterator& it)
 {
     saveLen(hash_type);
     saveLen(it->first.size());
@@ -196,7 +196,7 @@ void Rdb::saveHash(Iterator it)
     }
 }
 
-void Rdb::saveZset(Iterator it)
+void Rdb::saveZset(const Iterator& it)
 {
     saveLen(zset_type);
     saveLen(it->first.size());
@@ -254,21 +254,21 @@ void Rdb::load()
     close(fd);
 }
 
+// loadXXX()不能使用stack-array，不然如果key/value太长的话
+// 会导致stack-overflow
+
 char *Rdb::loadString(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
-    char key[keylen];
-    memcpy(key, ptr, keylen);
+    std::string key(ptr, keylen);
     ptr += keylen;
     ptr += loadLen(ptr, &vallen);
-    char val[vallen];
-    memcpy(val, ptr, vallen);
+    char *vptr = ptr;
     ptr += vallen;
-    std::string strKey(key, keylen);
-    _curDb->hashMap().emplace(strKey, std::string(val, vallen));
+    _curDb->hashMap().emplace(key, std::string(vptr, vallen));
     if (*tvptr > 0) {
-        _curDb->expireMap()[strKey] = *tvptr;
+        _curDb->expireMap()[key] = *tvptr;
         *tvptr = 0;
     }
     return ptr;
@@ -278,23 +278,19 @@ char *Rdb::loadList(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
-    char key[keylen];
-    memcpy(key, ptr, keylen);
+    std::string key(ptr, keylen);
     ptr += keylen;
     uint64_t listlen;
     ptr += loadLen(ptr, &listlen);
     DB::List list;
     while (listlen-- > 0) {
         ptr += loadLen(ptr, &vallen);
-        char val[vallen];
-        memcpy(val, ptr, vallen);
+        list.emplace_back(std::string(ptr, vallen));
         ptr += vallen;
-        list.emplace_back(std::string(val, vallen));
     }
-    std::string listKey(key, keylen);
-    _curDb->hashMap().emplace(listKey, std::move(list));
+    _curDb->hashMap().emplace(key, std::move(list));
     if (*tvptr > 0) {
-        _curDb->expireMap()[listKey] = *tvptr;
+        _curDb->expireMap()[key] = *tvptr;
         *tvptr = 0;
     }
     return ptr;
@@ -304,23 +300,19 @@ char *Rdb::loadSet(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
-    char key[keylen];
-    memcpy(key, ptr, keylen);
+    std::string key(ptr, keylen);
     ptr += keylen;
     uint64_t setlen;
     ptr += loadLen(ptr, &setlen);
     DB::Set set;
     while (setlen-- > 0) {
         ptr += loadLen(ptr, &vallen);
-        char val[vallen];
-        memcpy(val, ptr, vallen);
+        set.emplace(std::string(ptr, vallen));
         ptr += vallen;
-        set.emplace(std::string(val, vallen));
     }
-    std::string setKey(key, keylen);
-    _curDb->hashMap().emplace(setKey, std::move(set));
+    _curDb->hashMap().emplace(key, std::move(set));
     if (*tvptr > 0) {
-        _curDb->expireMap()[setKey] = *tvptr;
+        _curDb->expireMap()[key] = *tvptr;
         *tvptr = 0;
     }
     return ptr;
@@ -330,8 +322,7 @@ char *Rdb::loadHash(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
-    char key[keylen];
-    memcpy(key, ptr, keylen);
+    std::string key(ptr, keylen);
     ptr += keylen;
     uint64_t hashlen;
     ptr += loadLen(ptr, &hashlen);
@@ -339,19 +330,15 @@ char *Rdb::loadHash(char *ptr, int64_t *tvptr)
     uint64_t fieldlen;
     while (hashlen-- > 0) {
         ptr += loadLen(ptr, &fieldlen);
-        char field[fieldlen];
-        memcpy(field, ptr, fieldlen);
+        char *fieldptr = ptr;
         ptr += fieldlen;
         ptr += loadLen(ptr, &vallen);
-        char val[vallen];
-        memcpy(val, ptr, vallen);
+        hash.emplace(std::string(fieldptr, fieldlen), std::string(ptr, vallen));
         ptr += vallen;
-        hash.emplace(std::string(field, fieldlen), std::string(val, vallen));
     }
-    std::string hashKey(key, keylen);
-    _curDb->hashMap().emplace(hashKey, std::move(hash));
+    _curDb->hashMap().emplace(key, std::move(hash));
     if (*tvptr > 0) {
-        _curDb->expireMap()[hashKey] = *tvptr;
+        _curDb->expireMap()[key] = *tvptr;
         *tvptr = 0;
     }
     return ptr;
@@ -361,8 +348,7 @@ char *Rdb::loadZset(char *ptr, int64_t *tvptr)
 {
     uint64_t keylen, vallen;
     ptr += loadLen(ptr, &keylen);
-    char key[keylen];
-    memcpy(key, ptr, keylen);
+    std::string key(ptr, keylen);
     ptr += keylen;
     uint64_t zsetlen;
     ptr += loadLen(ptr, &zsetlen);
@@ -371,22 +357,18 @@ char *Rdb::loadZset(char *ptr, int64_t *tvptr)
     uint64_t slen;
     while (zsetlen-- > 0) {
         ptr += loadLen(ptr, &slen);
-        char score[slen];
-        memcpy(score, ptr, slen);
+        std::string scorestr(ptr, slen);
+        double score = atof(scorestr.c_str());
         ptr += slen;
         ptr += loadLen(ptr, &vallen);
-        char val[vallen];
-        memcpy(val, ptr, vallen);
+        std::string value(ptr, vallen);
+        zmap.emplace(value, score);
+        zset.emplace(score, std::move(value));
         ptr += vallen;
-        std::string scorestr(score, slen);
-        std::string valstr(val, vallen);
-        zset.emplace(atof(scorestr.c_str()), valstr);
-        zmap.emplace(valstr, atof(scorestr.c_str()));
     }
-    std::string zsetKey(key, keylen);
-    _curDb->hashMap().emplace(zsetKey, std::make_tuple(zset, zmap));
+    _curDb->hashMap().emplace(key, std::make_tuple(zset, zmap));
     if (*tvptr > 0) {
-        _curDb->expireMap()[zsetKey] = *tvptr;
+        _curDb->expireMap()[key] = *tvptr;
         *tvptr = 0;
     }
     return ptr;
