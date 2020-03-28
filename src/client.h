@@ -27,7 +27,7 @@ public:
     {
         _fd = Angel::SockOps::socket();
         int ret = Angel::SockOps::connect(
-                _fd, &Angel::InetAddr(port, ip).inetAddr());
+                _fd, Angel::InetAddr(port, ip));
         if (ret < 0) {
             perror("connect:");
             abort();

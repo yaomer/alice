@@ -45,15 +45,14 @@ void Aof::appendAof(int64_t now)
     writeToFile(fd, _buffer.data(), _buffer.size());
     _buffer.clear();
     if (g_server_conf.aof_mode == AOF_ALWAYS) {
-        fsync(fd);
+        g_server->fsyncBackground(fd);
     } else if (g_server_conf.aof_mode == AOF_EVERYSEC) {
         if (syncInterval >= 1000) {
-            fsync(fd);
+            g_server->fsyncBackground(fd);
             _lastSyncTime = now;
         }
     }
     _currentFilesize = getFilesize(fd);
-    close(fd);
 }
 
 static void aofSetCommand(Context::CommandList& cmdlist, int64_t now)
@@ -165,8 +164,7 @@ void Aof::rewrite()
         }
     }
     if (_buffer.size() > 0) flush();
-    fsync(_fd);
-    close(_fd);
+    g_server->fsyncBackground(_fd);
     rename(tmpfile, g_server_conf.appendonly_file.c_str());
 }
 
@@ -177,8 +175,7 @@ void Aof::appendRewriteBufferToAof()
     int fd = open(g_server_conf.appendonly_file.c_str(), O_RDWR | O_APPEND | O_CREAT, 0660);
     writeToFile(fd, _rewriteBuffer.data(), _rewriteBuffer.size());
     _rewriteBuffer.clear();
-    fsync(fd);
-    close(fd);
+    g_server->fsyncBackground(fd);
 }
 
 void Aof::rewriteSelectDb(int dbnum)

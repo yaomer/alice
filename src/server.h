@@ -221,6 +221,8 @@ public:
                 std::bind(&Server::onMessage, this, _1, _2));
         _server.setCloseCb(
                 std::bind(&Server::onClose, this, _1));
+        // 用于后台执行fsync()
+        _server.setTaskThreadNums(1);
     }
     void onClose(const Angel::TcpConnectionPtr& conn)
     {
@@ -282,7 +284,7 @@ public:
     static ssize_t parseRequest(Context& con, Angel::Buffer& buf);
     void executeCommand(Context& con, const char *query, size_t n);
     void replyResponse(const Angel::TcpConnectionPtr& conn);
-    void execError(const Angel::TcpConnectionPtr& conn);
+    void fsyncBackground(int fd);
     void start();
     DBServer& dbServer() { return _dbServer; }
     Angel::TcpServer& server() { return _server; }

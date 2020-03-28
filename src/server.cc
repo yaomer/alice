@@ -470,9 +470,7 @@ void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel:
     ssize_t n = write(_syncFd, buf.peek(), writeBytes);
     if (n > 0) buf.retrieve(n);
     if (_syncRdbFilesize > 0) return;
-    fsync(_syncFd);
-    close(_syncFd);
-    _syncFd = -1;
+    g_server->fsyncBackground(_syncFd);
     rename(_tmpfile, g_server_conf.rdb_file.c_str());
     clear();
     rdb()->load();
@@ -703,6 +701,11 @@ void DBServer::clear()
         db->hashMap().clear();
         db->expireMap().clear();
     }
+}
+
+void Server::fsyncBackground(int fd)
+{
+    _server.executor([fd]{ ::fsync(fd); ::close(fd); });
 }
 
 void Server::start()

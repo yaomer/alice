@@ -74,8 +74,7 @@ void Rdb::save()
     }
     saveLen(eof);
     if (_buffer.size() > 0) flush();
-    fsync(_fd);
-    close(_fd);
+    g_server->fsyncBackground(_fd);
     rename(tmpfile, g_server_conf.rdb_file.c_str());
 }
 

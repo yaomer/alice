@@ -157,7 +157,7 @@ void AliceContext::connect(const char *ip, int port)
 {
     _fd = Angel::SockOps::socket();
     int ret = Angel::SockOps::connect(
-            _fd, &Angel::InetAddr(port, ip).inetAddr());
+            _fd, Angel::InetAddr(port, ip));
     if (ret < 0) {
         _err = CONNECT_ERR;
         _errStr.assign(Angel::strerrno());
