@@ -538,20 +538,15 @@ void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
 void DBServer::appendCopyBacklogBuffer(const char *query, size_t len)
 {
     masterOffsetIncr(len);
-    _copyBacklogBuffer.push(query, len);
+    _copyBacklogBuffer.put(query, len);
 }
 
 void DBServer::appendPartialResyncData(Context& con, size_t off)
 {
-    unsigned size = _copyBacklogBuffer.size();
-    unsigned index = _copyBacklogBuffer.index();
-    const char *front = _copyBacklogBuffer.front();
-    if (index + off <= size) {
-        con.append(front, off);
-    } else {
-        con.append(front, size - index);
-        con.append(front - index, off - (size - index));
-    }
+    std::string buffer;
+    buffer.reserve(off);
+    _copyBacklogBuffer.get(buffer.data(), off);
+    con.append(std::move(buffer));
 }
 
 void DBServer::appendWriteCommand(const Context::CommandList& cmdlist,

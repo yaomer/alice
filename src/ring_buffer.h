@@ -25,38 +25,47 @@ public:
         _size = size;
         _index = 0;
     }
-    const char *front() const { return &*_buffer.begin() + index(); }
-    unsigned index() const { return __off(_index); }
-    unsigned size() const { return _size; }
-    void push(const char *from, unsigned len)
+    // 目前RingBuffer中已经存放有多少数据
+    unsigned size() const
+    {
+        if (_index < _size) return _index;
+        else return _size;
+    }
+    // get只dup一份需要的数据，并不会对RingBuffer作任何修改
+    void get(char *to, unsigned len)
+    {
+        len = std::min(len, size(), std::less<unsigned>());
+        if (_index < _size) {
+            memcpy(to, begin(), len);
+        } else {
+            unsigned off = __off();
+            unsigned l = std::min(len, _size - off, std::less<unsigned>());
+            memcpy(to, begin() + off, l);
+            memcpy(to + l, begin(), len - l);
+        }
+    }
+    void put(const char *from, unsigned len)
     {
         if (len > _size) {
             from += len - _size;
             len = _size;
         }
-        unsigned off = __off(_index);
+        unsigned off = __off();
         unsigned l = std::min(len, _size - off, std::less<unsigned>());
-        memcpy(&_buffer[0] + off, from, l);
-        memcpy(&_buffer[0], from + l, len - l);
+        memcpy(begin() + off, from, l);
+        memcpy(begin(), from + l, len - l);
         _index += len;
-    }
-    static unsigned off(const RingBuffer& r, unsigned offset)
-    {
-        return r.__off(offset);
     }
 private:
     // 因为_size是2的整数次幂，所以off % _size <==> off & (_size - 1)
-    unsigned __off(unsigned off) const { return off & (_size - 1); }
+    unsigned __off() const { return _index & (_size - 1); }
+
+    char *begin() { return &_buffer[0]; }
 
     std::string _buffer;
     unsigned _size;
     unsigned _index;
 };
 }
-// 按顺序遍历RingBuffer
-// for (int i = r.index(); i < r.size(); i++)
-//     ;
-// for (int i = 0; i < r.index(); i++)
-//     ;
 
 #endif // _ALICE_SRC_RING_BUFFER_H
