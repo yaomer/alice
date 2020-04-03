@@ -43,6 +43,7 @@ void Aof::appendAof(int64_t now)
     int64_t syncInterval = now - _lastSyncTime;
     int fd = open(g_server_conf.appendonly_file.c_str(), O_RDWR | O_APPEND | O_CREAT, 0660);
     writeToFile(fd, _buffer.data(), _buffer.size());
+    _currentFilesize = getFilesize(fd);
     _buffer.clear();
     if (g_server_conf.aof_mode == AOF_ALWAYS) {
         g_server->fsyncBackground(fd);
@@ -52,7 +53,6 @@ void Aof::appendAof(int64_t now)
             _lastSyncTime = now;
         }
     }
-    _currentFilesize = getFilesize(fd);
 }
 
 static void aofSetCommand(Context::CommandList& cmdlist, int64_t now)
