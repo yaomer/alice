@@ -171,11 +171,24 @@ static bool canRemoveMaster(const std::unique_ptr<SentinelInstance>& master)
     return master->flag() & SentinelInstance::DELETE;
 }
 
-static void sendPing(const std::unique_ptr<Angel::TcpClient>& cli)
+static void sendPing(const std::unique_ptr<SentinelInstance>& si)
 {
+    auto& cli = si->clients()[0];
     if (cli->isConnected()) {
         cli->conn()->send("*1\r\n$4\r\nPING\r\n");
     }
+}
+
+static void sendPubMessage(const std::unique_ptr<SentinelInstance>& si)
+{
+    auto& cli = si->clients()[0];
+    if (cli->isConnected()) si->pubMessage(cli->conn());
+}
+
+static void sendInfo(const std::unique_ptr<SentinelInstance>& si)
+{
+    auto& cli = si->clients()[0];
+    if (cli->isConnected()) cli->conn()->send("*1\r\n$4\r\nINFO\r\n");
 }
 
 // 向所有被监控的主从服务器以及对应的sentinel发送PING，
@@ -185,7 +198,7 @@ void Sentinel::sendPingToServers()
     for (auto it = masters().begin(); it != masters().end(); ) {
         auto master = it++;
         if (!isSubjectiveDownForMaster(master->second))
-            sendPing(master->second->clients()[0]);
+            sendPing(master->second);
         if (canRemoveMaster(master->second)) {
             masters().erase(master);
             continue;
@@ -195,22 +208,16 @@ void Sentinel::sendPingToServers()
             auto slave = it++;
             if (isSubjectiveDownForSlaveOrSentinel(slaves, slave->second))
                 continue;
-            sendPing(slave->second->clients()[0]);
+            sendPing(slave->second);
         }
         auto& sentinels = master->second->sentinels();
         for (auto it = sentinels.begin(); it != sentinels.end(); ) {
             auto sentinel = it++;
             if (isSubjectiveDownForSlaveOrSentinel(sentinels, sentinel->second))
                 continue;
-            sendPing(sentinel->second->clients()[0]);
+            sendPing(sentinel->second);
         }
     }
-}
-
-static void sendPubMessage(const std::unique_ptr<SentinelInstance>& si)
-{
-    auto& cli = si->clients()[0];
-    if (cli->isConnected()) si->pubMessage(cli->conn());
 }
 
 // 向所有被监控的主从服务器发送频道消息
@@ -232,12 +239,6 @@ void Sentinel::sendPubMessageToServers()
             sendPubMessage(slave->second);
         }
     }
-}
-
-static void sendInfo(const std::unique_ptr<SentinelInstance>& si)
-{
-    auto& cli = si->clients()[0];
-    if (cli->isConnected()) cli->conn()->send("*1\r\n$4\r\nINFO\r\n");
 }
 
 // 向所有被监控的主从服务器发送INFO命令
