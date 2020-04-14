@@ -81,12 +81,12 @@ static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::
             if (i + 2 >= len) goto syntax_err;
             *offset = str2l(cmdlist[++i].c_str());
             if (str2numberErr()) {
-                con.append(db_return_integer_err);
+                con.append(reply.integer_err);
                 return C_ERR;
             }
             *count = str2l(cmdlist[++i].c_str());
             if (str2numberErr()) {
-                con.append(db_return_integer_err);
+                con.append(reply.integer_err);
                 return C_ERR;
             }
             break;
@@ -109,7 +109,7 @@ static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::
     }
     return C_OK;
 syntax_err:
-    con.append(db_return_syntax_err);
+    con.append(reply.syntax_err);
     return C_ERR;
 }
 
@@ -119,7 +119,7 @@ int DB::sortGetResult(Context& con, const std::string& key, DB::SortObjectList& 
     expireIfNeeded(key);
     auto it = find(key);
     if (!isFound(it)) {
-        con.append(db_return_multi_empty);
+        con.append(reply.multi_empty);
         return C_ERR;
     }
     if (isXXType(it, List)) {
@@ -133,7 +133,7 @@ int DB::sortGetResult(Context& con, const std::string& key, DB::SortObjectList& 
         for (auto& it : set)
             result.emplace_back(&it);
     } else {
-        con.append(db_return_type_err);
+        con.append(reply.type_err);
         return C_ERR;
     }
     return C_OK;
@@ -193,12 +193,12 @@ static int sort(Context& con, unsigned cmdops, DB::SortObjectList& result)
 static int sortLimit(Context& con, DB::SortObjectList& result, int offset, int count)
 {
     if (offset < 0 || count <= 0) {
-        con.append(db_return_multi_empty);
+        con.append(reply.multi_empty);
         return C_ERR;
     }
     int size = result.size();
     if (offset >= size || offset + count > size) {
-        con.append(db_return_multi_empty);
+        con.append(reply.multi_empty);
         return C_ERR;
     }
     int i = 0;
@@ -293,6 +293,6 @@ end:
         if (it._value)
             appendReplyString(con, *it._value);
         else
-            con.append(db_return_nil);
+            con.append(reply.nil);
     }
 }

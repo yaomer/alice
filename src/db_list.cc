@@ -50,7 +50,7 @@ void DB::lpushx(Context& con, int option)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
     List& list = getListValue(it);
     option == LPUSHX ? list.emplace_front(cmdlist[2])
@@ -77,7 +77,7 @@ void DB::lpop(Context& con, int option)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, List);
     List& list = getListValue(it);
     if (option == LPOP) {
@@ -113,12 +113,12 @@ void DB::rpoplpush(Context& con, int option)
     int timeout = 0;
     if (option == BLOCK) {
         timeout = str2l(cmdlist[size - 1].c_str());
-        if (str2numberErr()) db_return(con, db_return_integer_err);
-        if (timeout < 0) db_return(con, "-ERR timeout out of range\r\n");
+        if (str2numberErr()) db_return(con, reply.integer_err);
+        if (timeout < 0) db_return(con, reply.timeout_out_of_range);
     }
     auto src = find(cmdlist[1]);
     if (!isFound(src)) {
-        if (option == NONBLOCK) db_return(con, db_return_nil);
+        if (option == NONBLOCK) db_return(con, reply.nil);
         auto e = find(cmdlist[2]);
         if (isFound(e)) checkType(con, e, List);
         addBlockingKey(con, cmdlist[1]);
@@ -156,10 +156,10 @@ void DB::lremCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     int count = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     String& value = cmdlist[3];
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
     List& list = getListValue(it);
     int retval = 0;
@@ -203,7 +203,7 @@ void DB::llenCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
     List& list = getListValue(it);
     appendReplyNumber(con, list.size());
@@ -213,17 +213,17 @@ void DB::lindexCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int index = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, List);
     List& list = getListValue(it);
     size_t size = list.size();
     if (index < 0)
         index += size;
     if (index >= static_cast<ssize_t>(size)) {
-        db_return(con, db_return_nil);
+        db_return(con, reply.nil);
     }
     for (auto& it : list)
         if (index-- == 0) {
@@ -236,17 +236,17 @@ void DB::lsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int index = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_no_such_key);
+    if (!isFound(it)) db_return(con, reply.no_such_key);
     checkType(con, it, List);
     List& list = getListValue(it);
     size_t size = list.size();
     if (index < 0)
         index += size;
     if (index >= static_cast<ssize_t>(size)) {
-        db_return(con, "-ERR index out of range\r\n");
+        db_return(con, reply.index_out_of_range);
     }
     for (auto& it : list)
         if (index-- == 0) {
@@ -254,19 +254,19 @@ void DB::lsetCommand(Context& con)
             break;
         }
     touchWatchKey(cmdlist[1]);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::lrangeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int start = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     int stop = str2l(cmdlist[3].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, List);
     List& list = getListValue(it);
     int upperbound = list.size() - 1;
@@ -291,7 +291,7 @@ int DB::checkRange(Context& con, int *start, int *stop,
         int lowerbound, int upperbound)
 {
     if (*start > upperbound || *stop < lowerbound) {
-        con.append(db_return_nil);
+        con.append(reply.nil);
         return C_ERR;
     }
     if (*start < 0 && *start >= lowerbound) {
@@ -307,7 +307,7 @@ int DB::checkRange(Context& con, int *start, int *stop,
         *stop = upperbound;
     }
     if (*start > *stop) {
-        con.append(db_return_nil);
+        con.append(reply.nil);
         return C_ERR;
     }
     return C_OK;
@@ -317,12 +317,12 @@ void DB::ltrimCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int start = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     int stop = str2l(cmdlist[3].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_ok);
+    if (!isFound(it)) db_return(con, reply.ok);
     checkType(con, it, List);
     List& list = getListValue(it);
     size_t size = list.size();
@@ -334,7 +334,7 @@ void DB::ltrimCommand(Context& con)
      || start > stop
      || stop > static_cast<ssize_t>(size) - 1) {
         list.clear();
-        db_return(con, db_return_ok);
+        db_return(con, reply.ok);
     }
     int i = 0;
     for (auto it = list.cbegin(); it != list.cend(); ) {
@@ -350,7 +350,7 @@ void DB::ltrimCommand(Context& con)
     }
     if (list.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 #define BLPOP 1
@@ -382,8 +382,8 @@ void DB::blpop(Context& con, int option)
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
     int timeout = str2l(cmdlist[size - 1].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
-    if (timeout < 0) db_return(con, "-ERR timeout out of range\r\n");
+    if (str2numberErr()) db_return(con, reply.integer_err);
+    if (timeout < 0) db_return(con, reply.timeout_out_of_range);
     for (size_t i = 1 ; i < size - 1; i++) {
         auto it = find(cmdlist[i]);
         if (isFound(it)) {

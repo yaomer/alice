@@ -33,8 +33,8 @@ void DB::setCommand(Context& con)
         case SET_EX: case SET_PX: {
             if (i + 1 >= len) goto syntax_err;
             expire = str2ll(cmdlist[++i].c_str());
-            if (str2numberErr()) db_return(con, db_return_integer_err);
-            if (expire <= 0) db_return(con, db_return_timeout_err);
+            if (str2numberErr()) db_return(con, reply.integer_err);
+            if (expire <= 0) db_return(con, reply.timeout_err);
             if (op->second == SET_EX)
                 expire *= 1000;
             break;
@@ -46,16 +46,16 @@ void DB::setCommand(Context& con)
     if ((cmdops & SET_NX) && (cmdops & SET_XX))
         goto syntax_err;
     if (cmdops & SET_NX) {
-        if (isFound(find(cmdlist[1]))) db_return(con, db_return_nil);
+        if (isFound(find(cmdlist[1]))) db_return(con, reply.nil);
         insert(cmdlist[1], cmdlist[2]);
-        con.append(db_return_ok);
+        con.append(reply.ok);
     } else if (cmdops & SET_XX) {
-        if (!isFound(find(cmdlist[1]))) db_return(con, db_return_nil);
+        if (!isFound(find(cmdlist[1]))) db_return(con, reply.nil);
         insert(cmdlist[1], cmdlist[2]);
-        con.append(db_return_ok);
+        con.append(reply.ok);
     } else {
         insert(cmdlist[1], cmdlist[2]);
-        con.append(db_return_ok);
+        con.append(reply.ok);
     }
     delExpireKey(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
@@ -64,7 +64,7 @@ void DB::setCommand(Context& con)
     }
     return;
 syntax_err:
-    con.append(db_return_syntax_err);
+    con.append(reply.syntax_err);
 }
 
 void DB::setnxCommand(Context& con)
@@ -73,9 +73,9 @@ void DB::setnxCommand(Context& con)
     if (!isFound(find(cmdlist[1]))) {
         insert(cmdlist[1], cmdlist[2]);
         touchWatchKey(cmdlist[1]);
-        con.append(db_return_1);
+        con.append(reply.n1);
     } else {
-        con.append(db_return_0);
+        con.append(reply.n0);
     }
 }
 
@@ -84,7 +84,7 @@ void DB::getCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, String);
     auto& value = getStringValue(it);
     appendReplyString(con, value);
@@ -98,7 +98,7 @@ void DB::getSetCommand(Context& con)
     auto it = find(cmdlist[1]);
     if (!isFound(it)) {
         insert(cmdlist[1], cmdlist[2]);
-        db_return(con, db_return_nil);
+        db_return(con, reply.nil);
     }
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
@@ -111,7 +111,7 @@ void DB::strlenCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, String);
     String& value = getStringValue(it);
     appendReplyNumber(con, value.size());
@@ -138,13 +138,13 @@ void DB::msetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    if (size % 2 == 0) db_return(con, db_return_argnumber_err);
+    if (size % 2 == 0) db_return(con, reply.argnumber_err);
     for (size_t i = 1; i < size; i += 2) {
         expireIfNeeded(cmdlist[i]);
         insert(cmdlist[i], cmdlist[i+1]);
         touchWatchKey(cmdlist[i]);
     }
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::mgetCommand(Context& con)
@@ -157,13 +157,13 @@ void DB::mgetCommand(Context& con)
         auto it = find(cmdlist[i]);
         if (isFound(it)) {
             if (!isXXType(it, String)) {
-                con.append(db_return_nil);
+                con.append(reply.nil);
                 continue;
             }
             String& value = getStringValue(it);
             appendReplyString(con, value);
         } else
-            con.append(db_return_nil);
+            con.append(reply.nil);
     }
 }
 
@@ -176,7 +176,7 @@ void DB::incr(Context& con, int64_t incr)
         checkType(con, it, String);
         String& value = getStringValue(it);
         int64_t number = str2ll(value.c_str());
-        if (str2numberErr()) db_return(con, db_return_integer_err);
+        if (str2numberErr()) db_return(con, reply.integer_err);
         number += incr;
         insert(cmdlist[1], String(convert(number)));
         appendReplyNumber(con, number);
@@ -196,7 +196,7 @@ void DB::incrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t increment = str2ll(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     incr(con, increment);
 }
 
@@ -209,7 +209,7 @@ void DB::decrbyCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int64_t decrement = str2ll(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     incr(con, -decrement);
 }
 
@@ -218,7 +218,7 @@ void DB::setRangeCommand(Context& con)
     auto& cmdlist = con.commandList();
     int offset = str2l(cmdlist[2].c_str());
     if (str2numberErr() || offset < 0)
-        db_return(con, db_return_integer_err);
+        db_return(con, reply.integer_err);
     String string;
     String& value = cmdlist[3];
     expireIfNeeded(cmdlist[1]);
@@ -253,12 +253,12 @@ void DB::getRangeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int start = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     int stop = str2l(cmdlist[3].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, String);
     String& string = getStringValue(it);
     int upperbound = string.size() - 1;

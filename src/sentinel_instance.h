@@ -2,6 +2,7 @@
 #define _ALICE_SRC_SENTINEL_INSTANCE_H
 
 #include <Angel/TcpClient.h>
+#include <Angel/EventLoop.h>
 
 #include <string>
 #include <memory>

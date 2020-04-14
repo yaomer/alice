@@ -34,13 +34,13 @@ void DB::sisMemberCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
     if (set.find(cmdlist[2]) != set.end())
-        con.append(db_return_1);
+        con.append(reply.n1);
     else
-        con.append(db_return_0);
+        con.append(reply.n0);
 }
 
 void DB::spopCommand(Context& con)
@@ -48,7 +48,7 @@ void DB::spopCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
     auto randkey = getRandHashKey(set);
@@ -72,11 +72,11 @@ void DB::srandMemberCommand(Context& con)
     int count = 0;
     if (cmdlist.size() > 2) {
         count = str2l(cmdlist[2].c_str());
-        if (str2numberErr()) db_return(con, db_return_integer_err);
-        if (count == 0) db_return(con, db_return_nil);
+        if (str2numberErr()) db_return(con, reply.integer_err);
+        if (count == 0) db_return(con, reply.nil);
     }
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
     // 类型转换，int -> size_t
@@ -134,7 +134,7 @@ void DB::sremCommand(Context& con)
     expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
     int retval = 0;
@@ -156,11 +156,11 @@ void DB::smoveCommand(Context& con)
     expireIfNeeded(cmdlist[1]);
     expireIfNeeded(cmdlist[2]);
     auto src = find(cmdlist[1]);
-    if (!isFound(src)) db_return(con, db_return_0);
+    if (!isFound(src)) db_return(con, reply.n0);
     checkType(con, src, Set);
     Set& srcSet = getSetValue(src);
     auto si = srcSet.find(cmdlist[3]);
-    if (si == srcSet.end()) db_return(con, db_return_0);
+    if (si == srcSet.end()) db_return(con, reply.n0);
     srcSet.erase(si);
     if (srcSet.empty()) delKeyWithExpire(cmdlist[1]);
     auto des = find(cmdlist[2]);
@@ -175,7 +175,7 @@ void DB::smoveCommand(Context& con)
     }
     touchWatchKey(cmdlist[1]);
     touchWatchKey(cmdlist[2]);
-    con.append(db_return_1);
+    con.append(reply.n1);
 }
 
 void DB::scardCommand(Context& con)
@@ -183,7 +183,7 @@ void DB::scardCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
     appendReplyNumber(con, set.size());
@@ -194,7 +194,7 @@ void DB::smembersCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_nil);
+    if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, Set);
     Set& set = getSetValue(it);
     appendReplyMulti(con, set.size());
@@ -212,7 +212,7 @@ void DB::sinterCommand(Context& con)
     for (size_t i = 1; i < size; i++) {
         expireIfNeeded(cmdlist[i]);
         auto it = find(cmdlist[i]);
-        if (!isFound(it)) db_return(con, db_return_nil);
+        if (!isFound(it)) db_return(con, reply.nil);
         checkType(con, it, Set);
         Set& set = getSetValue(it);
         if (minSize == 0) {
@@ -251,7 +251,7 @@ void DB::sinterStoreCommand(Context& con)
     for (size_t i = 2; i < size; i++) {
         expireIfNeeded(cmdlist[i]);
         auto it = find(cmdlist[i]);
-        if (!isFound(it)) db_return(con, db_return_0);
+        if (!isFound(it)) db_return(con, reply.n0);
         checkType(con, it, Set);
         Set& set = getSetValue(it);
         if (minSize == 0) {
@@ -305,7 +305,7 @@ void DB::sunionCommand(Context& con)
         }
     }
     if (rset.empty())
-        con.append(db_return_nil);
+        con.append(reply.nil);
     else {
         appendReplyMulti(con, rset.size());
         for (auto& it : rset)

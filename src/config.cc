@@ -1,7 +1,7 @@
 #include <stdio.h>
 
-#include "db.h"
 #include "config.h"
+#include "db.h"
 
 using namespace Alice;
 
@@ -189,7 +189,7 @@ void DB::configGet(Context& con, const std::string& arg)
     } else if (strcasecmp(arg.c_str(), "slowlog-max-len") == 0) {
         appendReplyString(con, convert(g_server_conf.slowlog_max_len));
     } else
-        con.message().assign(db_return_multi_empty);
+        con.message().assign(reply.multi_empty);
 }
 
 void DB::configSet(Context& con, const std::string& arg, const std::string& value)
@@ -205,5 +205,5 @@ void DB::configCommand(Context& con)
     } else if (strcasecmp(cmdlist[1].c_str(), "set") == 0) {
         configSet(con, cmdlist[2], cmdlist[2]);
     } else
-        con.append(db_return_subcommand_err);
+        con.append(reply.subcommand_err);
 }

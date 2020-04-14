@@ -1,8 +1,6 @@
 #ifndef _ALICE_SRC_SENTINEL_H
 #define _ALICE_SRC_SENTINEL_H
 
-#include <Angel/TcpClient.h>
-#include <Angel/EventLoop.h>
 #include <Angel/InetAddr.h>
 
 #include <unordered_map>

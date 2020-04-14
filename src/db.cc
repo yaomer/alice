@@ -125,41 +125,25 @@ DB::DB(DBServer *dbServer)
     };
 }
 
-//////////////////////////////////////////////////////////////////
-
-const char *db_return_ok = "+OK\r\n";
-const char *db_return_nil = "$-1\r\n";
-const char *db_return_0 = ":0\r\n";
-const char *db_return_1 = ":1\r\n";
-const char *db_return_multi_empty = "*0\r\n";
-const char *db_return_type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
-const char *db_return_integer_err = "-ERR value is not an integer or out of range\r\n";
-const char *db_return_float_err = "-ERR value is not a valid float\r\n";
-const char *db_return_syntax_err = "-ERR syntax error\r\n";
-const char *db_return_no_such_key = "-ERR no such key\r\n";
-const char *db_return_subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";
-const char *db_return_argnumber_err = "-ERR wrong number of arguments\r\n";
-const char *db_return_timeout_err = "-ERR invalid expire timeout\r\n";
-
-//////////////////////////////////////////////////////////////////
+Alice::ReplyString reply;
 
 void DB::selectCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int dbnum = str2l(cmdlist[1].c_str());
-    if (str2numberErr()) db_return(con, "-ERR invalid DB index\r\n");
+    if (str2numberErr()) db_return(con, reply.invalid_db_index);
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
-        db_return(con, "-ERR DB index is out of range\r\n");
+        db_return(con, reply.db_index_out_of_range);
     }
     con.db()->switchDb(dbnum);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::existsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
-    con.append(isFound(find(cmdlist[1])) ? db_return_1 : db_return_0);
+    con.append(isFound(find(cmdlist[1])) ? reply.n1 : reply.n0);
 }
 
 void DB::typeCommand(Context& con)
@@ -167,17 +151,17 @@ void DB::typeCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, "+none\r\n");
+    if (!isFound(it)) db_return(con, reply.none_type);
     if (isXXType(it, String))
-        con.append("+string\r\n");
+        con.append(reply.string_type);
     else if (isXXType(it, List))
-        con.append("+list\r\n");
+        con.append(reply.list_type);
     else if (isXXType(it, Set))
-        con.append("+set\r\n");
+        con.append(reply.set_type);
     else if (isXXType(it, Zset))
-        con.append("+zset\r\n");
+        con.append(reply.zset_type);
     else if (isXXType(it, Hash))
-        con.append("+hash\r\n");
+        con.append(reply.hash_type);
 }
 
 #define TTL 1
@@ -186,9 +170,9 @@ void DB::typeCommand(Context& con)
 void DB::ttl(Context& con, int option)
 {
     auto& cmdlist = con.commandList();
-    if (!isFound(find(cmdlist[1]))) db_return(con, ":-2\r\n");
+    if (!isFound(find(cmdlist[1]))) db_return(con, reply.n_2);
     auto expire = expireMap().find(cmdlist[1]);
-    if (expire == expireMap().end()) db_return(con, ":-1\r\n");
+    if (expire == expireMap().end()) db_return(con, reply.n_1);
     int64_t milliseconds = expire->second - Angel::nowMs();
     if (option == TTL) milliseconds /= 1000;
     appendReplyNumber(con, milliseconds);
@@ -211,12 +195,12 @@ void DB::expire(Context& con, int option)
 {
     auto& cmdlist = con.commandList();
     int64_t expire = str2ll(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
-    if (expire <= 0) db_return(con, db_return_timeout_err);
-    if (!isFound(find(cmdlist[1]))) db_return(con, db_return_0);
+    if (str2numberErr()) db_return(con, reply.integer_err);
+    if (expire <= 0) db_return(con, reply.timeout_err);
+    if (!isFound(find(cmdlist[1]))) db_return(con, reply.n0);
     if (option == EXPIRE) expire *= 1000;
     addExpireKey(cmdlist[1], expire);
-    con.append(db_return_1);
+    con.append(reply.n1);
 }
 
 void DB::expireCommand(Context& con)
@@ -246,7 +230,7 @@ void DB::delCommand(Context& con)
 void DB::keysCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (cmdlist[1].compare("*")) db_return(con, "-ERR unknown option\r\n");
+    if (cmdlist[1].compare("*")) db_return(con, reply.unknown_option);
     appendReplyMulti(con, _hashMap.size());
     for (auto& it : _hashMap)
         appendReplyString(con, it.first);
@@ -256,7 +240,7 @@ void DB::saveCommand(Context& con)
 {
     if (_dbServer->rdb()->childPid() != -1) return;
     _dbServer->rdb()->save();
-    con.append(db_return_ok);
+    con.append(reply.ok);
     _dbServer->setLastSaveTime(Angel::nowMs());
     _dbServer->dirtyReset();
 }
@@ -297,7 +281,7 @@ void DB::lastSaveCommand(Context& con)
 void DB::flushdbCommand(Context& con)
 {
     _hashMap.clear();
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::flushAllCommand(Context& con)
@@ -306,7 +290,7 @@ void DB::flushAllCommand(Context& con)
         db->hashMap().clear();
     if (!g_server_conf.save_params.empty()) bgSaveCommand(con);
     if (g_server_conf.enable_appendonly) bgRewriteAofCommand(con);
-    con.message().assign(db_return_ok);
+    con.message().assign(reply.ok);
 }
 
 void DB::slaveofCommand(Context& con)
@@ -316,11 +300,11 @@ void DB::slaveofCommand(Context& con)
             && strcasecmp(cmdlist[2].c_str(), "one") == 0) {
         _dbServer->disconnectMasterServer();
         _dbServer->clearFlag(Context::SLAVE);
-        db_return(con, db_return_ok);
+        db_return(con, reply.ok);
     }
     int port = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
-    con.append(db_return_ok);
+    if (str2numberErr()) db_return(con, reply.integer_err);
+    con.append(reply.ok);
     if (port == g_server_conf.port && cmdlist[1].compare(g_server_conf.addr) == 0) {
         logWarn("try connect to self");
         return;
@@ -391,7 +375,7 @@ void DB::pingCommand(Context& con)
 void DB::multiCommand(Context& con)
 {
     con.setFlag(Context::EXEC_MULTI);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::execCommand(Context& con)
@@ -400,7 +384,7 @@ void DB::execCommand(Context& con)
     bool multiIsWrite = (con.flag() & Context::EXEC_MULTI_WRITE);
     if (con.flag() & Context::EXEC_MULTI_ERR) {
         con.clearFlag(Context::EXEC_MULTI_ERR);
-        con.append(db_return_nil);
+        con.append(reply.nil);
         goto end;
     }
     if (multiIsWrite) {
@@ -432,7 +416,7 @@ void DB::discardCommand(Context& con)
     con.clearFlag(Context::EXEC_MULTI);
     con.clearFlag(Context::EXEC_MULTI_ERR);
     con.clearFlag(Context::EXEC_MULTI_WRITE);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::watchCommand(Context& con)
@@ -445,13 +429,13 @@ void DB::watchCommand(Context& con)
             con.watchKeys().emplace_back(cmdlist[i]);
         }
     }
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::unwatchCommand(Context& con)
 {
     unwatchKeys(con);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::unwatchKeys(Context& con)
@@ -565,14 +549,14 @@ void DB::renameCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_no_such_key);
+    if (!isFound(it)) db_return(con, reply.no_such_key);
     if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
-        db_return(con, db_return_ok);
+        db_return(con, reply.ok);
     }
     delKeyWithExpire(cmdlist[2]);
     insert(cmdlist[2], it->second);
     delKeyWithExpire(cmdlist[1]);
-    con.append(db_return_ok);
+    con.append(reply.ok);
 }
 
 void DB::renamenxCommand(Context& con)
@@ -580,31 +564,31 @@ void DB::renamenxCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_no_such_key);
+    if (!isFound(it)) db_return(con, reply.no_such_key);
     if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
-        db_return(con, db_return_0);
+        db_return(con, reply.n0);
     }
-    if (isFound(find(cmdlist[2]))) db_return(con, db_return_0);
+    if (isFound(find(cmdlist[2]))) db_return(con, reply.n0);
     insert(cmdlist[2], it->second);
     delKeyWithExpire(cmdlist[1]);
-    con.append(db_return_1);
+    con.append(reply.n1);
 }
 
 void DB::moveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     int dbnum = str2l(cmdlist[2].c_str());
-    if (str2numberErr()) db_return(con, db_return_integer_err);
+    if (str2numberErr()) db_return(con, reply.integer_err);
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
-        db_return(con, "-ERR DB index out of range\r\n");
+        db_return(con, reply.db_index_out_of_range);
     }
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, db_return_0);
+    if (!isFound(it)) db_return(con, reply.n0);
     auto& map = _dbServer->selectDb(dbnum)->hashMap();
-    if (map.find(cmdlist[1]) != map.end()) db_return(con, db_return_0);
+    if (map.find(cmdlist[1]) != map.end()) db_return(con, reply.n0);
     map.emplace(it->first, it->second);
     delKeyWithExpire(cmdlist[1]);
-    con.append(db_return_1);
+    con.append(reply.n1);
 }
 
 void DB::lruCommand(Context& con)
@@ -612,7 +596,7 @@ void DB::lruCommand(Context& con)
     auto& cmdlist = con.commandList();
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
-    if (!isFound(it)) db_return(con, ":-1\r\n");
+    if (!isFound(it)) db_return(con, reply.n_1);
     int64_t seconds = (_lru_cache - it->second.lru()) / 1000;
     appendReplyNumber(con, seconds);
 }
@@ -624,8 +608,8 @@ void DB::slowlogGet(Context& con, Context::CommandList& cmdlist)
     int count = 0;
     if (cmdlist.size() > 2) {
         count = str2l(cmdlist[2].c_str());
-        if (str2numberErr()) db_return(con, db_return_integer_err);
-        if (count <= 0) db_return(con, db_return_multi_empty);
+        if (str2numberErr()) db_return(con, reply.integer_err);
+        if (count <= 0) db_return(con, reply.multi_empty);
     } else
         count = SlOWLOG_GET_LOGS;
     if (count > _dbServer->slowlogQueue().size())
@@ -651,9 +635,9 @@ void DB::slowlogCommand(Context& con)
         appendReplyNumber(con, _dbServer->slowlogQueue().size());
     } else if (strcasecmp(cmdlist[1].c_str(), "reset") == 0) {
         _dbServer->slowlogQueue().clear();
-        con.append(db_return_ok);
+        con.append(reply.ok);
     } else
-        con.append(db_return_subcommand_err);
+        con.append(reply.subcommand_err);
 }
 
 // 清空con.blockingKeys()，并从DB::blockingKeys()中移除所有con

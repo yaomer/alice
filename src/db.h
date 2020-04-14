@@ -448,15 +448,47 @@ private:
     WatchMap _watchMap; // 存储所有客户watch的键
     BlockingKeys _blockingKeys; // 存储所有阻塞的键
 };
+
+struct ReplyString {
+    const char *ok = "+OK\r\n";
+    const char *nil = "$-1\r\n";
+    const char *n0 = ":0\r\n";
+    const char *n1 = ":1\r\n";
+    const char *n_1 = ":-1\r\n";
+    const char *n_2 = ":-2\r\n";
+    const char *multi_empty = "*0\r\n";
+    const char *type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
+    const char *integer_err = "-ERR value is not an integer or out of range\r\n";
+    const char *float_err = "-ERR value is not a valid float\r\n";
+    const char *syntax_err = "-ERR syntax error\r\n";
+    const char *no_such_key = "-ERR no such key\r\n";
+    const char *subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";
+    const char *argnumber_err = "-ERR wrong number of arguments\r\n";
+    const char *timeout_err = "-ERR invalid expire timeout\r\n";
+    const char *timeout_out_of_range = "-ERR timeout is out of range\r\n";
+    const char *invalid_db_index = "-ERR invalid DB index\r\n";
+    const char *db_index_out_of_range = "-ERR DB index is out of range\r\n";
+    const char *index_out_of_range = "-ERR index is out of range\r\n";
+    const char *unknown_option = "-ERR unknown option\r\n";
+    const char *none_type = "+none\r\n";
+    const char *string_type = "+string\r\n";
+    const char *list_type = "+list\r\n";
+    const char *hash_type = "+hash\r\n";
+    const char *set_type = "+set\r\n";
+    const char *zset_type = "+zset\r\n";
 };
 
-// it's type: HashMap::iterator
+}
+
+extern Alice::ReplyString reply;
+
+// typeof(it) == HashMap::iterator
 #define isXXType(it, _type) \
     ((it)->second.value().type() == typeid(_type))
 #define checkType(con, it, _type) \
     do { \
         if (!isXXType(it, _type)) { \
-            (con).append(db_return_type_err); \
+            (con).append(reply.type_err); \
             return; \
         } \
         (it)->second.updateLru(); \
@@ -472,19 +504,5 @@ private:
 
 #define db_return(con, str) \
     do { (con).append(str); return; } while(0)
-
-extern const char *db_return_ok;
-extern const char *db_return_nil;
-extern const char *db_return_0;
-extern const char *db_return_1;
-extern const char *db_return_multi_empty;
-extern const char *db_return_type_err;
-extern const char *db_return_integer_err;
-extern const char *db_return_float_err;
-extern const char *db_return_syntax_err;
-extern const char *db_return_no_such_key;
-extern const char *db_return_subcommand_err;
-extern const char *db_return_argnumber_err;
-extern const char *db_return_timeout_err;
 
 #endif
