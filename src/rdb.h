@@ -13,11 +13,12 @@ public:
     using Iterator = DB::HashMap::iterator;
 
     static const size_t buffer_flush_size = 4096;
+    static const size_t compress_limit = 30;
 
     explicit Rdb(DBServer *dbServer)
         : _dbServer(dbServer),
         _childPid(-1),
-        _curDb(nullptr),
+        _curdb(nullptr),
         _fd(-1)
     {
 
@@ -32,11 +33,16 @@ public:
 private:
     int saveLen(uint64_t len);
     int loadLen(char *ptr, uint64_t *lenptr);
+    void saveKey(const std::string& key);
+    void saveValue(const std::string& value);
     void saveString(const Iterator& it);
     void saveList(const Iterator& it);
     void saveSet(const Iterator& it);
     void saveHash(const Iterator& it);
     void saveZset(const Iterator& it);
+    void loadExpireKey(const std::string& key, int64_t *tvptr);
+    char *loadKey(char *ptr, std::string *key);
+    char *loadValue(char *ptr, std::string *value);
     char *loadString(char *ptr, int64_t *tvptr);
     char *loadList(char *ptr, int64_t *tvptr);
     char *loadSet(char *ptr, int64_t *tvptr);
@@ -46,11 +52,15 @@ private:
     void append(const void *data, size_t len);
     void flush();
 
+    bool canCompress(size_t value_len);
+    void compress(const char *input, size_t input_len, std::string *output);
+    void uncompress(const char *compressed, size_t compressed_len, std::string *origin);
+
     DBServer *_dbServer;
     pid_t _childPid;
     std::string _buffer;
     std::string _syncBuffer;
-    DB *_curDb;
+    DB *_curdb;
     int _fd;
 };
 }

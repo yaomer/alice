@@ -483,24 +483,24 @@ struct ReplyString {
 extern Alice::ReplyString reply;
 
 // typeof(it) == HashMap::iterator
-#define isXXType(it, _type) \
+#define isType(it, _type) \
     ((it)->second.value().type() == typeid(_type))
 #define checkType(con, it, _type) \
     do { \
-        if (!isXXType(it, _type)) { \
+        if (!isType(it, _type)) { \
             (con).append(reply.type_err); \
             return; \
         } \
         (it)->second.updateLru(); \
     } while (0)
-#define getXXType(it, _type) \
+#define getValue(it, _type) \
     (std::any_cast<_type>((it)->second.value()))
 
-#define getStringValue(it)  getXXType(it, DB::String&)
-#define getListValue(it)    getXXType(it, DB::List&)
-#define getHashValue(it)    getXXType(it, DB::Hash&)
-#define getSetValue(it)     getXXType(it, DB::Set&)
-#define getZsetValue(it)    getXXType(it, DB::Zset&)
+#define getStringValue(it)  getValue(it, DB::String&)
+#define getListValue(it)    getValue(it, DB::List&)
+#define getHashValue(it)    getValue(it, DB::Hash&)
+#define getSetValue(it)     getValue(it, DB::Set&)
+#define getZsetValue(it)    getValue(it, DB::Zset&)
 
 #define db_return(con, str) \
     do { (con).append(str); return; } while(0)

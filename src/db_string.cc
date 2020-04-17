@@ -156,7 +156,7 @@ void DB::mgetCommand(Context& con)
         expireIfNeeded(cmdlist[i]);
         auto it = find(cmdlist[i]);
         if (isFound(it)) {
-            if (!isXXType(it, String)) {
+            if (!isType(it, String)) {
                 con.append(reply.nil);
                 continue;
             }

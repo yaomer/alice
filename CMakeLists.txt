@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 3.0)
 
 project (Alice)
 
@@ -7,6 +7,14 @@ set (CMAKE_CXX_FLAGS "-std=c++17 -Wall -O2")
 set (SERVER_DIR "${PROJECT_SOURCE_DIR}/src")
 set (CLIENT_DIR "${PROJECT_SOURCE_DIR}/client")
 set (PROXY_DIR "${PROJECT_SOURCE_DIR}/proxy")
+
+include (CheckLibraryExists)
+check_library_exists(snappy snappy_compress "" ALICE_HAVE_SNAPPY)
+
+configure_file (
+    "${SERVER_DIR}/configure.h.in"
+    "${SERVER_DIR}/configure.h"
+)
 
 set (SERVER_FILES
     ${SERVER_DIR}/server.cc
@@ -47,8 +55,13 @@ set_target_properties(angel PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libange
 add_library(linenoise STATIC IMPORTED)
 set_target_properties(linenoise PROPERTIES IMPORTED_LOCATION "/usr/local/lib/liblinenoise.a")
 
+if (ALICE_HAVE_SNAPPY)
+    add_library(snappy STATIC IMPORTED)
+    set_target_properties(snappy PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libsnappy.a")
+endif()
+
 add_executable(alice-server ${SERVER_FILES})
-target_link_libraries(alice-server angel)
+target_link_libraries(alice-server angel snappy)
 
 add_executable(alice-cli ${CLI_CLIENT_FILES})
 target_link_libraries(alice-cli angel linenoise)

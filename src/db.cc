@@ -152,15 +152,15 @@ void DB::typeCommand(Context& con)
     expireIfNeeded(cmdlist[1]);
     auto it = find(cmdlist[1]);
     if (!isFound(it)) db_return(con, reply.none_type);
-    if (isXXType(it, String))
+    if (isType(it, String))
         con.append(reply.string_type);
-    else if (isXXType(it, List))
+    else if (isType(it, List))
         con.append(reply.list_type);
-    else if (isXXType(it, Set))
+    else if (isType(it, Set))
         con.append(reply.set_type);
-    else if (isXXType(it, Zset))
+    else if (isType(it, Zset))
         con.append(reply.zset_type);
-    else if (isXXType(it, Hash))
+    else if (isType(it, Hash))
         con.append(reply.hash_type);
 }
 

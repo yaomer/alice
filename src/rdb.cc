@@ -1,15 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <assert.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <stdint.h>
 #include <arpa/inet.h>
 #include <tuple>
 
 #include "rdb.h"
 #include "server.h"
+#include "configure.h"
+
+#if defined (ALICE_HAVE_SNAPPY)
+#include <snappy.h>
+#endif
 
 using namespace Alice;
 
@@ -28,7 +34,26 @@ namespace Alice {
     static unsigned char rdb_14bit_len = 1;
     static unsigned char rdb_32bit_len = 0x80;
     static unsigned char rdb_64bit_len = 0x81;
+    static unsigned char compress_value = 0;
+    static unsigned char uncompress_value = 1;
 }
+
+// <key>: <key-len><key>
+// <value>: <uncompress><origin-len><origin-value>
+//        | <compress><origin-len><compressed-len><compressed-value>
+// <pair>: <key><value>
+//
+// <string>: <string-type><pair>
+// <list>: <list-type><key><list-len><value ...>
+// <set>: <set-type><key><set-len><value ...>
+// <hash>: <hash-type><key><hash-len><<pair> ...>
+// <zset>: <zset-type><key><zset-len><<pair> ...>
+//
+// <any-value>: <<string>|<list>|<set>|<hash>|<zset>>
+// <db>: <<key><any-value> ...>
+//
+// rdb-file:
+// <magic><<db-num><db> ...><eof>
 
 void Rdb::save()
 {
@@ -58,15 +83,15 @@ void Rdb::save()
                     append(&timeval, 8);
                 }
             }
-            if (isXXType(it, DB::String)) {
+            if (isType(it, DB::String)) {
                 saveString(it);
-            } else if (isXXType(it, DB::List)) {
+            } else if (isType(it, DB::List)) {
                 saveList(it);
-            } else if (isXXType(it, DB::Set)) {
+            } else if (isType(it, DB::Set)) {
                 saveSet(it);
-            } else if (isXXType(it, DB::Hash)) {
+            } else if (isType(it, DB::Hash)) {
                 saveHash(it);
-            } else if (isXXType(it, DB::Zset)) {
+            } else if (isType(it, DB::Zset)) {
                 saveZset(it);
             }
         }
@@ -144,70 +169,81 @@ int Rdb::loadLen(char *ptr, uint64_t *lenptr)
     return readBytes;
 }
 
+void Rdb::saveKey(const std::string& key)
+{
+    saveLen(key.size());
+    append(key);
+}
+
+void Rdb::saveValue(const std::string& value)
+{
+    if (canCompress(value.size())) {
+        saveLen(compress_value);
+        saveLen(value.size());
+        std::string output;
+        compress(value.data(), value.size(), &output);
+        saveLen(output.size());
+        append(output);
+    } else {
+        saveLen(uncompress_value);
+        saveLen(value.size());
+        append(value);
+    }
+}
+
 void Rdb::saveString(const Iterator& it)
 {
     saveLen(string_type);
-    saveLen(it->first.size());
-    append(it->first);
-    DB::String& string = getXXType(it, DB::String&);
-    saveLen(string.size());
-    append(string);
+    saveKey(it->first);
+    DB::String& string = getValue(it, DB::String&);
+    saveValue(string);
 }
 
 void Rdb::saveList(const Iterator& it)
 {
     saveLen(list_type);
-    saveLen(it->first.size());
-    append(it->first);
-    DB::List& list = getXXType(it, DB::List&);
+    saveKey(it->first);
+    DB::List& list = getValue(it, DB::List&);
     saveLen(list.size());
-    for (auto& it : list) {
-        saveLen(it.size());
-        append(it);
+    for (auto& value : list) {
+        saveValue(value);
     }
 }
 
 void Rdb::saveSet(const Iterator& it)
 {
     saveLen(set_type);
-    saveLen(it->first.size());
-    append(it->first);
-    DB::Set& set = getXXType(it, DB::Set&);
+    saveKey(it->first);
+    DB::Set& set = getValue(it, DB::Set&);
     saveLen(set.size());
-    for (auto& it : set) {
-        saveLen(it.size());
-        append(it);
+    for (auto& value : set) {
+        saveValue(value);
     }
 }
 
 void Rdb::saveHash(const Iterator& it)
 {
     saveLen(hash_type);
-    saveLen(it->first.size());
-    append(it->first);
-    DB::Hash& hash = getXXType(it, DB::Hash&);
+    saveKey(it->first);
+    DB::Hash& hash = getValue(it, DB::Hash&);
     saveLen(hash.size());
-    for (auto& it : hash) {
-        saveLen(it.first.size());
-        append(it.first);
-        saveLen(it.second.size());
-        append(it.second);
+    for (auto& pair : hash) {
+        saveKey(pair.first);
+        saveValue(pair.second);
     }
 }
 
 void Rdb::saveZset(const Iterator& it)
 {
     saveLen(zset_type);
-    saveLen(it->first.size());
-    append(it->first);
-    auto& tuple = getXXType(it, DB::Zset&);
+    saveKey(it->first);
+    auto& tuple = getValue(it, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);
     saveLen(zset.size());
     for (auto& it : zset) {
         saveLen(strlen(convert2f(std::get<0>(it))));
         append(convert2f(std::get<0>(it)));
-        saveLen(std::get<1>(it).size());
-        append(std::get<1>(it));
+        saveValue(std::get<1>(it));
     }
 }
 
@@ -223,31 +259,31 @@ void Rdb::load()
     if (size < 5 || strncmp(buf, "ALICE", 5))
         return;
     buf += 5;
-    uint64_t typelen;
+    uint64_t type;
     int64_t timeval = 0;
     while (true) {
-        size_t len = loadLen(buf, &typelen);
-        if (typelen == eof)
+        int len = loadLen(buf, &type);
+        if (type == eof)
             break;
-        if (typelen == select_db) {
+        if (type == select_db) {
             buf += len;
-            buf += loadLen(buf, &typelen);
-            _curDb = _dbServer->selectDb(typelen);
+            buf += loadLen(buf, &type);
+            _curdb = _dbServer->selectDb(type);
             continue;
         }
-        if (buf[0] == expire_key) {
-            timeval = *reinterpret_cast<int64_t*>(buf+1);
-            buf += 9;
-        } else if (buf[0] == string_type) {
-            buf = loadString(buf + 1, &timeval);
-        } else if (buf[0] == list_type) {
-            buf = loadList(buf + 1, &timeval);
-        } else if (buf[0] == set_type) {
-            buf = loadSet(buf + 1, &timeval);
-        } else if (buf[0] == hash_type) {
-            buf = loadHash(buf + 1, &timeval);
+        if (type == expire_key) {
+            timeval = *reinterpret_cast<int64_t*>(buf+len);
+            buf += len + 8;
+        } else if (type == string_type) {
+            buf = loadString(buf + len, &timeval);
+        } else if (type == list_type) {
+            buf = loadList(buf + len, &timeval);
+        } else if (type == set_type) {
+            buf = loadSet(buf + len, &timeval);
+        } else if (type == hash_type) {
+            buf = loadHash(buf + len, &timeval);
         } else
-            buf = loadZset(buf + 1, &timeval);
+            buf = loadZset(buf + len, &timeval);
     }
     munmap(start, size);
     close(fd);
@@ -256,121 +292,125 @@ void Rdb::load()
 // loadXXX()不能使用stack-array，不然如果key/value太长的话
 // 会导致stack-overflow
 
+char *Rdb::loadKey(char *ptr, std::string *key)
+{
+    uint64_t len;
+    ptr += loadLen(ptr, &len);
+    key->assign(ptr, len);
+    ptr += len;
+    return ptr;
+}
+
+char *Rdb::loadValue(char *ptr, std::string *value)
+{
+    uint64_t compress_if;
+    ptr += loadLen(ptr, &compress_if);
+    assert(compress_if == compress_value || compress_if == uncompress_value);
+    if (compress_if == compress_value) {
+        uint64_t origin_len, compressed_len;
+        ptr += loadLen(ptr, &origin_len);
+        ptr += loadLen(ptr, &compressed_len);
+        uncompress(ptr, compressed_len, value);
+        assert(value->size() == origin_len);
+        ptr += compressed_len;
+    } else {
+        uint64_t value_len;
+        ptr += loadLen(ptr, &value_len);
+        value->assign(ptr, value_len);
+        ptr += value_len;
+    }
+    return ptr;
+}
+
 char *Rdb::loadString(char *ptr, int64_t *tvptr)
 {
-    uint64_t keylen, vallen;
-    ptr += loadLen(ptr, &keylen);
-    std::string key(ptr, keylen);
-    ptr += keylen;
-    ptr += loadLen(ptr, &vallen);
-    char *vptr = ptr;
-    ptr += vallen;
-    _curDb->hashMap().emplace(key, std::string(vptr, vallen));
-    if (*tvptr > 0) {
-        _curDb->expireMap()[key] = *tvptr;
-        *tvptr = 0;
-    }
+    std::string key, value;
+    ptr = loadKey(ptr, &key);
+    ptr = loadValue(ptr, &value);
+    _curdb->hashMap().emplace(key, std::move(value));
+    loadExpireKey(key, tvptr);
     return ptr;
 }
 
 char *Rdb::loadList(char *ptr, int64_t *tvptr)
 {
-    uint64_t keylen, vallen;
-    ptr += loadLen(ptr, &keylen);
-    std::string key(ptr, keylen);
-    ptr += keylen;
-    uint64_t listlen;
-    ptr += loadLen(ptr, &listlen);
+    std::string key;
+    ptr = loadKey(ptr, &key);
+    uint64_t list_len;
+    ptr += loadLen(ptr, &list_len);
     DB::List list;
-    while (listlen-- > 0) {
-        ptr += loadLen(ptr, &vallen);
-        list.emplace_back(std::string(ptr, vallen));
-        ptr += vallen;
+    while (list_len-- > 0) {
+        std::string value;
+        ptr = loadValue(ptr, &value);
+        list.emplace_back(std::move(value));
     }
-    _curDb->hashMap().emplace(key, std::move(list));
-    if (*tvptr > 0) {
-        _curDb->expireMap()[key] = *tvptr;
-        *tvptr = 0;
-    }
+    _curdb->hashMap().emplace(key, std::move(list));
+    loadExpireKey(key, tvptr);
     return ptr;
 }
 
 char *Rdb::loadSet(char *ptr, int64_t *tvptr)
 {
-    uint64_t keylen, vallen;
-    ptr += loadLen(ptr, &keylen);
-    std::string key(ptr, keylen);
-    ptr += keylen;
-    uint64_t setlen;
-    ptr += loadLen(ptr, &setlen);
+    std::string key;
+    ptr = loadKey(ptr, &key);
+    uint64_t set_len;
+    ptr += loadLen(ptr, &set_len);
     DB::Set set;
-    while (setlen-- > 0) {
-        ptr += loadLen(ptr, &vallen);
-        set.emplace(std::string(ptr, vallen));
-        ptr += vallen;
+    while (set_len-- > 0) {
+        std::string value;
+        ptr = loadValue(ptr, &value);
+        set.emplace(std::move(value));
     }
-    _curDb->hashMap().emplace(key, std::move(set));
-    if (*tvptr > 0) {
-        _curDb->expireMap()[key] = *tvptr;
-        *tvptr = 0;
-    }
+    _curdb->hashMap().emplace(key, std::move(set));
+    loadExpireKey(key, tvptr);
     return ptr;
 }
 
 char *Rdb::loadHash(char *ptr, int64_t *tvptr)
 {
-    uint64_t keylen, vallen;
-    ptr += loadLen(ptr, &keylen);
-    std::string key(ptr, keylen);
-    ptr += keylen;
-    uint64_t hashlen;
-    ptr += loadLen(ptr, &hashlen);
+    std::string key;
+    ptr = loadKey(ptr, &key);
+    uint64_t hash_len;
+    ptr += loadLen(ptr, &hash_len);
     DB::Hash hash;
-    uint64_t fieldlen;
-    while (hashlen-- > 0) {
-        ptr += loadLen(ptr, &fieldlen);
-        char *fieldptr = ptr;
-        ptr += fieldlen;
-        ptr += loadLen(ptr, &vallen);
-        hash.emplace(std::string(fieldptr, fieldlen), std::string(ptr, vallen));
-        ptr += vallen;
+    while (hash_len-- > 0) {
+        std::string field, value;
+        ptr = loadKey(ptr, &field);
+        ptr = loadValue(ptr, &value);
+        hash.emplace(std::move(field), std::move(value));
     }
-    _curDb->hashMap().emplace(key, std::move(hash));
-    if (*tvptr > 0) {
-        _curDb->expireMap()[key] = *tvptr;
-        *tvptr = 0;
-    }
+    _curdb->hashMap().emplace(key, std::move(hash));
+    loadExpireKey(key, tvptr);
     return ptr;
 }
 
 char *Rdb::loadZset(char *ptr, int64_t *tvptr)
 {
-    uint64_t keylen, vallen;
-    ptr += loadLen(ptr, &keylen);
-    std::string key(ptr, keylen);
-    ptr += keylen;
-    uint64_t zsetlen;
-    ptr += loadLen(ptr, &zsetlen);
+    std::string key;
+    ptr = loadKey(ptr, &key);
+    uint64_t zset_len;
+    ptr += loadLen(ptr, &zset_len);
     DB::_Zset zset;
     DB::_Zmap zmap;
-    uint64_t slen;
-    while (zsetlen-- > 0) {
-        ptr += loadLen(ptr, &slen);
-        std::string scorestr(ptr, slen);
-        double score = atof(scorestr.c_str());
-        ptr += slen;
-        ptr += loadLen(ptr, &vallen);
-        std::string value(ptr, vallen);
+    while (zset_len-- > 0) {
+        std::string score_str, value;
+        ptr = loadKey(ptr, &score_str);
+        double score = atof(score_str.c_str());
+        ptr = loadValue(ptr, &value);
         zmap.emplace(value, score);
         zset.emplace(score, std::move(value));
-        ptr += vallen;
     }
-    _curDb->hashMap().emplace(key, std::make_tuple(zset, zmap));
+    _curdb->hashMap().emplace(key, std::make_tuple(zset, zmap));
+    loadExpireKey(key, tvptr);
+    return ptr;
+}
+
+void Rdb::loadExpireKey(const std::string& key, int64_t *tvptr)
+{
     if (*tvptr > 0) {
-        _curDb->expireMap()[key] = *tvptr;
+        _curdb->expireMap()[key] = *tvptr;
         *tvptr = 0;
     }
-    return ptr;
 }
 
 void Rdb::append(const std::string& data)
@@ -396,4 +436,33 @@ void Rdb::appendSyncBuffer(const Context::CommandList& cmdlist,
 {
     if (query) _syncBuffer.append(query, len);
     else DBServer::appendCommand(_syncBuffer, cmdlist);
+}
+
+bool Rdb::canCompress(size_t value_len)
+{
+#if defined (ALICE_HAVE_SNAPPY)
+    return value_len > compress_limit;
+#else
+    return false;
+#endif
+}
+
+void Rdb::compress(const char *input, size_t input_len,
+                   std::string *output)
+{
+#if defined (ALICE_HAVE_SNAPPY)
+    snappy::Compress(input, input_len, output);
+#else
+    return;
+#endif
+}
+
+void Rdb::uncompress(const char *compressed, size_t compressed_len,
+                     std::string *origin)
+{
+#if defined (ALICE_HAVE_SNAPPY)
+    snappy::Uncompress(compressed, compressed_len, origin);
+#else
+    return;
+#endif
 }

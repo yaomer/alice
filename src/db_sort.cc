@@ -122,12 +122,12 @@ int DB::sortGetResult(Context& con, const std::string& key, DB::SortObjectList& 
         con.append(reply.multi_empty);
         return C_ERR;
     }
-    if (isXXType(it, List)) {
+    if (isType(it, List)) {
         *cmdops |= SORT_LIST_TYPE;
         List& list = getListValue(it);
         for (auto& it : list)
             result.emplace_back(&it);
-    } else if (isXXType(it, Set)) {
+    } else if (isType(it, Set)) {
         *cmdops |= SORT_SET_TYPE;
         Set& set = getSetValue(it);
         for (auto& it : set)
@@ -154,7 +154,7 @@ void DB::sortByPattern(unsigned *cmdops, const String& by, SortObjectList& resul
                     + by.substr(star - by.begin(), by.size());
             }
             auto e = find(key);
-            if (!isFound(e) || !isXXType(e, String)) {
+            if (!isFound(e) || !isType(e, String)) {
                 it._u.cmpVal = it._value;
             } else {
                 String& val = getStringValue(e);
@@ -243,7 +243,7 @@ void DB::sortByGetKeys(SortObjectList& result, unsigned cmdops, const std::vecto
                     + p.substr(star - p.begin(), p.size());
             }
             auto e = find(key);
-            if (isFound(e) && isXXType(e, String)) {
+            if (isFound(e) && isType(e, String)) {
                 String& val = getStringValue(e);
                 tres.emplace_back(&val);
             } else

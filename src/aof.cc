@@ -150,15 +150,15 @@ void Aof::rewrite()
                     rewriteExpire(it->first, expire->second);
                 }
             }
-            if (isXXType(it, DB::String))
+            if (isType(it, DB::String))
                 rewriteString(it);
-            else if (isXXType(it, DB::List))
+            else if (isType(it, DB::List))
                 rewriteList(it);
-            else if (isXXType(it, DB::Set))
+            else if (isType(it, DB::Set))
                 rewriteSet(it);
-            else if (isXXType(it, DB::Hash))
+            else if (isType(it, DB::Hash))
                 rewriteHash(it);
-            else if (isXXType(it, DB::Zset))
+            else if (isType(it, DB::Zset))
                 rewriteZset(it);
             index++;
         }
@@ -202,7 +202,7 @@ void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)
 
 void Aof::rewriteString(Iterator it)
 {
-    DB::String& string = getXXType(it, DB::String&);
+    DB::String& string = getValue(it, DB::String&);
     append("*3\r\n$3\r\nSET\r\n$");
     append(convert(it->first.size()));
     append("\r\n");
@@ -214,7 +214,7 @@ void Aof::rewriteString(Iterator it)
 
 void Aof::rewriteList(Iterator it)
 {
-    DB::List& list = getXXType(it, DB::List&);
+    DB::List& list = getValue(it, DB::List&);
     if (list.empty()) return;
     append("*");
     append(convert(list.size() + 2));
@@ -232,7 +232,7 @@ void Aof::rewriteList(Iterator it)
 
 void Aof::rewriteSet(Iterator it)
 {
-    DB::Set& set = getXXType(it, DB::Set&);
+    DB::Set& set = getValue(it, DB::Set&);
     if (set.empty()) return;
     append("*");
     append(convert(set.size() + 2));
@@ -250,7 +250,7 @@ void Aof::rewriteSet(Iterator it)
 
 void Aof::rewriteHash(Iterator it)
 {
-    DB::Hash& hash = getXXType(it, DB::Hash&);
+    DB::Hash& hash = getValue(it, DB::Hash&);
     if (hash.empty()) return;
     append("*");
     append(convert(hash.size() * 2 + 2));
@@ -271,7 +271,7 @@ void Aof::rewriteHash(Iterator it)
 
 void Aof::rewriteZset(Iterator it)
 {
-    auto& tuple = getXXType(it, DB::Zset&);
+    auto& tuple = getValue(it, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);
     if (zset.empty()) return;
     append("*");

@@ -7,4 +7,5 @@ appendonly.aof
 alice-server
 alice-cli
 alice-proxy
-libalice.a
+libalice-api.a
+configure.h
