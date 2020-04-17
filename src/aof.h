@@ -38,7 +38,6 @@ private:
     void rewriteSet(Iterator it);
     void rewriteHash(Iterator it);
     void rewriteZset(Iterator it);
-    size_t getFilesize(int fd);
 
     DBServer *_dbServer;
     std::string _buffer;

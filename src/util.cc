@@ -1,7 +1,9 @@
 #include <time.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <errno.h>
+
 #include <vector>
 #include <string>
 
@@ -175,6 +177,21 @@ next:
         goto next;
     }
     fclose(fp);
+}
+
+off_t getfilesize(int fd)
+{
+    struct stat st;
+    fstat(fd, &st);
+    return st.st_size;
+}
+
+bool fileExists(const char *filename)
+{
+    FILE *fp = fopen(filename, "r");
+    bool exists = fp ? true : false;
+    fclose(fp);
+    return exists;
 }
 
 }

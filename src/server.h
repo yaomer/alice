@@ -109,9 +109,6 @@ public:
     void sendSyncCommandToSlave(const char *query, size_t len);
     void sendAckToMaster(const Angel::TcpConnectionPtr& conn);
     void doWriteCommand(const Context::CommandList& cmdlist, const char *query, size_t len);
-    static void appendCommand(std::string& buffer, const Context::CommandList& cmdlist);
-    static void appendCommand(std::string& buffer, const Context::CommandList& cmdlist,
-                              const char *query, size_t len);
     void appendWriteCommand(const Context::CommandList& cmdlist, const char *query, size_t len);
     Slaves& slaves() { return _slaves; }
     size_t masterOffset() const { return _masterOffset; }
@@ -143,6 +140,9 @@ public:
     SlowlogQueue& slowlogQueue() { return _slowlogQueue; }
     void addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end);
     void clear();
+    static void CONVERT2RESP(std::string& buffer, const Context::CommandList& cmdlist);
+    static void CONVERT2RESP(std::string& buffer, const Context::CommandList& cmdlist,
+                              const char *query, size_t len);
     static ssize_t getProcMemory();
 private:
     void evictAllkeysWithLru();

@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <tuple>
 
@@ -250,9 +249,8 @@ void Rdb::saveZset(const Iterator& it)
 void Rdb::load()
 {
     int fd = open(g_server_conf.rdb_file.c_str(), O_RDONLY);
-    struct stat st;
-    fstat(fd, &st);
-    size_t size = st.st_size;
+    if (fd < 0) return;
+    off_t size = getfilesize(fd);
     void *start = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
     if (start == MAP_FAILED) return;
     char *buf = reinterpret_cast<char*>(start);
@@ -435,7 +433,7 @@ void Rdb::appendSyncBuffer(const Context::CommandList& cmdlist,
                            const char *query, size_t len)
 {
     if (query) _syncBuffer.append(query, len);
-    else DBServer::appendCommand(_syncBuffer, cmdlist);
+    else DBServer::CONVERT2RESP(_syncBuffer, cmdlist);
 }
 
 bool Rdb::canCompress(size_t value_len)

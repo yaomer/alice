@@ -13,7 +13,7 @@ using namespace Alice;
 
 // if parse error, return -1
 // if not enough data, return 0
-// else return length of response
+// else return length of request
 ssize_t Server::parseRequest(Context& con, Angel::Buffer& buf)
 {
     const char *s = buf.peek();
@@ -114,8 +114,8 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
     context.message().clear();
 }
 
-// [query, len]是REPL形式的请求字符串，如果query为真，则使用[query, len]，这样可以避免许多低效的拷贝；
-// 如果query为假，则使用cmdlist，然后将其转换为REPL形式的字符串，不过这种情况很少见
+// [query, len]是RESP形式的请求字符串，如果query为真，则使用[query, len]，这样可以避免许多低效的拷贝；
+// 如果query为假，则使用cmdlist，然后将其转换为RESP形式的字符串，不过这种情况很少见
 void DBServer::doWriteCommand(const Context::CommandList& cmdlist,
                               const char *query, size_t len)
 {
@@ -124,7 +124,7 @@ void DBServer::doWriteCommand(const Context::CommandList& cmdlist,
     if (!_slaves.empty()) {
         if (!query) {
             std::string buffer;
-            appendCommand(buffer, cmdlist);
+            CONVERT2RESP(buffer, cmdlist);
             sendSyncCommandToSlave(buffer.data(), buffer.size());
         } else
             sendSyncCommandToSlave(query, len);
@@ -561,7 +561,7 @@ void DBServer::appendWriteCommand(const Context::CommandList& cmdlist,
     if (!slaves().empty()) {
         if (!query) {
             std::string buffer;
-            appendCommand(buffer, cmdlist);
+            CONVERT2RESP(buffer, cmdlist);
             appendCopyBacklogBuffer(buffer.data(), buffer.size());
         } else
             appendCopyBacklogBuffer(query, len);
@@ -589,8 +589,8 @@ static void appendTimeStamp(std::string& buffer, int64_t timeval, bool is_second
     appendCommandArg(buffer, convert(strlen(convert(milliseconds))), convert(milliseconds));
 }
 
-// 将解析后的命令转换成REPL形式的命令
-void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cmdlist)
+// 将解析后的命令转换成RESP形式的命令
+void DBServer::CONVERT2RESP(std::string& buffer, const Context::CommandList& cmdlist)
 {
     appendCommandHead(buffer, cmdlist.size());
     for (auto& it : cmdlist) {
@@ -598,10 +598,9 @@ void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cm
     }
 }
 
-// 将解析后的命令转换成REPL形式的命令
-// 如果split_expire为真, 则需要将涉及到(P)EXPIRE命令的超时值改为一个unix timestamp
+// 将解析后的命令转换成RESP形式的命令
 // EXPIRE命令将被转换为PEXPIRE
-void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cmdlist,
+void DBServer::CONVERT2RESP(std::string& buffer, const Context::CommandList& cmdlist,
                              const char *query, size_t len)
 {
     size_t size = cmdlist.size();
@@ -627,7 +626,7 @@ void DBServer::appendCommand(std::string& buffer, const Context::CommandList& cm
         appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
         appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), false);
     } else {
-        if (!query) appendCommand(buffer, cmdlist);
+        if (!query) CONVERT2RESP(buffer, cmdlist);
         else buffer.append(query, len);
     }
 }
@@ -711,7 +710,8 @@ void Server::start()
             g_server->dbServer().aof()->rewriteBackground();
             g_server->loop()->quit();
             });
-    if (g_server_conf.enable_appendonly)
+    // 优先使用AOF文件来载入数据
+    if (fileExists(g_server_conf.appendonly_file.c_str()))
         _dbServer.aof()->load();
     else
         _dbServer.rdb()->load();
@@ -731,7 +731,17 @@ static struct option opts[] = {
     { "serverconf", 1, NULL, 'a' },
     { "sentinel", 0, NULL, 'b' },
     { "sentinelconf", 1, NULL, 'c' },
+    { "help", 0, NULL, 'h' },
 };
+
+static void help()
+{
+    fprintf(stderr, "default <server-conf-file=alice.conf>\n"
+                    "--serverconf <file>\n"
+                    "--sentinel [run as a sentinel] <sentinel-conf-file=sentinel.conf>\n"
+                    "--sentinelconf <file> [run as a sentinel] <sentinel-conf-file=file>\n");
+    abort();
+}
 
 int main(int argc, char *argv[])
 {
@@ -739,11 +749,12 @@ int main(int argc, char *argv[])
     bool startup_sentinel = false;
     std::string server_conf_file = "alice.conf";
     std::string sentinel_conf_file = "sentinel.conf";
-    while ((c = getopt_long(argc, argv, "a:bc:", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "a:bc:h", opts, NULL)) != -1) {
         switch (c) {
         case 'a': server_conf_file = optarg; break;
         case 'b': startup_sentinel = true; break;
         case 'c': startup_sentinel = true; sentinel_conf_file = optarg; break;
+        case 'h': help();
         }
     }
 

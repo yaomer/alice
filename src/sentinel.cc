@@ -127,7 +127,7 @@ void SentinelInstance::askForSentinels(const char *runid)
     cmdlist.emplace_back(convert(inetAddr().toIpPort()));
     cmdlist.emplace_back(convert(g_sentinel->currentEpoch()));
     cmdlist.emplace_back(runid);
-    DBServer::appendCommand(message, cmdlist);
+    DBServer::CONVERT2RESP(message, cmdlist);
     for (auto& sentinel : sentinels()) {
         auto& cli = sentinel.second->clients()[0];
         if (cli->isConnected()) {

@@ -56,6 +56,9 @@ void writeToFile(int fd, const char *buf, size_t nbytes);
 using ConfParamList = std::vector<std::vector<std::string>>;
 void parseConf(ConfParamList& confParamList, const char *filename);
 
+off_t getfilesize(int fd);
+bool fileExists(const char *filename);
+
 // 判断n是否是2的整数次幂
 bool inline is_power_of_2(unsigned n)
 {

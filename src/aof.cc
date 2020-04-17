@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <string.h>
 
 #include "aof.h"
@@ -26,14 +25,14 @@ Aof::Aof(DBServer *dbServer)
 void Aof::append(const Context::CommandList& cmdlist,
                  const char *query, size_t len)
 {
-    DBServer::appendCommand(_buffer, cmdlist, query, len);
+    DBServer::CONVERT2RESP(_buffer, cmdlist, query, len);
 }
 
 // 保存aof重写过程中执行的所有写命令
 void Aof::appendRewriteBuffer(const Context::CommandList& cmdlist,
                               const char *query, size_t len)
 {
-    DBServer::appendCommand(_rewriteBuffer, cmdlist, query, len);
+    DBServer::CONVERT2RESP(_rewriteBuffer, cmdlist, query, len);
 }
 
 // 将缓冲区中的命令flush到文件中
@@ -43,7 +42,7 @@ void Aof::appendAof(int64_t now)
     int64_t syncInterval = now - _lastSyncTime;
     int fd = open(g_server_conf.appendonly_file.c_str(), O_RDWR | O_APPEND | O_CREAT, 0660);
     writeToFile(fd, _buffer.data(), _buffer.size());
-    _currentFilesize = getFilesize(fd);
+    _currentFilesize = getfilesize(fd);
     _buffer.clear();
     if (g_server_conf.aof_mode == AOF_ALWAYS) {
         g_server->fsyncBackground(fd);
@@ -75,7 +74,7 @@ void Aof::load()
     Context pseudoClient(_dbServer, nullptr);
     Angel::Buffer buf;
     FILE *fp = fopen(g_server_conf.appendonly_file.c_str(), "r");
-    if (!fp || getFilesize(fileno(fp)) == 0) {
+    if (!fp || getfilesize(fileno(fp)) == 0) {
         rewriteSelectDb(0);
         if (fp) fclose(fp);
         return;
@@ -130,7 +129,7 @@ void Aof::rewriteBackground()
 void Aof::rewrite()
 {
     _fd = open(tmpfile, O_RDWR | O_CREAT | O_APPEND, 0660);
-    _lastRewriteFilesize = getFilesize(_fd);
+    _lastRewriteFilesize = getfilesize(_fd);
     _buffer.clear();
     int64_t now = Angel::nowMs();
     int index = 0;
@@ -306,13 +305,6 @@ void Aof::flush()
 {
     writeToFile(_fd, _buffer.data(), _buffer.size());
     _buffer.clear();
-}
-
-size_t Aof::getFilesize(int fd)
-{
-    struct stat st;
-    fstat(fd, &st);
-    return st.st_size;
 }
 
 bool Aof::rewriteIsOk()
