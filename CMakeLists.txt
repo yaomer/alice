@@ -56,5 +56,5 @@ target_link_libraries(alice-cli angel linenoise)
 add_executable(alice-proxy ${PROXY_FILES})
 target_link_libraries(alice-proxy angel)
 
-add_library(alice STATIC ${CLIENT_FILES})
-target_link_libraries(alice angel)
+add_library(alice-api STATIC ${CLIENT_FILES})
+target_link_libraries(alice-api angel)
