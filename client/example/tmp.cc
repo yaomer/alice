@@ -4,7 +4,7 @@
 int main()
 {
     Alice::AliceContext alice;
-    alice.connect("127.0.0.1", 1296);
+    alice.connect("127.0.0.1", 6379);
     if (alice.err()) {
         std::cout << alice.errStr() << "\n";
         return 1;
@@ -20,5 +20,7 @@ int main()
     std::cout << "name(list):\n";
     for (auto& it : alice.reply())
         std::cout << it << "\n";
+    std::cout << alice.lock("hello") << "\n";
+    alice.release("hello");
     alice.close();
 }

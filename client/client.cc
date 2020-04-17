@@ -10,8 +10,8 @@
 #include <fcntl.h>
 #include <iostream>
 
-#include "alice.h"
-#include "util.h"
+#include "client.h"
+#include "../src/util.h"
 
 using namespace Alice;
 
@@ -168,3 +168,15 @@ void AliceContext::close()
 {
     ::close(_fd);
 }
+
+// bool AliceContext::lock(const std::string& key)
+// {
+//    executor("set %s unique_id nx", key.c_str());
+//    return strncasecmp(reply()[0].data(), "OK", 2) == 0;
+// }
+
+// void AliceContext::release(const std::string& key)
+// {
+//    executor("eval \"if redis.call('get', KEYS[1]) == 'unique_id' "
+//             "then redis.call('del', KEYS[1]) end\" 1 %s", key.c_str());
+// }

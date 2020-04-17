@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include <memory>
 
-#include "util.h"
+#include "../src/util.h"
 
 using std::placeholders::_1;
 using std::placeholders::_2;

@@ -1,5 +1,5 @@
-#ifndef _ALICE_SRC_ALICE_H
-#define _ALICE_SRC_ALICE_H
+#ifndef _ALICE_CLIENT_H
+#define _ALICE_CLIENT_H
 
 #include <Angel/Buffer.h>
 
@@ -27,6 +27,8 @@ public:
     int err() { return _err; }
     std::string& errStr() { return _errStr; }
     void close();
+    // bool lock(const std::string& key);
+    // void release(const std::string& key);
 private:
     void sendRequest();
     void parseStatusReply();
@@ -45,4 +47,4 @@ private:
 };
 }
 
-#endif // _ALICE_SRC_ALICE_H
+#endif // _ALICE_CLIENT_H
