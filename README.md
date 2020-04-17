@@ -17,7 +17,8 @@
 ### 依赖
 + 网络模块使用[Angel](https://github.com/yaomer/Angel)
 + 客户端的命令提示使用[linenoise](https://github.com/antirez/linenoise)
-+ 我们默认libangel.a和liblinenoise.a都安装到了/usr/local/lib目录
++ 如果安装了`snappy`，则会在生成rdb快照时进行压缩，这可以使生成的rdb快照更加紧凑
++ 我们默认libangel.a liblinenoise.a libsnappy.a都安装到了/usr/local/lib目录
 
 ### 压测
 + 压测可使用[redis](https://github.com/antirez/redis)自带的benchmark(有一点需要注意的是：必须指定-t cmd)
