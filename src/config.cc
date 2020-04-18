@@ -145,20 +145,20 @@ void Alice::readSentinelConf(const char *sentinel_conf_file)
 
 void DB::configGet(Context& con, const std::string& arg)
 {
-    appendReplyMulti(con, 2);
-    appendReplyString(con, arg);
+    con.appendReplyMulti(2);
+    con.appendReplyString(arg);
     if (strcasecmp(arg.c_str(), "databases") == 0) {
-        appendReplyString(con, convert(g_server_conf.databases));
+        con.appendReplyString(convert(g_server_conf.databases));
     } else if (strcasecmp(arg.c_str(), "expire-check-dbnums") == 0) {
-        appendReplyString(con, convert(g_server_conf.expire_check_dbnums));
+        con.appendReplyString(convert(g_server_conf.expire_check_dbnums));
     } else if (strcasecmp(arg.c_str(), "expire-check-keys") == 0) {
-        appendReplyString(con, convert(g_server_conf.expire_check_keys));
+        con.appendReplyString(convert(g_server_conf.expire_check_keys));
     } else if (strcasecmp(arg.c_str(), "maxmemory") == 0) {
-        appendReplyString(con, convert(g_server_conf.maxmemory));
+        con.appendReplyString(convert(g_server_conf.maxmemory));
     } else if (strcasecmp(arg.c_str(), "maxmemory-policy") == 0) {
-        appendReplyString(con, convert(g_server_conf.maxmemory_policy));
+        con.appendReplyString(convert(g_server_conf.maxmemory_policy));
     } else if (strcasecmp(arg.c_str(), "maxmemory-samples") == 0) {
-        appendReplyString(con, convert(g_server_conf.maxmemory_samples));
+        con.appendReplyString(convert(g_server_conf.maxmemory_samples));
     } else if (strcasecmp(arg.c_str(), "save") == 0) {
         std::string s;
         for (auto& it : g_server_conf.save_params) {
@@ -168,26 +168,26 @@ void DB::configGet(Context& con, const std::string& arg)
             s.append(" ");
         }
         s.pop_back();
-        appendReplyString(con, s);
+        con.appendReplyString(s);
     } else if (strcasecmp(arg.c_str(), "appendonly") == 0) {
-        appendReplyString(con, g_server_conf.enable_appendonly ? "yes" : "no");
+        con.appendReplyString(g_server_conf.enable_appendonly ? "yes" : "no");
     } else if (strcasecmp(arg.c_str(), "appendfsync") == 0) {
         if (g_server_conf.aof_mode == AOF_EVERYSEC)
-            appendReplyString(con, "everysec");
+            con.appendReplyString("everysec");
         else if (g_server_conf.aof_mode == AOF_ALWAYS)
-            appendReplyString(con, "always");
+            con.appendReplyString("always");
         else
-            appendReplyString(con, "no");
+            con.appendReplyString("no");
     } else if (strcasecmp(arg.c_str(), "repl-timeout") == 0) {
-        appendReplyString(con, convert(g_server_conf.repl_timeout));
+        con.appendReplyString(convert(g_server_conf.repl_timeout));
     } else if (strcasecmp(arg.c_str(), "repl-ping-period") == 0) {
-        appendReplyString(con, convert(g_server_conf.repl_ping_period));
+        con.appendReplyString(convert(g_server_conf.repl_ping_period));
     } else if (strcasecmp(arg.c_str(), "repl-backlog-size") == 0) {
-        appendReplyString(con, convert(g_server_conf.repl_backlog_size));
+        con.appendReplyString(convert(g_server_conf.repl_backlog_size));
     } else if (strcasecmp(arg.c_str(), "slowlog-log-slower-than") == 0) {
-        appendReplyString(con, convert(g_server_conf.slowlog_log_slower_than));
+        con.appendReplyString(convert(g_server_conf.slowlog_log_slower_than));
     } else if (strcasecmp(arg.c_str(), "slowlog-max-len") == 0) {
-        appendReplyString(con, convert(g_server_conf.slowlog_max_len));
+        con.appendReplyString(convert(g_server_conf.slowlog_max_len));
     } else
         con.message().assign(reply.multi_empty);
 }

@@ -33,11 +33,11 @@ private:
     void rewrite();
     void rewriteSelectDb(int dbnum);
     void rewriteExpire(const DB::Key& key, int64_t milliseconds);
-    void rewriteString(Iterator it);
-    void rewriteList(Iterator it);
-    void rewriteSet(Iterator it);
-    void rewriteHash(Iterator it);
-    void rewriteZset(Iterator it);
+    void rewriteString(const Iterator& it);
+    void rewriteList(const Iterator& it);
+    void rewriteSet(const Iterator& it);
+    void rewriteHash(const Iterator& it);
+    void rewriteZset(const Iterator& it);
 
     DBServer *_dbServer;
     std::string _buffer;

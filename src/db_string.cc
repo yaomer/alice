@@ -87,7 +87,7 @@ void DB::getCommand(Context& con)
     if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, String);
     auto& value = getStringValue(it);
-    appendReplyString(con, value);
+    con.appendReplyString(value);
 }
 
 void DB::getSetCommand(Context& con)
@@ -103,7 +103,7 @@ void DB::getSetCommand(Context& con)
     checkType(con, it, String);
     String oldvalue = getStringValue(it);
     insert(cmdlist[1], cmdlist[2]);
-    appendReplyString(con, oldvalue);
+    con.appendReplyString(oldvalue);
 }
 
 void DB::strlenCommand(Context& con)
@@ -114,7 +114,7 @@ void DB::strlenCommand(Context& con)
     if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, String);
     String& value = getStringValue(it);
-    appendReplyNumber(con, value.size());
+    con.appendReplyNumber(value.size());
 }
 
 void DB::appendCommand(Context& con)
@@ -125,13 +125,13 @@ void DB::appendCommand(Context& con)
     auto it = find(cmdlist[1]);
     if (!isFound(it)) {
         insert(cmdlist[1], cmdlist[2]);
-        appendReplyNumber(con, cmdlist[2].size());
+        con.appendReplyNumber(cmdlist[2].size());
         return;
     }
     checkType(con, it, String);
     String& string = getStringValue(it);
     string.append(cmdlist[2]);
-    appendReplyNumber(con, string.size());
+    con.appendReplyNumber(string.size());
 }
 
 void DB::msetCommand(Context& con)
@@ -151,7 +151,7 @@ void DB::mgetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    appendReplyMulti(con, size - 1);
+    con.appendReplyMulti(size - 1);
     for (size_t i = 1; i < size; i++) {
         expireIfNeeded(cmdlist[i]);
         auto it = find(cmdlist[i]);
@@ -161,7 +161,7 @@ void DB::mgetCommand(Context& con)
                 continue;
             }
             String& value = getStringValue(it);
-            appendReplyString(con, value);
+            con.appendReplyString(value);
         } else
             con.append(reply.nil);
     }
@@ -179,10 +179,10 @@ void DB::incr(Context& con, int64_t incr)
         if (str2numberErr()) db_return(con, reply.integer_err);
         number += incr;
         insert(cmdlist[1], String(convert(number)));
-        appendReplyNumber(con, number);
+        con.appendReplyNumber(number);
     } else {
         insert(cmdlist[1], String(convert(incr)));
-        appendReplyNumber(con, incr);
+        con.appendReplyNumber(incr);
     }
     touchWatchKey(cmdlist[1]);
 }
@@ -228,7 +228,7 @@ void DB::setRangeCommand(Context& con)
         string.reserve(offset + value.size());
         string.resize(offset, '\x00');
         string.append(value);
-        appendReplyNumber(con, string.size());
+        con.appendReplyNumber(string.size());
         insert(cmdlist[1], std::move(string));
         return;
     }
@@ -245,7 +245,7 @@ void DB::setRangeCommand(Context& con)
             string[i] = '\x00';
         string.append(value);
     }
-    appendReplyNumber(con, string.size());
+    con.appendReplyNumber(string.size());
     insert(cmdlist[1], std::move(string));
 }
 
@@ -265,5 +265,5 @@ void DB::getRangeCommand(Context& con)
     int lowerbound = -string.size();
     if (checkRange(con, &start, &stop, lowerbound, upperbound) == C_ERR)
         return;
-    appendReplyString(con, string.substr(start, stop - start + 1));
+    con.appendReplyString(string.substr(start, stop - start + 1));
 }

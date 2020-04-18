@@ -175,7 +175,7 @@ void DB::ttl(Context& con, int option)
     if (expire == expireMap().end()) db_return(con, reply.n_1);
     int64_t milliseconds = expire->second - Angel::nowMs();
     if (option == TTL) milliseconds /= 1000;
-    appendReplyNumber(con, milliseconds);
+    con.appendReplyNumber(milliseconds);
 }
 
 void DB::ttlCommand(Context& con)
@@ -224,16 +224,16 @@ void DB::delCommand(Context& con)
             retval++;
         }
     }
-    appendReplyNumber(con, retval);
+    con.appendReplyNumber(retval);
 }
 
 void DB::keysCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     if (cmdlist[1].compare("*")) db_return(con, reply.unknown_option);
-    appendReplyMulti(con, _hashMap.size());
+    con.appendReplyMulti(_hashMap.size());
     for (auto& it : _hashMap)
-        appendReplyString(con, it.first);
+        con.appendReplyString(it.first);
 }
 
 void DB::saveCommand(Context& con)
@@ -275,7 +275,7 @@ void DB::bgRewriteAofCommand(Context& con)
 
 void DB::lastSaveCommand(Context& con)
 {
-    appendReplyNumber(con, _dbServer->lastSaveTime());
+    con.appendReplyNumber(_dbServer->lastSaveTime());
 }
 
 void DB::flushdbCommand(Context& con)
@@ -458,7 +458,7 @@ void DB::publishCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t subClients = _dbServer->pubMessage(cmdlist[2], cmdlist[1], con.conn()->id());
-    appendReplyNumber(con, subClients);
+    con.appendReplyNumber(subClients);
 }
 
 void DB::subscribeCommand(Context& con)
@@ -467,10 +467,10 @@ void DB::subscribeCommand(Context& con)
     con.append("+Reading messages... (press Ctrl-C to quit)\r\n");
     for (size_t i = 1; i < cmdlist.size(); i++) {
         _dbServer->subChannel(cmdlist[i], con.conn()->id());
-        appendReplyMulti(con, 3);
-        appendReplyString(con, "subscribe");
-        appendReplyString(con, cmdlist[i]);
-        appendReplyNumber(con, i);
+        con.appendReplyMulti(3);
+        con.appendReplyString("subscribe");
+        con.appendReplyString(cmdlist[i]);
+        con.appendReplyNumber(i);
     }
 }
 
@@ -507,7 +507,7 @@ void DB::infoCommand(Context& con)
 
 void DB::dbsizeCommand(Context& con)
 {
-    appendReplyNumber(con, _hashMap.size());
+    con.appendReplyNumber(_hashMap.size());
 }
 
 void DB::expireIfNeeded(const Key& key)
@@ -598,7 +598,7 @@ void DB::lruCommand(Context& con)
     auto it = find(cmdlist[1]);
     if (!isFound(it)) db_return(con, reply.n_1);
     int64_t seconds = (_lru_cache - it->second.lru()) / 1000;
-    appendReplyNumber(con, seconds);
+    con.appendReplyNumber(seconds);
 }
 
 #define SlOWLOG_GET_LOGS 10
@@ -614,15 +614,15 @@ void DB::slowlogGet(Context& con, Context::CommandList& cmdlist)
         count = SlOWLOG_GET_LOGS;
     if (count > _dbServer->slowlogQueue().size())
         count = _dbServer->slowlogQueue().size();
-    appendReplyMulti(con, count);
+    con.appendReplyMulti(count);
     for (auto& it : _dbServer->slowlogQueue()) {
-        appendReplyMulti(con, 4);
-        appendReplyString(con, convert(it._id));
-        appendReplyString(con, convert(it._time));
-        appendReplyString(con, convert(it._duration));
-        appendReplyMulti(con, it._args.size());
+        con.appendReplyMulti(4);
+        con.appendReplyString(convert(it._id));
+        con.appendReplyString(convert(it._time));
+        con.appendReplyString(convert(it._duration));
+        con.appendReplyMulti(it._args.size());
         for (auto& arg : it._args)
-            appendReplyString(con, arg);
+            con.appendReplyString(arg);
     }
 }
 
@@ -632,7 +632,7 @@ void DB::slowlogCommand(Context& con)
     if (strcasecmp(cmdlist[1].c_str(), "get") == 0) {
         slowlogGet(con, cmdlist);
     } else if (strcasecmp(cmdlist[1].c_str(), "len") == 0) {
-        appendReplyNumber(con, _dbServer->slowlogQueue().size());
+        con.appendReplyNumber(_dbServer->slowlogQueue().size());
     } else if (strcasecmp(cmdlist[1].c_str(), "reset") == 0) {
         _dbServer->slowlogQueue().clear();
         con.append(reply.ok);

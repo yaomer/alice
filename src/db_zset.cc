@@ -26,7 +26,7 @@ void DB::zaddCommand(Context& con)
             zmap.emplace(cmdlist[i+1], score);
         }
         insert(cmdlist[1], std::make_tuple(zset, zmap));
-        appendReplyNumber(con, (cmdlist.size() - 2) / 2);
+        con.appendReplyNumber((cmdlist.size() - 2) / 2);
         return;
     }
     checkType(con, it, Zset);
@@ -46,7 +46,7 @@ void DB::zaddCommand(Context& con)
         zmap.emplace(cmdlist[i+1], score);
         zset.emplace(std::move(tuple));
     }
-    appendReplyNumber(con, retval);
+    con.appendReplyNumber(retval);
 }
 
 void DB::zscoreCommand(Context& con)
@@ -60,7 +60,7 @@ void DB::zscoreCommand(Context& con)
     _Zmap zmap = std::get<1>(tuple);
     auto e = zmap.find(cmdlist[2]);
     if (e != zmap.end()) {
-        appendReplyDouble(con, e->second);
+        con.appendReplyDouble(e->second);
     } else
         con.append(reply.nil);
 }
@@ -79,7 +79,7 @@ void DB::zincrbyCommand(Context& con)
         zmap.emplace(cmdlist[3], score);
         zset.emplace(score, cmdlist[3]);
         insert(cmdlist[1], std::make_tuple(zset, zmap));
-        appendReplyDouble(con, score);
+        con.appendReplyDouble(score);
         return;
     }
     checkType(con, it, Zset);
@@ -91,11 +91,11 @@ void DB::zincrbyCommand(Context& con)
         zset.erase(std::make_tuple(e->second, cmdlist[3]));
         e->second += score;
         zset.emplace(e->second, cmdlist[3]);
-        appendReplyDouble(con, e->second);
+        con.appendReplyDouble(e->second);
     } else {
         zmap.emplace(cmdlist[3], score);
         zset.emplace(score, cmdlist[3]);
-        appendReplyDouble(con, score);
+        con.appendReplyDouble(score);
     }
 }
 
@@ -107,7 +107,7 @@ void DB::zcardCommand(Context& con)
     if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, Zset);
     auto& tuple = getZsetValue(it);
-    appendReplyNumber(con, std::get<0>(tuple).size());
+    con.appendReplyNumber(std::get<0>(tuple).size());
 }
 
 void DB::zcountCommand(Context& con)
@@ -130,7 +130,7 @@ void DB::zcountCommand(Context& con)
     // else upperbound = set.find(max) + 1
     if (lowerbound == zset.end()) db_return(con, reply.n0);
     int distance = std::distance(lowerbound, upperbound);
-    appendReplyNumber(con, distance);
+    con.appendReplyNumber(distance);
 }
 
 void DB::zrange(Context& con, bool reverse)
@@ -158,9 +158,9 @@ void DB::zrange(Context& con, bool reverse)
     if (checkRange(con, &start, &stop, lowerbound, upperbound) == C_ERR)
         return;
     if (withscores)
-        appendReplyMulti(con, (stop - start + 1) * 2);
+        con.appendReplyMulti((stop - start + 1) * 2);
     else
-        appendReplyMulti(con, stop - start + 1);
+        con.appendReplyMulti(stop - start + 1);
     int i = 0;
     if (!reverse) {
         for (auto& it : zset) {
@@ -170,9 +170,9 @@ void DB::zrange(Context& con, bool reverse)
             }
             if (i > stop)
                 break;
-            appendReplyString(con, std::get<1>(it));
+            con.appendReplyString(std::get<1>(it));
             if (withscores)
-                appendReplyDouble(con, std::get<0>(it));
+                con.appendReplyDouble(std::get<0>(it));
             i++;
         }
     } else {
@@ -183,9 +183,9 @@ void DB::zrange(Context& con, bool reverse)
             }
             if (i > stop)
                 break;
-            appendReplyString(con, std::get<1>(*it));
+            con.appendReplyString(std::get<1>(*it));
             if (withscores)
-                appendReplyDouble(con, std::get<0>(*it));
+                con.appendReplyDouble(std::get<0>(*it));
             i++;
         }
     }
@@ -219,7 +219,7 @@ void DB::zrank(Context& con, bool reverse)
         distance = std::distance(zset.cbegin(), last);
     else
         distance = std::distance(last, zset.cend());
-    appendReplyNumber(con, distance);
+    con.appendReplyNumber(distance);
 }
 
 void DB::zrankCommand(Context& con)
@@ -282,18 +282,18 @@ static void zrangefor(Context& con, DB::_Zset::iterator first, DB::_Zset::iterat
     bool isCount = (count > 0);
     if (!reverse) {
         while (first != last) {
-            DB::appendReplyString(con, std::get<1>(*first));
+            con.appendReplyString(std::get<1>(*first));
             if (withscores)
-                DB::appendReplyDouble(con, std::get<0>(*first));
+                con.appendReplyDouble(std::get<0>(*first));
             ++first;
             if (isCount && --count == 0)
                 break;
         }
     } else {
         for (--last; ; --last) {
-            DB::appendReplyString(con, std::get<1>(*last));
+            con.appendReplyString(std::get<1>(*last));
             if (withscores)
-                DB::appendReplyDouble(con, std::get<0>(*last));
+                con.appendReplyDouble(std::get<0>(*last));
             if (last == first || (isCount && --count == 0))
                 break;
         }
@@ -319,9 +319,9 @@ static int zrangeByScoreWithLimit(Context& con, DB::_Zset::iterator lowerbound,
     int distance = std::distance(lowerbound, upperbound);
     if (count > distance) count = distance;
     if (withscores)
-        DB::appendReplyMulti(con, count * 2);
+        con.appendReplyMulti(count * 2);
     else
-        DB::appendReplyMulti(con, count);
+        con.appendReplyMulti(count);
     zrangefor(con, lowerbound, upperbound, count, withscores, reverse);
     return C_OK;
 }
@@ -421,13 +421,13 @@ void DB::zrangeByScore(Context& con, bool reverse)
         zrangeByScoreWithLimit(con, lowerbound, upperbound,
                 offset, count, true, reverse);
     } else if (cmdops & WITHSCORES) {
-        appendReplyMulti(con, distance * 2);
+        con.appendReplyMulti(distance * 2);
         zrangefor(con, lowerbound, upperbound, 0, true, reverse);
     } else if (cmdops & LIMIT) {
         zrangeByScoreWithLimit(con, lowerbound, upperbound,
                 offset, count, false, reverse);
     } else {
-        appendReplyMulti(con, distance);
+        con.appendReplyMulti(distance);
         zrangefor(con, lowerbound, upperbound, 0, false, reverse);
     }
 }
@@ -462,7 +462,7 @@ void DB::zremCommand(Context& con)
         }
     }
     if (zset.empty()) delKeyWithExpire(cmdlist[1]);
-    appendReplyNumber(con, rem);
+    con.appendReplyNumber(rem);
     touchWatchKey(cmdlist[1]);
 }
 
@@ -499,7 +499,7 @@ void DB::zremRangeByRankCommand(Context& con)
         rem++;
     }
     if (zset.empty()) delKeyWithExpire(cmdlist[1]);
-    appendReplyNumber(con, rem);
+    con.appendReplyNumber(rem);
     touchWatchKey(cmdlist[1]);
 }
 
@@ -550,5 +550,5 @@ void DB::zremRangeByScoreCommand(Context& con)
         rem++;
     }
     if (zset.empty()) delKeyWithExpire(cmdlist[1]);
-    appendReplyNumber(con, rem);
+    con.appendReplyNumber(rem);
 }

@@ -57,7 +57,7 @@ void DB::hgetCommand(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        appendReplyString(con, value->second);
+        con.appendReplyString(value->second);
     } else
         con.append(reply.nil);
 }
@@ -96,7 +96,7 @@ void DB::hdelCommand(Context& con)
     }
     if (hash.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
-    appendReplyNumber(con, retval);
+    con.appendReplyNumber(retval);
 }
 
 void DB::hlenCommand(Context& con)
@@ -107,7 +107,7 @@ void DB::hlenCommand(Context& con)
     if (isFound(it)) {
         checkType(con, it, Hash);
         Hash& hash = getHashValue(it);
-        appendReplyNumber(con, hash.size());
+        con.appendReplyNumber(hash.size());
     } else {
         con.append(reply.n0);
     }
@@ -123,7 +123,7 @@ void DB::hstrlenCommand(Context& con)
     Hash& hash = getHashValue(it);
     auto value = hash.find(cmdlist[2]);
     if (value != hash.end()) {
-        appendReplyNumber(con, value->second.size());
+        con.appendReplyNumber(value->second.size());
     } else {
         con.append(reply.n0);
     }
@@ -151,10 +151,10 @@ void DB::hincrbyCommand(Context& con)
         if (str2numberErr()) db_return(con, reply.integer_err);
         i64 += incr;
         value->second.assign(convert(i64));
-        appendReplyNumber(con, i64);
+        con.appendReplyNumber(i64);
     } else {
         hash.emplace(cmdlist[2], String(convert(incr)));
-        appendReplyNumber(con, incr);
+        con.appendReplyNumber(incr);
     }
     touchWatchKey(cmdlist[1]);
 }
@@ -187,7 +187,7 @@ void DB::hmgetCommand(Context& con)
     expireIfNeeded(cmdlist[1]);
     size_t size = cmdlist.size();
     auto it = find(cmdlist[1]);
-    appendReplyMulti(con, size - 2);
+    con.appendReplyMulti(size - 2);
     if (!isFound(it)) {
         for (size_t i = 2; i < size; i++)
             con.append(reply.nil);
@@ -198,7 +198,7 @@ void DB::hmgetCommand(Context& con)
     for (size_t i = 2; i < size; i++) {
         auto it = hash.find(cmdlist[i]);
         if (it != hash.end()) {
-            appendReplyString(con, it->second);
+            con.appendReplyString(it->second);
         } else {
             con.append(reply.nil);
         }
@@ -217,15 +217,15 @@ void DB::hgetXX(Context& con, int getXX)
     if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, Hash);
     Hash& hash = getHashValue(it);
-    appendReplyMulti(con, getXX == HGETALL ? hash.size() * 2 : hash.size());
+    con.appendReplyMulti(getXX == HGETALL ? hash.size() * 2 : hash.size());
     for (auto& it : hash) {
         if (getXX == HGETKEYS) {
-            appendReplyString(con, it.first);
+            con.appendReplyString(it.first);
         } else if (getXX == HGETVALUES) {
-            appendReplyString(con, it.second);
+            con.appendReplyString(it.second);
         } else if (getXX == HGETALL) {
-            appendReplyString(con, it.first);
-            appendReplyString(con, it.second);
+            con.appendReplyString(it.first);
+            con.appendReplyString(it.second);
         }
     }
 }

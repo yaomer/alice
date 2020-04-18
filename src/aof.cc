@@ -199,7 +199,7 @@ void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)
 
 }
 
-void Aof::rewriteString(Iterator it)
+void Aof::rewriteString(const Iterator& it)
 {
     DB::String& string = getValue(it, DB::String&);
     append("*3\r\n$3\r\nSET\r\n$");
@@ -211,7 +211,7 @@ void Aof::rewriteString(Iterator it)
     append(string + "\r\n");
 }
 
-void Aof::rewriteList(Iterator it)
+void Aof::rewriteList(const Iterator& it)
 {
     DB::List& list = getValue(it, DB::List&);
     if (list.empty()) return;
@@ -229,7 +229,7 @@ void Aof::rewriteList(Iterator it)
     }
 }
 
-void Aof::rewriteSet(Iterator it)
+void Aof::rewriteSet(const Iterator& it)
 {
     DB::Set& set = getValue(it, DB::Set&);
     if (set.empty()) return;
@@ -247,7 +247,7 @@ void Aof::rewriteSet(Iterator it)
     }
 }
 
-void Aof::rewriteHash(Iterator it)
+void Aof::rewriteHash(const Iterator& it)
 {
     DB::Hash& hash = getValue(it, DB::Hash&);
     if (hash.empty()) return;
@@ -268,7 +268,7 @@ void Aof::rewriteHash(Iterator it)
     }
 }
 
-void Aof::rewriteZset(Iterator it)
+void Aof::rewriteZset(const Iterator& it)
 {
     auto& tuple = getValue(it, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);

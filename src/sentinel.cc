@@ -691,10 +691,10 @@ void SentinelInstance::stopToReplicateMaster()
 void SentinelInstance::replicateMaster(Angel::InetAddr& masterAddr)
 {
     Context con(nullptr, nullptr);
-    DB::appendReplyMulti(con, 3);
-    DB::appendReplyString(con, "SLAVEOF");
-    DB::appendReplyString(con, masterAddr.toIpAddr());
-    DB::appendReplyString(con, convert(masterAddr.toIpPort()));
+    con.appendReplyMulti(3);
+    con.appendReplyString("SLAVEOF");
+    con.appendReplyString(masterAddr.toIpAddr());
+    con.appendReplyString(convert(masterAddr.toIpPort()));
     _clients[0]->conn()->send(con.message());
 }
 

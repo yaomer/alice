@@ -19,7 +19,7 @@ void DB::lpush(Context& con, int option)
             option == LPUSH ? list.emplace_front(cmdlist[i])
                             : list.emplace_back(cmdlist[i]);
         }
-        appendReplyNumber(con, list.size());
+        con.appendReplyNumber(list.size());
     } else {
         List list;
         for (size_t i = 2; i < size; i++) {
@@ -27,7 +27,7 @@ void DB::lpush(Context& con, int option)
                             : list.emplace_back(cmdlist[i]);
         }
         insert(cmdlist[1], std::move(list));
-        appendReplyNumber(con, list.size());
+        con.appendReplyNumber(list.size());
     }
     touchWatchKey(cmdlist[1]);
 }
@@ -56,7 +56,7 @@ void DB::lpushx(Context& con, int option)
     option == LPUSHX ? list.emplace_front(cmdlist[2])
                      : list.emplace_back(cmdlist[2]);
     touchWatchKey(cmdlist[1]);
-    appendReplyNumber(con, list.size());
+    con.appendReplyNumber(list.size());
 }
 
 void DB::lpushxCommand(Context& con)
@@ -81,10 +81,10 @@ void DB::lpop(Context& con, int option)
     checkType(con, it, List);
     List& list = getListValue(it);
     if (option == LPOP) {
-        appendReplyString(con, list.front());
+        con.appendReplyString(list.front());
         list.pop_front();
     } else {
-        appendReplyString(con, list.back());
+        con.appendReplyString(list.back());
         list.pop_back();
     }
     if (list.empty()) delKeyWithExpire(cmdlist[1]);
@@ -128,7 +128,7 @@ void DB::rpoplpush(Context& con, int option)
     }
     checkType(con, src, List);
     List& srclist = getListValue(src);
-    appendReplyString(con, srclist.back());
+    con.appendReplyString(srclist.back());
     auto des = find(cmdlist[2]);
     if (isFound(des)) {
         checkType(con, des, List);
@@ -195,7 +195,7 @@ void DB::lremCommand(Context& con)
     }
     if (list.empty()) delKeyWithExpire(cmdlist[1]);
     touchWatchKey(cmdlist[1]);
-    appendReplyNumber(con, retval);
+    con.appendReplyNumber(retval);
 }
 
 void DB::llenCommand(Context& con)
@@ -206,7 +206,7 @@ void DB::llenCommand(Context& con)
     if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
     List& list = getListValue(it);
-    appendReplyNumber(con, list.size());
+    con.appendReplyNumber(list.size());
 }
 
 void DB::lindexCommand(Context& con)
@@ -227,7 +227,7 @@ void DB::lindexCommand(Context& con)
     }
     for (auto& it : list)
         if (index-- == 0) {
-            appendReplyString(con, it);
+            con.appendReplyString(it);
             break;
         }
 }
@@ -273,7 +273,7 @@ void DB::lrangeCommand(Context& con)
     int lowerbound = -list.size();
     if (checkRange(con, &start, &stop, lowerbound, upperbound) == C_ERR)
         return;
-    appendReplyMulti(con, stop - start + 1);
+    con.appendReplyMulti(stop - start + 1);
     int i = 0;
     for (auto& it : list) {
         if (i < start) {
@@ -282,7 +282,7 @@ void DB::lrangeCommand(Context& con)
         }
         if (i > stop)
             break;
-        appendReplyString(con, it);
+        con.appendReplyString(it);
         i++;
     }
 }
@@ -389,9 +389,9 @@ void DB::blpop(Context& con, int option)
         if (isFound(it)) {
             checkType(con, it, List);
             List& list = getListValue(it);
-            appendReplyMulti(con, 2);
-            appendReplyString(con, cmdlist[i]);
-            appendReplyString(con, option == BLPOP ? list.front() : list.back());
+            con.appendReplyMulti(2);
+            con.appendReplyString(cmdlist[i]);
+            con.appendReplyString(option == BLPOP ? list.front() : list.back());
             option == BLPOP ? list.pop_front() : list.pop_back();
             if (list.empty()) delKeyWithExpire(cmdlist[i]);
             return;
@@ -458,9 +458,9 @@ void DB::blockingPop(const std::string& key)
     if (!conn) return;
     auto& context = std::any_cast<Context&>(conn->getContext());
     bops = getLastcmd(context.lastcmd());
-    DB::appendReplyMulti(other, 2);
-    DB::appendReplyString(other, key);
-    DB::appendReplyString(other, (bops == BLOCK_LPOP) ? value.front() : value.back());
+    other.appendReplyMulti(2);
+    other.appendReplyString(key);
+    other.appendReplyString((bops == BLOCK_LPOP) ? value.front() : value.back());
     double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
     other.append("+(");
     other.append(convert2f(seconds));

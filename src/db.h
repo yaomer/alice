@@ -111,6 +111,31 @@ public:
     {
         _slaveAddr.reset(new Angel::InetAddr(slaveAddr.inetAddr()));
     }
+
+    template <typename T>
+    void appendReplyMulti(T size)
+    {
+        append("*");
+        append(convert(size));
+        append("\r\n");
+    }
+    void appendReplyString(const std::string& s)
+    {
+        append("$");
+        append(convert(s.size()));
+        append("\r\n" + s + "\r\n");
+    }
+    template <typename T>
+    void appendReplyNumber(T number)
+    {
+        append(":");
+        append(convert(number));
+        append("\r\n");
+    }
+    void appendReplyDouble(double number)
+    {
+        appendReplyString(convert2f(number));
+    }
 private:
     DBServer *_db;
     Angel::TcpConnection *_conn;
@@ -379,36 +404,9 @@ public:
     void zremCommand(Context& con);
     void zremRangeByRankCommand(Context& con);
     void zremRangeByScoreCommand(Context& con);
-
-    template <typename T>
-    static void appendReplyMulti(Context& con, T size)
-    {
-        con.append("*");
-        con.append(convert(size));
-        con.append("\r\n");
-    }
-    static void appendReplyString(Context& con, const std::string& s)
-    {
-        con.append("$");
-        con.append(convert(s.size()));
-        con.append("\r\n" + s + "\r\n");
-    }
-    template <typename T>
-    static void appendReplyNumber(Context& con, T number)
-    {
-        con.append(":");
-        con.append(convert(number));
-        con.append("\r\n");
-    }
-    static void appendReplyDouble(Context& con, double number)
-    {
-        con.append(":");
-        con.append(convert2f(number));
-        con.append("\r\n");
-    }
 private:
     Iterator find(const Key& key) { return _hashMap.find(key); }
-    bool isFound(Iterator it) { return it != _hashMap.end(); }
+    bool isFound(const Iterator& it) { return it != _hashMap.end(); }
     template <typename T>
     void insert(const Key& key, const T& value)
     {

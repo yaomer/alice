@@ -288,10 +288,10 @@ void DB::sortCommand(Context& con)
     if (cmdops & SORT_GET) sortByGetKeys(result, cmdops, get);
     if (cmdops & SORT_STORE) sortStore(result, cmdops, des);
 end:
-    appendReplyMulti(con, result.size());
+    con.appendReplyMulti(result.size());
     for (auto& it : result) {
         if (it._value)
-            appendReplyString(con, *it._value);
+            con.appendReplyString(*it._value);
         else
             con.append(reply.nil);
     }
