@@ -39,6 +39,8 @@ struct ServerConf {
     int aof_mode = AOF_EVERYSEC;
     std::string rdb_file = "dump.rdb";
     std::string appendonly_file = "appendonly.aof";
+    // 是否需要压缩rdb-file
+    bool rdb_compress = true;
     // master-slave连接超时时间
     int repl_timeout = 60 * 1000;
     // 从服务器向主服务器发送PING的周期

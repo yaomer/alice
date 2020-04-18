@@ -439,7 +439,7 @@ void Rdb::appendSyncBuffer(const Context::CommandList& cmdlist,
 bool Rdb::canCompress(size_t value_len)
 {
 #if defined (ALICE_HAVE_SNAPPY)
-    return value_len > compress_limit;
+    return g_server_conf.rdb_compress && value_len > compress_limit;
 #else
     return false;
 #endif

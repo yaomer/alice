@@ -35,6 +35,17 @@ static ssize_t humanSizeToBytes(const char *s)
     return bytes;
 }
 
+static bool parseYesOrNo(const std::string& s, bool& option)
+{
+    if (strcasecmp(s.c_str(), "yes") == 0)
+        option = true;
+    else if (strcasecmp(s.c_str(), "no") == 0)
+        option = false;
+    else
+        return false;
+    return true;
+}
+
 void Alice::readServerConf(const char *server_conf_file)
 {
     ConfParamList paramlist;
@@ -51,9 +62,7 @@ void Alice::readServerConf(const char *server_conf_file)
         } else if (strcasecmp(it[0].c_str(), "save") == 0) {
             g_server_conf.save_params.emplace_back(atol(it[1].c_str()), atol(it[2].c_str()));
         } else if (strcasecmp(it[0].c_str(), "appendonly") == 0) {
-            if (strcasecmp(it[1].c_str(), "yes") == 0)
-                g_server_conf.enable_appendonly = true;
-            else if (strcasecmp(it[1].c_str(), "no"))
+            if (!parseYesOrNo(it[1], g_server_conf.enable_appendonly))
                 error("appendonly");
         } else if (strcasecmp(it[0].c_str(), "appendfsync") == 0) {
             if (strcasecmp(it[1].c_str(), "always") == 0)
@@ -114,6 +123,9 @@ void Alice::readServerConf(const char *server_conf_file)
             g_server_conf.master_ip = it[1];
             g_server_conf.master_port = atoi(it[2].c_str());
             ASSERT(g_server_conf.master_port > 0, "slaveof");
+        } else if (strcasecmp(it[0].c_str(), "rdb-compress") == 0) {
+            if (!parseYesOrNo(it[1], g_server_conf.rdb_compress))
+                error("rdb-compress");
         }
     }
 }
