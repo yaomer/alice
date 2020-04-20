@@ -63,6 +63,7 @@ public:
     explicit Context(DBServer *db, Angel::TcpConnection *conn)
         : _db(db),
         _conn(conn),
+        _lastBufsize(0),
         _flag(0),
         _perm(IS_READ | IS_WRITE),
         _blockStartTime(-1),
@@ -75,6 +76,12 @@ public:
     using WatchKeys = std::vector<std::string>;
     using BlockingKeys = std::vector<std::string>;
 
+    int flag() const { return _flag; }
+    void setFlag(int flag) { _flag |= flag; }
+    void clearFlag(int flag) { _flag &= ~flag; }
+    int perm() const { return _perm; }
+    void setPerm(int perm) { _perm |= perm; }
+    void clearPerm(int perm) { _perm &= ~perm; }
     DBServer *db() { return _db; }
     Angel::TcpConnection *conn() { return _conn; }
     Angel::InetAddr *slaveAddr() { return _slaveAddr.get(); }
@@ -85,15 +92,10 @@ public:
     { _buffer.append(s); }
     void append(const char *s, size_t len)
     { _buffer.append(s, len); }
-    void assign(const std::string& s)
-    { _buffer.assign(s); }
-    std::string& message() { return _buffer; }
-    int flag() const { return _flag; }
-    void setFlag(int flag) { _flag |= flag; }
-    void clearFlag(int flag) { _flag &= ~flag; }
-    int perm() const { return _perm; }
-    void setPerm(int perm) { _perm |= perm; }
-    void clearPerm(int perm) { _perm &= ~perm; }
+    std::string& reply() { return _buffer; }
+    void updateLastBufsize() { _lastBufsize = _buffer.size(); }
+    bool haveNewReply() { return _lastBufsize != _buffer.size(); }
+    const char *curReply() { return &_buffer[_lastBufsize]; }
     int64_t blockStartTime() const { return _blockStartTime; }
     int blockTimeout() const { return _blockTimeout; }
     int blockDbnum() const { return _blockDbnum; }
@@ -146,6 +148,8 @@ private:
     WatchKeys _watchKeys;
     // 发送缓冲区
     std::string _buffer;
+    // 命令开始执行前_buffer的大小
+    size_t _lastBufsize;
     int _flag;
     // 能执行的命令的权限
     int _perm;
@@ -276,12 +280,19 @@ public:
     void delKeyWithExpire(const Key& key)
     { _hashMap.erase(key); _expireMap.erase(key); }
     CommandMap& commandMap() { return _commandMap; }
+    void clear();
 
     ExpireMap& expireMap() { return _expireMap; }
     void addExpireKey(const Key& key, int64_t expire)
     { _expireMap[key] = expire + Angel::nowMs(); }
     void delExpireKey(const Key& key) { _expireMap.erase(key); }
-    void expireIfNeeded(const Key& key);
+    void checkExpire(const Key& key);
+    template <typename T>
+    void checkEmpty(const T& container, const Key& key)
+    {
+        if (container.empty())
+            delKeyWithExpire(key);
+    }
 
     BlockingKeys& blockingKeys() { return _blockingKeys; }
     void clearBlockingKeysForContext(Context& con);
@@ -417,22 +428,26 @@ private:
             blockingPop(key);
     }
 
-    void ttl(Context& con, int option);
-    void expire(Context& con, int option);
+    void ttl(Context& con, bool is_ttl);
+    void expire(Context& con, bool is_expire);
     void incr(Context& con, int64_t incr);
-    void lpush(Context& con, int option);
-    void lpushx(Context& con, int option);
-    void lpop(Context& con, int option);
-    void blpop(Context& con, int option);
-    void rpoplpush(Context& con, int option);
+    void lpush(Context& con, bool is_lpush);
+    void lpushx(Context& con, bool is_lpushx);
+    void lpop(Context& con, bool is_lpop);
+    void blpop(Context& con, bool is_blpop);
+    void rpoplpush(Context& con, bool is_nonblock);
     void blockingPop(const std::string& key);
-    void hgetXX(Context& con, int getXX);
+    void hget(Context& con, int what);
+    void sinter(Context& con, Set& rset, int start);
+    void sunion(Context& con, Set& rset, int start);
+    void sreply(Context& con, Set& rset);
+    void sstore(Context& con, Set& rset);
     void zrange(Context& con, bool reverse);
     void zrank(Context& con, bool reverse);
     void zrangeByScore(Context& con, bool reverse);
-    int checkRange(Context& con, int *start, int *stop, int lowerbound, int upperbound);
-    int sortGetResult(Context& con, const String& key, SortObjectList& result, unsigned *cmdops);
-    void sortByPattern(unsigned *cmdops, const String& by, SortObjectList& result);
+    int checkRange(Context& con, int& start, int& stop, int lower, int upper);
+    int sortGetResult(Context& con, const String& key, SortObjectList& result, unsigned& cmdops);
+    void sortByPattern(unsigned& cmdops, const String& by, SortObjectList& result);
     void sortByGetKeys(SortObjectList& result, unsigned cmdops, const std::vector<std::string>& get);
     void sortStore(SortObjectList& result, unsigned cmdops, const String& des);
     void configGet(Context& con, const std::string& arg);

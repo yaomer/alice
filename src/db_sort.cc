@@ -4,6 +4,10 @@
 
 using namespace Alice;
 
+// sort目前只支持list和set
+// SORT key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern ...]]
+//          [ASC|DESC] [ALPHA] [STORE destination]
+
 // 执行一个SORT命令，一般分为以下几步：
 // 使用[BY] [ASC] [DESC] [ALPHA]对输入键进行排序，得到一个结果集
 // 使用[LIMIT]过滤结果集
@@ -58,8 +62,9 @@ public:
 };
 }
 
-static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::string& by,
-        std::string& des, std::vector<std::string>& get, int *offset, int *count)
+static int parseSortArgs(Context& con, unsigned& cmdops, std::string& key,
+                         std::string& by, std::string& des, std::vector<std::string>& get,
+                         int& offset, int& count)
 {
     auto& cmdlist = con.commandList();
     size_t len = cmdlist.size();
@@ -67,7 +72,7 @@ static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::
     for (size_t i = 2; i < len; i++) {
         std::transform(cmdlist[i].begin(), cmdlist[i].end(), cmdlist[i].begin(), ::toupper);
         auto op = sortops.find(cmdlist[i]);
-        if (op != sortops.end()) *cmdops |= op->second;
+        if (op != sortops.end()) cmdops |= op->second;
         else goto syntax_err;
         switch (op->second) {
         case SORT_ASC: case SORT_DESC: case SORT_ALPHA:
@@ -79,22 +84,16 @@ static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::
         }
         case SORT_LIMIT: {
             if (i + 2 >= len) goto syntax_err;
-            *offset = str2l(cmdlist[++i].c_str());
-            if (str2numberErr()) {
-                con.append(reply.integer_err);
-                return C_ERR;
-            }
-            *count = str2l(cmdlist[++i].c_str());
-            if (str2numberErr()) {
-                con.append(reply.integer_err);
-                return C_ERR;
-            }
+            offset = str2l(cmdlist[++i].c_str());
+            if (str2numberErr()) goto integer_err;
+            count = str2l(cmdlist[++i].c_str());
+            if (str2numberErr()) goto integer_err;
             break;
         }
         case SORT_GET: {
             if (i + 1 >= len) goto syntax_err;
             if (cmdlist[i+1].compare("#") == 0)
-                *cmdops |= SORT_GET_VAL;
+                cmdops |= SORT_GET_VAL;
             else
                 get.emplace_back(cmdlist[i + 1]);
             i++;
@@ -111,25 +110,28 @@ static int parseSortArgs(Context& con, unsigned *cmdops, std::string& key, std::
 syntax_err:
     con.append(reply.syntax_err);
     return C_ERR;
+integer_err:
+    con.append(reply.integer_err);
+    return C_ERR;
 }
 
 int DB::sortGetResult(Context& con, const std::string& key, DB::SortObjectList& result,
-        unsigned *cmdops)
+                      unsigned& cmdops)
 {
-    expireIfNeeded(key);
+    checkExpire(key);
     auto it = find(key);
     if (!isFound(it)) {
         con.append(reply.multi_empty);
         return C_ERR;
     }
     if (isType(it, List)) {
-        *cmdops |= SORT_LIST_TYPE;
-        List& list = getListValue(it);
+        cmdops |= SORT_LIST_TYPE;
+        auto& list = getListValue(it);
         for (auto& it : list)
             result.emplace_back(&it);
     } else if (isType(it, Set)) {
-        *cmdops |= SORT_SET_TYPE;
-        Set& set = getSetValue(it);
+        cmdops |= SORT_SET_TYPE;
+        auto& set = getSetValue(it);
         for (auto& it : set)
             result.emplace_back(&it);
     } else {
@@ -139,7 +141,7 @@ int DB::sortGetResult(Context& con, const std::string& key, DB::SortObjectList& 
     return C_OK;
 }
 
-void DB::sortByPattern(unsigned *cmdops, const String& by, SortObjectList& result)
+void DB::sortByPattern(unsigned& cmdops, const String& by, SortObjectList& result)
 {
     std::string key;
     auto star = std::find(by.begin(), by.end(), '*');
@@ -162,7 +164,7 @@ void DB::sortByPattern(unsigned *cmdops, const String& by, SortObjectList& resul
             }
         }
     } else {
-        *cmdops |= SORT_NOT;
+        cmdops |= SORT_NOT;
     }
 }
 
@@ -202,14 +204,13 @@ static int sortLimit(Context& con, DB::SortObjectList& result, int offset, int c
         return C_ERR;
     }
     int i = 0;
-    for (auto it = result.begin(); it != result.end(); ) {
+    for (auto it = result.begin(); it != result.end(); i++) {
         if (i < offset) {
             ++it;
             result.pop_front();
-            i++;
             continue;
         }
-        if (i++ >= count) {
+        if (i >= count) {
             for (auto end = result.end(); end != it; ) {
                 --end;
                 result.pop_back();
@@ -274,11 +275,11 @@ void DB::sortCommand(Context& con)
     String key, by, des;
     int offset = 0, count = 0;
     std::vector<String> get;
-    if (parseSortArgs(con, &cmdops, key, by, des, get, &offset, &count) == C_ERR)
+    if (parseSortArgs(con, cmdops, key, by, des, get, offset, count) == C_ERR)
         return;
     SortObjectList result;
-    if (sortGetResult(con, key, result, &cmdops) == C_ERR) return;
-    if (cmdops & SORT_BY) sortByPattern(&cmdops, by, result);
+    if (sortGetResult(con, key, result, cmdops) == C_ERR) return;
+    if (cmdops & SORT_BY) sortByPattern(cmdops, by, result);
     if (cmdops & SORT_NOT) goto end;
     if (sort(con, cmdops, result) == C_ERR) return;
     if (cmdops & SORT_LIMIT) {

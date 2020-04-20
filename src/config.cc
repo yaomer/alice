@@ -201,7 +201,7 @@ void DB::configGet(Context& con, const std::string& arg)
     } else if (strcasecmp(arg.c_str(), "slowlog-max-len") == 0) {
         con.appendReplyString(convert(g_server_conf.slowlog_max_len));
     } else
-        con.message().assign(reply.multi_empty);
+        con.reply().assign(reply.multi_empty);
 }
 
 void DB::configSet(Context& con, const std::string& arg, const std::string& value)

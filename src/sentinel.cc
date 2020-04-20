@@ -695,7 +695,7 @@ void SentinelInstance::replicateMaster(Angel::InetAddr& masterAddr)
     con.appendReplyString("SLAVEOF");
     con.appendReplyString(masterAddr.toIpAddr());
     con.appendReplyString(convert(masterAddr.toIpPort()));
-    _clients[0]->conn()->send(con.message());
+    _clients[0]->conn()->send(con.reply());
 }
 
 // 将slave转换成一个master

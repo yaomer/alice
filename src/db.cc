@@ -127,6 +127,14 @@ DB::DB(DBServer *dbServer)
 
 Alice::ReplyString reply;
 
+// 清空当前db
+void DB::clear()
+{
+    _hashMap.clear();
+    _expireMap.clear();
+}
+
+// SELECT index
 void DB::selectCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
@@ -139,18 +147,23 @@ void DB::selectCommand(Context& con)
     con.append(reply.ok);
 }
 
+// EXISTS key
 void DB::existsCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    con.append(isFound(find(cmdlist[1])) ? reply.n1 : reply.n0);
+    auto& key = cmdlist[1];
+    checkExpire(key);
+    bool found = isFound(find(key));
+    con.append(found ? reply.n1 : reply.n0);
 }
 
+// TYPE key
 void DB::typeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.none_type);
     if (isType(it, String))
         con.append(reply.string_type);
@@ -164,73 +177,75 @@ void DB::typeCommand(Context& con)
         con.append(reply.hash_type);
 }
 
-#define TTL 1
-#define PTTL 2
-
-void DB::ttl(Context& con, int option)
+// (P)TTL key
+void DB::ttl(Context& con, bool is_ttl)
 {
     auto& cmdlist = con.commandList();
-    if (!isFound(find(cmdlist[1]))) db_return(con, reply.n_2);
-    auto expire = expireMap().find(cmdlist[1]);
-    if (expire == expireMap().end()) db_return(con, reply.n_1);
-    int64_t milliseconds = expire->second - Angel::nowMs();
-    if (option == TTL) milliseconds /= 1000;
-    con.appendReplyNumber(milliseconds);
+    auto& key = cmdlist[1];
+    if (!isFound(find(key))) db_return(con, reply.n_2);
+    auto it = expireMap().find(key);
+    if (it == expireMap().end()) db_return(con, reply.n_1);
+    int64_t ttl_ms = it->second - Angel::nowMs();
+    if (is_ttl) ttl_ms /= 1000;
+    con.appendReplyNumber(ttl_ms);
 }
 
 void DB::ttlCommand(Context& con)
 {
-    ttl(con, TTL);
+    ttl(con, true);
 }
 
 void DB::pttlCommand(Context& con)
 {
-    ttl(con, PTTL);
+    ttl(con, false);
 }
 
-#define EXPIRE 1
-#define PEXPIRE 2
-
-void DB::expire(Context& con, int option)
+// EXPIRE key seconds
+// PEXPIRE key milliseconds
+void DB::expire(Context& con, bool is_expire)
 {
     auto& cmdlist = con.commandList();
-    int64_t expire = str2ll(cmdlist[2].c_str());
+    auto& key = cmdlist[1];
+    auto expire = str2ll(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
     if (expire <= 0) db_return(con, reply.timeout_err);
-    if (!isFound(find(cmdlist[1]))) db_return(con, reply.n0);
-    if (option == EXPIRE) expire *= 1000;
-    addExpireKey(cmdlist[1], expire);
+    if (!isFound(find(key))) db_return(con, reply.n0);
+    if (is_expire) expire *= 1000;
+    addExpireKey(key, expire);
     con.append(reply.n1);
 }
 
 void DB::expireCommand(Context& con)
 {
-    expire(con, EXPIRE);
+    expire(con, true);
 }
 
 void DB::pexpireCommand(Context& con)
 {
-    expire(con, PEXPIRE);
+    expire(con, false);
 }
 
+// DEL key [key ...]
 void DB::delCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    int retval = 0;
+    int dels = 0;
     for (size_t i = 1; i < size; i++) {
         if (isFound(find(cmdlist[i]))) {
             delKeyWithExpire(cmdlist[i]);
-            retval++;
+            dels++;
         }
     }
-    con.appendReplyNumber(retval);
+    con.appendReplyNumber(dels);
 }
 
+// KEYS pattern[目前只支持*]
 void DB::keysCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (cmdlist[1].compare("*")) db_return(con, reply.unknown_option);
+    if (cmdlist[1].compare("*"))
+        db_return(con, reply.unknown_option);
     con.appendReplyMulti(_hashMap.size());
     for (auto& it : _hashMap)
         con.appendReplyString(it.first);
@@ -280,19 +295,20 @@ void DB::lastSaveCommand(Context& con)
 
 void DB::flushdbCommand(Context& con)
 {
-    _hashMap.clear();
+    clear();
     con.append(reply.ok);
 }
 
 void DB::flushAllCommand(Context& con)
 {
-    for (auto& db : _dbServer->dbs())
-        db->hashMap().clear();
+    _dbServer->clear();
     if (!g_server_conf.save_params.empty()) bgSaveCommand(con);
     if (g_server_conf.enable_appendonly) bgRewriteAofCommand(con);
-    con.message().assign(reply.ok);
+    con.reply().assign(reply.ok);
 }
 
+// SLAVEOF host port
+// SLAVEOF no one
 void DB::slaveofCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
@@ -314,6 +330,8 @@ void DB::slaveofCommand(Context& con)
     _dbServer->connectMasterServer();
 }
 
+// PSYNC ? -1
+// PSYNC run_id repl_off
 void DB::psyncCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
@@ -349,17 +367,19 @@ sync:
     }
 }
 
+// REPLCONF addr <port> <ip>
+// REPLCONF ack repl_off
 void DB::replconfCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    if (strcasecmp(cmdlist[1].c_str(), "port") == 0) {
+    if (strcasecmp(cmdlist[1].c_str(), "addr") == 0) {
         auto it = _dbServer->slaves().find(con.conn()->id());
         if (it == _dbServer->slaves().end()) {
-            logInfo("found a new slave %s:%s", cmdlist[4].c_str(), cmdlist[2].c_str());
+            logInfo("found a new slave %s:%s", cmdlist[3].c_str(), cmdlist[2].c_str());
             _dbServer->slaves().emplace(con.conn()->id(), _dbServer->masterOffset());
         }
         con.setSlaveAddr(
-                Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[4].c_str()));
+                Angel::InetAddr(atoi(cmdlist[2].c_str()), cmdlist[3].c_str()));
     } else if (strcasecmp(cmdlist[1].c_str(), "ack") == 0) {
         size_t slaveoff = atoll(cmdlist[2].c_str());
         auto it = _dbServer->slaves().find(con.conn()->id());
@@ -381,13 +401,13 @@ void DB::multiCommand(Context& con)
 void DB::execCommand(Context& con)
 {
     Context::CommandList tlist = { "MULTI" };
-    bool multiIsWrite = (con.flag() & Context::EXEC_MULTI_WRITE);
+    bool is_write = (con.flag() & Context::EXEC_MULTI_WRITE);
     if (con.flag() & Context::EXEC_MULTI_ERR) {
         con.clearFlag(Context::EXEC_MULTI_ERR);
         con.append(reply.nil);
         goto end;
     }
-    if (multiIsWrite) {
+    if (is_write) {
         _dbServer->freeMemoryIfNeeded();
         _dbServer->doWriteCommand(tlist, nullptr, 0);
     }
@@ -395,10 +415,10 @@ void DB::execCommand(Context& con)
         auto command = _commandMap.find(cmdlist[0]);
         con.commandList().swap(cmdlist);
         command->second._commandCb(con);
-        if (multiIsWrite)
+        if (is_write)
             _dbServer->doWriteCommand(con.commandList(), nullptr, 0);
     }
-    if (multiIsWrite) {
+    if (is_write) {
         tlist = { "EXEC" };
         _dbServer->doWriteCommand(tlist, nullptr, 0);
         con.clearFlag(Context::EXEC_MULTI_WRITE);
@@ -423,7 +443,7 @@ void DB::watchCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
     for (size_t i = 1; i < cmdlist.size(); i++) {
-        expireIfNeeded(cmdlist[i]);
+        checkExpire(cmdlist[i]);
         if (isFound(find(cmdlist[i]))) {
             watchKeyForClient(cmdlist[i], con.conn()->id());
             con.watchKeys().emplace_back(cmdlist[i]);
@@ -454,13 +474,17 @@ void DB::unwatchKeys(Context& con)
     con.watchKeys().clear();
 }
 
+// PUBLISH channel message
 void DB::publishCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    size_t subClients = _dbServer->pubMessage(cmdlist[2], cmdlist[1], con.conn()->id());
+    auto& channel = cmdlist[1];
+    auto& message = cmdlist[2];
+    size_t subClients = _dbServer->pubMessage(message, channel, con.conn()->id());
     con.appendReplyNumber(subClients);
 }
 
+// SUBSCRIBE channel [channel ...]
 void DB::subscribeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
@@ -510,7 +534,7 @@ void DB::dbsizeCommand(Context& con)
     con.appendReplyNumber(_hashMap.size());
 }
 
-void DB::expireIfNeeded(const Key& key)
+void DB::checkExpire(const Key& key)
 {
     auto it = expireMap().find(key);
     if (it == expireMap().end()) return;
@@ -544,58 +568,68 @@ void DB::touchWatchKey(const Key& key)
     }
 }
 
+// RENAME key newkey
 void DB::renameCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    auto& newkey = cmdlist[2];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.no_such_key);
-    if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
+    if (strcasecmp(key.c_str(), newkey.c_str()) == 0) {
         db_return(con, reply.ok);
     }
-    delKeyWithExpire(cmdlist[2]);
-    insert(cmdlist[2], it->second);
-    delKeyWithExpire(cmdlist[1]);
+    delKeyWithExpire(newkey);
+    insert(newkey, it->second);
+    delKeyWithExpire(key);
     con.append(reply.ok);
 }
 
+// RENAMENX key newkey
 void DB::renamenxCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    auto& newkey = cmdlist[2];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.no_such_key);
-    if (strcasecmp(cmdlist[1].c_str(), cmdlist[2].c_str()) == 0) {
+    if (strcasecmp(key.c_str(), newkey.c_str()) == 0) {
         db_return(con, reply.n0);
     }
-    if (isFound(find(cmdlist[2]))) db_return(con, reply.n0);
-    insert(cmdlist[2], it->second);
-    delKeyWithExpire(cmdlist[1]);
+    if (isFound(find(newkey))) db_return(con, reply.n0);
+    insert(newkey, it->second);
+    delKeyWithExpire(key);
     con.append(reply.n1);
 }
 
+// MOVE key db
 void DB::moveCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
+    auto& key = cmdlist[1];
     int dbnum = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
     if (dbnum < 0 || dbnum >= g_server_conf.databases) {
         db_return(con, reply.db_index_out_of_range);
     }
-    auto it = find(cmdlist[1]);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.n0);
     auto& map = _dbServer->selectDb(dbnum)->hashMap();
-    if (map.find(cmdlist[1]) != map.end()) db_return(con, reply.n0);
+    if (map.find(key) != map.end()) db_return(con, reply.n0);
     map.emplace(it->first, it->second);
-    delKeyWithExpire(cmdlist[1]);
+    delKeyWithExpire(key);
     con.append(reply.n1);
 }
 
+// LRU key
 void DB::lruCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.n_1);
     int64_t seconds = (_lru_cache - it->second.lru()) / 1000;
     con.appendReplyNumber(seconds);
@@ -626,6 +660,9 @@ void DB::slowlogGet(Context& con, Context::CommandList& cmdlist)
     }
 }
 
+// SLOWLOG get [count]
+// SLOWLOG len
+// SLOWLOG reset
 void DB::slowlogCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
@@ -658,4 +695,30 @@ void DB::clearBlockingKeysForContext(Context& con)
     }
     con.clearFlag(Context::CON_BLOCK);
     con.blockingKeys().clear();
+}
+
+int DB::checkRange(Context& con, int& start, int& stop,
+                   int lower, int upper)
+{
+    if (start > upper || stop < lower) {
+        con.append(reply.nil);
+        return C_ERR;
+    }
+    if (start < 0 && start >= lower) {
+        start += upper + 1;
+    }
+    if (stop < 0 && stop >= lower) {
+        stop += upper + 1;
+    }
+    if (start < lower) {
+        start = 0;
+    }
+    if (stop > upper) {
+        stop = upper;
+    }
+    if (start > stop) {
+        con.append(reply.nil);
+        return C_ERR;
+    }
+    return C_OK;
 }

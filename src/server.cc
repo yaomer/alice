@@ -87,12 +87,13 @@ void Server::executeCommand(Context& con, const char *query, size_t len)
         }
     }
     if (it->second.perm() & IS_WRITE) _dbServer.freeMemoryIfNeeded();
+    con.updateLastBufsize();
     start = Angel::nowUs();
     it->second._commandCb(con);
     end = Angel::nowUs();
     _dbServer.addSlowlogIfNeeded(cmdlist, start, end);
     // 命令执行未出错
-    if ((it->second.perm() & IS_WRITE) && (con.message()[0] != '-')) {
+    if ((it->second.perm() & IS_WRITE) && (con.curReply()[0] != '-')) {
         _dbServer.doWriteCommand(cmdlist, query, len);
     }
     goto end;
@@ -110,8 +111,8 @@ void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
     auto& context = std::any_cast<Context&>(conn->getContext());
     // 从服务器不应向主服务器发送回复信息
     if (!(context.flag() & Context::MASTER))
-        conn->send(context.message());
-    context.message().clear();
+        conn->send(context.reply());
+    context.reply().clear();
 }
 
 // [query, len]是RESP形式的请求字符串，如果query为真，则使用[query, len]，这样可以避免许多低效的拷贝；
@@ -236,7 +237,7 @@ void DBServer::checkExpireCycle(int64_t now)
             size_t bucketNumber = std::get<0>(randkey);
             size_t where = std::get<1>(randkey);
             for (auto it = db->expireMap().cbegin(bucketNumber);
-                    it != db->expireMap().cend(bucketNumber); it++) {
+                    it != db->expireMap().cend(bucketNumber); ++it) {
                 if (where-- == 0) {
                     if (it->second <= now) {
                         db->delKeyWithExpire(it->first);
@@ -344,12 +345,11 @@ void DBServer::sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn)
 {
     std::string buffer;
     Angel::InetAddr *inetAddr = g_server->server().listenAddr();
-    buffer += "*5\r\n$8\r\nreplconf\r\n$4\r\nport\r\n$";
+    buffer += "*4\r\n$8\r\nreplconf\r\n$4\r\naddr\r\n$";
     buffer += convert(strlen(convert(inetAddr->toIpPort())));
     buffer += "\r\n";
     buffer += convert(inetAddr->toIpPort());
-    buffer += "\r\n";
-    buffer += "$4\r\naddr\r\n$";
+    buffer += "\r\n$";
     buffer += convert(strlen(inetAddr->toIpAddr()));
     buffer += "\r\n";
     buffer += inetAddr->toIpAddr();
@@ -585,8 +585,8 @@ static void appendCommandArg(std::string& buffer, const std::string& s1,
 static void appendTimeStamp(std::string& buffer, int64_t timeval, bool is_seconds)
 {
     if (is_seconds) timeval *= 1000;
-    int64_t milliseconds = timeval + Angel::nowMs();
-    appendCommandArg(buffer, convert(strlen(convert(milliseconds))), convert(milliseconds));
+    int64_t ms = timeval + Angel::nowMs();
+    appendCommandArg(buffer, convert(strlen(convert(ms))), convert(ms));
 }
 
 // 将解析后的命令转换成RESP形式的命令
@@ -692,8 +692,7 @@ void DBServer::addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, 
 void DBServer::clear()
 {
     for (auto& db : dbs()) {
-        db->hashMap().clear();
-        db->expireMap().clear();
+        db->clear();
     }
 }
 

@@ -190,7 +190,7 @@ void Rdb::saveValue(const std::string& value)
     }
 }
 
-void Rdb::saveString(const Iterator& it)
+void Rdb::saveString(const iterator& it)
 {
     saveLen(string_type);
     saveKey(it->first);
@@ -198,7 +198,7 @@ void Rdb::saveString(const Iterator& it)
     saveValue(string);
 }
 
-void Rdb::saveList(const Iterator& it)
+void Rdb::saveList(const iterator& it)
 {
     saveLen(list_type);
     saveKey(it->first);
@@ -209,7 +209,7 @@ void Rdb::saveList(const Iterator& it)
     }
 }
 
-void Rdb::saveSet(const Iterator& it)
+void Rdb::saveSet(const iterator& it)
 {
     saveLen(set_type);
     saveKey(it->first);
@@ -220,7 +220,7 @@ void Rdb::saveSet(const Iterator& it)
     }
 }
 
-void Rdb::saveHash(const Iterator& it)
+void Rdb::saveHash(const iterator& it)
 {
     saveLen(hash_type);
     saveKey(it->first);
@@ -232,7 +232,7 @@ void Rdb::saveHash(const Iterator& it)
     }
 }
 
-void Rdb::saveZset(const Iterator& it)
+void Rdb::saveZset(const iterator& it)
 {
     saveLen(zset_type);
     saveKey(it->first);

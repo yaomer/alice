@@ -107,7 +107,7 @@ void Aof::load()
             cmdlist.clear();
             buf.retrieve(n);
         }
-        pseudoClient.message().clear();
+        pseudoClient.reply().clear();
     }
     _dbServer->switchDb(0);
     fclose(fp);
@@ -186,20 +186,20 @@ void Aof::rewriteSelectDb(int dbnum)
     append("\r\n");
 }
 
-void Aof::rewriteExpire(const DB::Key& key, int64_t milliseconds)
+void Aof::rewriteExpire(const DB::Key& key, int64_t expire)
 {
     append("*3\r\n$7\r\nPEXPIRE\r\n$");
     append(convert(key.size()));
     append("\r\n");
     append(key + "\r\n$");
-    append(convert(strlen(convert(milliseconds))));
+    append(convert(strlen(convert(expire))));
     append("\r\n");
-    append(convert(milliseconds));
+    append(convert(expire));
     append("\r\n");
 
 }
 
-void Aof::rewriteString(const Iterator& it)
+void Aof::rewriteString(const iterator& it)
 {
     DB::String& string = getValue(it, DB::String&);
     append("*3\r\n$3\r\nSET\r\n$");
@@ -211,7 +211,7 @@ void Aof::rewriteString(const Iterator& it)
     append(string + "\r\n");
 }
 
-void Aof::rewriteList(const Iterator& it)
+void Aof::rewriteList(const iterator& it)
 {
     DB::List& list = getValue(it, DB::List&);
     if (list.empty()) return;
@@ -229,7 +229,7 @@ void Aof::rewriteList(const Iterator& it)
     }
 }
 
-void Aof::rewriteSet(const Iterator& it)
+void Aof::rewriteSet(const iterator& it)
 {
     DB::Set& set = getValue(it, DB::Set&);
     if (set.empty()) return;
@@ -247,7 +247,7 @@ void Aof::rewriteSet(const Iterator& it)
     }
 }
 
-void Aof::rewriteHash(const Iterator& it)
+void Aof::rewriteHash(const iterator& it)
 {
     DB::Hash& hash = getValue(it, DB::Hash&);
     if (hash.empty()) return;
@@ -268,7 +268,7 @@ void Aof::rewriteHash(const Iterator& it)
     }
 }
 
-void Aof::rewriteZset(const Iterator& it)
+void Aof::rewriteZset(const iterator& it)
 {
     auto& tuple = getValue(it, DB::Zset&);
     DB::_Zset& zset = std::get<0>(tuple);

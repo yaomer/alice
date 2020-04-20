@@ -10,7 +10,7 @@ namespace Alice {
 
 class Rdb {
 public:
-    using Iterator = DB::HashMap::iterator;
+    using iterator = DB::HashMap::iterator;
 
     static const size_t buffer_flush_size = 4096;
     static const size_t compress_limit = 30;
@@ -35,11 +35,11 @@ private:
     int loadLen(char *ptr, uint64_t *lenptr);
     void saveKey(const std::string& key);
     void saveValue(const std::string& value);
-    void saveString(const Iterator& it);
-    void saveList(const Iterator& it);
-    void saveSet(const Iterator& it);
-    void saveHash(const Iterator& it);
-    void saveZset(const Iterator& it);
+    void saveString(const iterator& it);
+    void saveList(const iterator& it);
+    void saveSet(const iterator& it);
+    void saveHash(const iterator& it);
+    void saveZset(const iterator& it);
     void loadExpireKey(const std::string& key, int64_t *tvptr);
     char *loadKey(char *ptr, std::string *key);
     char *loadValue(char *ptr, std::string *value);

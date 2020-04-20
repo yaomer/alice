@@ -3,183 +3,184 @@
 
 using namespace Alice;
 
-#define LPUSH 1
-#define RPUSH 2
-
-void DB::lpush(Context& con, int option)
+// L(R)PUSH key value [value ...]
+void DB::lpush(Context& con, bool is_lpush)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    checkExpire(key);
+    auto it = find(key);
     if (isFound(it)) {
         checkType(con, it, List);
-        List& list = getListValue(it);
+        auto& list = getListValue(it);
         for (size_t i = 2; i < size; i++) {
-            option == LPUSH ? list.emplace_front(cmdlist[i])
-                            : list.emplace_back(cmdlist[i]);
+            is_lpush ? list.emplace_front(cmdlist[i])
+                     : list.emplace_back(cmdlist[i]);
         }
         con.appendReplyNumber(list.size());
     } else {
         List list;
         for (size_t i = 2; i < size; i++) {
-            option == LPUSH ? list.emplace_front(cmdlist[i])
-                            : list.emplace_back(cmdlist[i]);
+            is_lpush ? list.emplace_front(cmdlist[i])
+                     : list.emplace_back(cmdlist[i]);
         }
-        insert(cmdlist[1], std::move(list));
+        insert(key, std::move(list));
         con.appendReplyNumber(list.size());
     }
-    touchWatchKey(cmdlist[1]);
+    touchWatchKey(key);
 }
 
 void DB::lpushCommand(Context& con)
 {
-    lpush(con, LPUSH);
+    lpush(con, true);
 }
 
 void DB::rpushCommand(Context& con)
 {
-    lpush(con, RPUSH);
+    lpush(con, false);
 }
 
-#define LPUSHX 1
-#define RPUSHX 2
-
-void DB::lpushx(Context& con, int option)
+// L(R)PUSHX key value
+void DB::lpushx(Context& con, bool is_lpushx)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    auto& value = cmdlist[2];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
-    List& list = getListValue(it);
-    option == LPUSHX ? list.emplace_front(cmdlist[2])
-                     : list.emplace_back(cmdlist[2]);
-    touchWatchKey(cmdlist[1]);
+    auto& list = getListValue(it);
+    is_lpushx ? list.emplace_front(value)
+              : list.emplace_back(value);
+    touchWatchKey(key);
     con.appendReplyNumber(list.size());
 }
 
 void DB::lpushxCommand(Context& con)
 {
-    lpushx(con, LPUSHX);
+    lpushx(con, true);
 }
 
 void DB::rpushxCommand(Context& con)
 {
-    lpushx(con, RPUSHX);
+    lpushx(con, false);
 }
 
-#define LPOP 1
-#define RPOP 2
-
-void DB::lpop(Context& con, int option)
+// L(R)POP key
+void DB::lpop(Context& con, bool is_lpop)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, List);
-    List& list = getListValue(it);
-    if (option == LPOP) {
+    auto& list = getListValue(it);
+    if (is_lpop) {
         con.appendReplyString(list.front());
         list.pop_front();
     } else {
         con.appendReplyString(list.back());
         list.pop_back();
     }
-    if (list.empty()) delKeyWithExpire(cmdlist[1]);
-    touchWatchKey(cmdlist[1]);
+    checkEmpty(list, key);
+    touchWatchKey(key);
 }
 
 void DB::lpopCommand(Context& con)
 {
-    lpop(con, LPOP);
+    lpop(con, true);
 }
 
 void DB::rpopCommand(Context& con)
 {
-    lpop(con, RPOP);
+    lpop(con, false);
 }
 
-#define BLOCK 1
-#define NONBLOCK 2
-
-void DB::rpoplpush(Context& con, int option)
+// RPOPLPUSH source destination
+// BRPOPLPUSH source destination timeout
+void DB::rpoplpush(Context& con, bool is_nonblock)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
-    expireIfNeeded(cmdlist[1]);
-    expireIfNeeded(cmdlist[2]);
+    auto& src_key = cmdlist[1];
+    auto& des_key = cmdlist[2];
+    checkExpire(src_key);
+    checkExpire(des_key);
     int timeout = 0;
-    if (option == BLOCK) {
+    if (!is_nonblock) {
         timeout = str2l(cmdlist[size - 1].c_str());
         if (str2numberErr()) db_return(con, reply.integer_err);
         if (timeout < 0) db_return(con, reply.timeout_out_of_range);
     }
-    auto src = find(cmdlist[1]);
-    if (!isFound(src)) {
-        if (option == NONBLOCK) db_return(con, reply.nil);
-        auto e = find(cmdlist[2]);
+    auto src_it = find(src_key);
+    if (!isFound(src_it)) {
+        if (is_nonblock) db_return(con, reply.nil);
+        auto e = find(des_key);
         if (isFound(e)) checkType(con, e, List);
-        addBlockingKey(con, cmdlist[1]);
-        con.des().assign(cmdlist[2]);
+        addBlockingKey(con, src_key);
+        con.des().assign(des_key);
         setContextToBlock(con, timeout);
         return;
     }
-    checkType(con, src, List);
-    List& srclist = getListValue(src);
-    con.appendReplyString(srclist.back());
-    auto des = find(cmdlist[2]);
-    if (isFound(des)) {
-        checkType(con, des, List);
-        List& deslist = getListValue(des);
-        deslist.emplace_front(srclist.back());
-        touchWatchKey(cmdlist[1]);
-        touchWatchKey(cmdlist[2]);
+    checkType(con, src_it, List);
+    auto& src_list = getListValue(src_it);
+    con.appendReplyString(src_list.back());
+    auto des_it = find(des_key);
+    if (isFound(des_it)) {
+        checkType(con, des_it, List);
+        auto& des_list = getListValue(des_it);
+        des_list.emplace_front(src_list.back());
+        touchWatchKey(src_key);
+        touchWatchKey(des_key);
     } else {
-        List deslist;
-        deslist.emplace_front(srclist.back());
-        insert(cmdlist[2], deslist);
-        touchWatchKey(cmdlist[1]);
+        List des_list;
+        des_list.emplace_front(src_list.back());
+        insert(des_key, std::move(des_list));
+        touchWatchKey(src_key);
     }
-    srclist.pop_back();
-    if (srclist.empty()) delKeyWithExpire(cmdlist[1]);
+    src_list.pop_back();
+    checkEmpty(src_list, src_key);
 }
 
 void DB::rpoplpushCommand(Context& con)
 {
-    rpoplpush(con, NONBLOCK);
+    rpoplpush(con, true);
 }
 
+// LREM key count value
 void DB::lremCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
+    auto& key = cmdlist[1];
+    auto& value = cmdlist[3];
+    checkExpire(key);
     int count = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
-    String& value = cmdlist[3];
-    auto it = find(cmdlist[1]);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
-    List& list = getListValue(it);
-    int retval = 0;
+    auto& list = getListValue(it);
+    int rems = 0;
     if (count > 0) {
         for (auto it = list.cbegin(); it != list.cend(); ) {
             if ((*it).compare(value) == 0) {
                 auto tmp = it++;
                 list.erase(tmp);
-                retval++;
+                rems++;
                 if (--count == 0)
                     break;
             } else
-                it++;
+                ++it;
         }
     } else if (count < 0) {
-        for (auto it = list.crbegin(); it != list.crend(); it++) {
+        for (auto it = list.crbegin(); it != list.crend(); ++it) {
             if ((*it).compare(value) == 0) {
                 // &*(reverse_iterator(i)) == &*(i - 1)
                 list.erase((++it).base());
-                retval++;
+                rems++;
                 if (++count == 0)
                     break;
             }
@@ -189,36 +190,40 @@ void DB::lremCommand(Context& con)
             if ((*it).compare(value) == 0) {
                 auto tmp = it++;
                 list.erase(tmp);
-                retval++;
+                rems++;
             }
         }
     }
-    if (list.empty()) delKeyWithExpire(cmdlist[1]);
-    touchWatchKey(cmdlist[1]);
-    con.appendReplyNumber(retval);
+    checkEmpty(list, key);
+    touchWatchKey(key);
+    con.appendReplyNumber(rems);
 }
 
+// LLEN key
 void DB::llenCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    auto& key = cmdlist[1];
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.n0);
     checkType(con, it, List);
-    List& list = getListValue(it);
+    auto& list = getListValue(it);
     con.appendReplyNumber(list.size());
 }
 
+// LINDEX key index
 void DB::lindexCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
+    auto& key = cmdlist[1];
     int index = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, List);
-    List& list = getListValue(it);
+    auto& list = getListValue(it);
     size_t size = list.size();
     if (index < 0)
         index += size;
@@ -232,16 +237,19 @@ void DB::lindexCommand(Context& con)
         }
 }
 
+// LSET key index value
 void DB::lsetCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
+    auto& key = cmdlist[1];
+    auto& value = cmdlist[3];
     int index = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.no_such_key);
     checkType(con, it, List);
-    List& list = getListValue(it);
+    auto& list = getListValue(it);
     size_t size = list.size();
     if (index < 0)
         index += size;
@@ -250,28 +258,30 @@ void DB::lsetCommand(Context& con)
     }
     for (auto& it : list)
         if (index-- == 0) {
-            it.assign(cmdlist[3]);
+            it.assign(value);
             break;
         }
-    touchWatchKey(cmdlist[1]);
+    touchWatchKey(key);
     con.append(reply.ok);
 }
 
+// LRANGE key start stop
 void DB::lrangeCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
+    auto& key = cmdlist[1];
     int start = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
     int stop = str2l(cmdlist[3].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.nil);
     checkType(con, it, List);
-    List& list = getListValue(it);
-    int upperbound = list.size() - 1;
-    int lowerbound = -list.size();
-    if (checkRange(con, &start, &stop, lowerbound, upperbound) == C_ERR)
+    auto& list = getListValue(it);
+    int upper = list.size() - 1;
+    int lower = -list.size();
+    if (checkRange(con, start, stop, lower, upper) == C_ERR)
         return;
     con.appendReplyMulti(stop - start + 1);
     int i = 0;
@@ -287,44 +297,20 @@ void DB::lrangeCommand(Context& con)
     }
 }
 
-int DB::checkRange(Context& con, int *start, int *stop,
-        int lowerbound, int upperbound)
-{
-    if (*start > upperbound || *stop < lowerbound) {
-        con.append(reply.nil);
-        return C_ERR;
-    }
-    if (*start < 0 && *start >= lowerbound) {
-        *start += upperbound + 1;
-    }
-    if (*stop < 0 && *stop >= lowerbound) {
-        *stop += upperbound + 1;
-    }
-    if (*start < lowerbound) {
-        *start = 0;
-    }
-    if (*stop > upperbound) {
-        *stop = upperbound;
-    }
-    if (*start > *stop) {
-        con.append(reply.nil);
-        return C_ERR;
-    }
-    return C_OK;
-}
-
+// LTRIM key start stop
 void DB::ltrimCommand(Context& con)
 {
     auto& cmdlist = con.commandList();
+    auto& key = cmdlist[1];
     int start = str2l(cmdlist[2].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
     int stop = str2l(cmdlist[3].c_str());
     if (str2numberErr()) db_return(con, reply.integer_err);
-    expireIfNeeded(cmdlist[1]);
-    auto it = find(cmdlist[1]);
+    checkExpire(key);
+    auto it = find(key);
     if (!isFound(it)) db_return(con, reply.ok);
     checkType(con, it, List);
-    List& list = getListValue(it);
+    auto& list = getListValue(it);
     size_t size = list.size();
     if (start < 0)
         start += size;
@@ -337,24 +323,15 @@ void DB::ltrimCommand(Context& con)
         db_return(con, reply.ok);
     }
     int i = 0;
-    for (auto it = list.cbegin(); it != list.cend(); ) {
+    for (auto it = list.cbegin(); it != list.cend(); i++) {
         auto tmp = it++;
-        if (i < start) {
-            list.erase(tmp);
-            i++;
-        } else if (i > stop) {
-            list.erase(tmp);
-            i++;
-        } else
-            i++;
+        if (i >= start && i <= stop) continue;
+        list.erase(tmp);
     }
-    if (list.empty()) delKeyWithExpire(cmdlist[1]);
-    touchWatchKey(cmdlist[1]);
+    checkEmpty(list, key);
+    touchWatchKey(key);
     con.append(reply.ok);
 }
-
-#define BLPOP 1
-#define BRPOP 2
 
 // 将一个blocking Key添加到DB::blockingKeys和Context::blockingKeys中
 void DB::addBlockingKey(Context& con, const Key& key)
@@ -377,7 +354,8 @@ void DB::setContextToBlock(Context& con, int timeout)
     _dbServer->blockedClients().push_back(con.conn()->id());
 }
 
-void DB::blpop(Context& con, int option)
+// BLPOP key [key ...] timeout
+void DB::blpop(Context& con, bool is_blpop)
 {
     auto& cmdlist = con.commandList();
     size_t size = cmdlist.size();
@@ -385,37 +363,38 @@ void DB::blpop(Context& con, int option)
     if (str2numberErr()) db_return(con, reply.integer_err);
     if (timeout < 0) db_return(con, reply.timeout_out_of_range);
     for (size_t i = 1 ; i < size - 1; i++) {
-        auto it = find(cmdlist[i]);
+        auto& key = cmdlist[i];
+        auto it = find(key);
         if (isFound(it)) {
             checkType(con, it, List);
-            List& list = getListValue(it);
+            auto& list = getListValue(it);
             con.appendReplyMulti(2);
-            con.appendReplyString(cmdlist[i]);
-            con.appendReplyString(option == BLPOP ? list.front() : list.back());
-            option == BLPOP ? list.pop_front() : list.pop_back();
-            if (list.empty()) delKeyWithExpire(cmdlist[i]);
+            con.appendReplyString(key);
+            con.appendReplyString(is_blpop ? list.front() : list.back());
+            is_blpop ? list.pop_front() : list.pop_back();
+            checkEmpty(list, key);
             return;
         }
     }
-    for (size_t j = 1; j < size - 1; j++) {
-        addBlockingKey(con, cmdlist[j]);
+    for (size_t i = 1; i < size - 1; i++) {
+        addBlockingKey(con, cmdlist[i]);
     }
     setContextToBlock(con, timeout);
 }
 
 void DB::blpopCommand(Context& con)
 {
-    (con.flag() & Context::EXEC_MULTI) ? lpopCommand(con) : blpop(con, BLPOP);
+    (con.flag() & Context::EXEC_MULTI) ? lpopCommand(con) : blpop(con, true);
 }
 
 void DB::brpopCommand(Context& con)
 {
-    (con.flag() & Context::EXEC_MULTI) ? rpopCommand(con) : blpop(con, BRPOP);
+    (con.flag() & Context::EXEC_MULTI) ? rpopCommand(con) : blpop(con, false);
 }
 
 void DB::brpoplpushCommand(Context& con)
 {
-    (con.flag() & Context::EXEC_MULTI) ? rpoplpushCommand(con) : rpoplpush(con, BLOCK);
+    (con.flag() & Context::EXEC_MULTI) ? rpoplpushCommand(con) : rpoplpush(con, false);
 }
 
 #define BLOCK_LPOP 1
@@ -435,7 +414,7 @@ void DB::blockMoveSrcToDes(const String& src, const String& des)
 {
     auto it = find(des);
     if (isFound(it)) {
-        List& list = getListValue(it);
+        auto& list = getListValue(it);
         list.emplace_front(src);
     } else {
         List list;
@@ -452,7 +431,7 @@ void DB::blockingPop(const std::string& key)
     unsigned bops = 0;
     Context other(_dbServer, nullptr);
     int64_t now = Angel::nowMs();
-    auto& value = getListValue(find(key));
+    auto& list = getListValue(find(key));
 
     auto conn = g_server->server().getConnection(*cl->second.begin());
     if (!conn) return;
@@ -460,20 +439,20 @@ void DB::blockingPop(const std::string& key)
     bops = getLastcmd(context.lastcmd());
     other.appendReplyMulti(2);
     other.appendReplyString(key);
-    other.appendReplyString((bops == BLOCK_LPOP) ? value.front() : value.back());
+    other.appendReplyString((bops == BLOCK_LPOP) ? list.front() : list.back());
     double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
     other.append("+(");
     other.append(convert2f(seconds));
     other.append("s)\r\n");
-    conn->send(other.message());
-    other.message().clear();
+    conn->send(other.reply());
+    other.reply().clear();
 
     clearBlockingKeysForContext(context);
     _dbServer->removeBlockedClient(conn->id());
     if (bops == BLOCK_RPOPLPUSH) {
-        blockMoveSrcToDes(value.back(), context.des());
+        blockMoveSrcToDes(list.back(), context.des());
     }
-    (bops == BLOCK_LPOP) ? value.pop_front() : value.pop_back();
-    if (value.empty()) delKeyWithExpire(key);
+    (bops == BLOCK_LPOP) ? list.pop_front() : list.pop_back();
+    checkEmpty(list, key);
     touchWatchKey(key);
 }

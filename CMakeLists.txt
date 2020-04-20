@@ -8,8 +8,7 @@ set (SERVER_DIR "${PROJECT_SOURCE_DIR}/src")
 set (CLIENT_DIR "${PROJECT_SOURCE_DIR}/client")
 set (PROXY_DIR "${PROJECT_SOURCE_DIR}/proxy")
 
-include (CheckLibraryExists)
-check_library_exists(snappy snappy_compress "" ALICE_HAVE_SNAPPY)
+find_library (ALICE_HAVE_SNAPPY NAMES snappy)
 
 configure_file (
     "${SERVER_DIR}/configure.h.in"
@@ -61,7 +60,11 @@ if (ALICE_HAVE_SNAPPY)
 endif()
 
 add_executable(alice-server ${SERVER_FILES})
-target_link_libraries(alice-server angel snappy)
+target_link_libraries(alice-server angel)
+
+if (ALICE_HAVE_SNAPPY)
+    target_link_libraries(alice-server snappy)
+endif()
 
 add_executable(alice-cli ${CLI_CLIENT_FILES})
 target_link_libraries(alice-cli angel linenoise)
