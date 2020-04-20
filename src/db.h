@@ -63,7 +63,7 @@ public:
     explicit Context(DBServer *db, Angel::TcpConnection *conn)
         : _db(db),
         _conn(conn),
-        _lastBufsize(0),
+        _lastBufSize(0),
         _flag(0),
         _perm(IS_READ | IS_WRITE),
         _blockStartTime(-1),
@@ -93,9 +93,14 @@ public:
     void append(const char *s, size_t len)
     { _buffer.append(s, len); }
     std::string& reply() { return _buffer; }
-    void updateLastBufsize() { _lastBufsize = _buffer.size(); }
-    bool haveNewReply() { return _lastBufsize != _buffer.size(); }
-    const char *curReply() { return &_buffer[_lastBufsize]; }
+    void updateLastBufsize() { _lastBufSize = _buffer.size(); }
+    bool haveNewReply() { return _lastBufSize != _buffer.size(); }
+    const char *curReply() { return &_buffer[_lastBufSize]; }
+    void resetCurReply(const std::string& s)
+    {
+        _buffer.erase(_lastBufSize, _buffer.size()-_lastBufSize);
+        _buffer.append(s);
+    }
     int64_t blockStartTime() const { return _blockStartTime; }
     int blockTimeout() const { return _blockTimeout; }
     int blockDbnum() const { return _blockDbnum; }
@@ -149,7 +154,7 @@ private:
     // 发送缓冲区
     std::string _buffer;
     // 命令开始执行前_buffer的大小
-    size_t _lastBufsize;
+    size_t _lastBufSize;
     int _flag;
     // 能执行的命令的权限
     int _perm;

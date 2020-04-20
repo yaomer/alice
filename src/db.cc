@@ -304,7 +304,7 @@ void DB::flushAllCommand(Context& con)
     _dbServer->clear();
     if (!g_server_conf.save_params.empty()) bgSaveCommand(con);
     if (g_server_conf.enable_appendonly) bgRewriteAofCommand(con);
-    con.reply().assign(reply.ok);
+    con.resetCurReply(reply.ok);
 }
 
 // SLAVEOF host port
