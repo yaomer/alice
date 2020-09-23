@@ -17,7 +17,7 @@
 ### 依赖
 + 网络模块使用[Angel](https://github.com/yaomer/Angel)
 + 客户端的命令提示使用[linenoise](https://github.com/antirez/linenoise)
-+ 如果安装了`snappy`，则会在生成rdb快照时进行压缩，这可以使生成的rdb快照更加紧凑
++ mmdb-rdb和ssdb-leveldb需要使用`snappy`
 + 我们默认libangel.a liblinenoise.a libsnappy.a都安装到了/usr/local/lib目录
 
 ### 压测
