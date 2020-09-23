@@ -6,12 +6,13 @@
 #include <unordered_map>
 #include <tuple>
 
-#include "sentinel_instance.h"
+namespace alice {
 
-namespace Alice {
+void read_server_conf(const std::string& filename);
+void read_sentinel_conf(const std::string& filename);
 
-void readServerConf(const char *server_conf_file);
-void readSentinelConf(const char *sentinel_conf_file);
+#define ENGINE_MMDB 1
+#define ENGINE_SSDB 2
 
 #define AOF_ALWAYS 1
 #define AOF_EVERYSEC 2
@@ -24,54 +25,70 @@ void readSentinelConf(const char *sentinel_conf_file);
 #define EVICT_VOLATILE_TTL 5
 #define EVICT_NO 6
 
-struct ServerConf {
-    // 服务器监听的端口
+struct server_conf_t {
     int port = 1296;
-    // 服务器的IP
-    std::string addr = "127.0.0.1";
-    // 创建的数据库数目
-    int databases = 16;
-    // 保存rdb持久化触发的条件
-    std::vector<std::tuple<time_t, int>> save_params;
-    // 是否开启aof持久化
-    bool enable_appendonly = false;
-    // aof持久化的模式
-    int aof_mode = AOF_EVERYSEC;
-    std::string rdb_file = "dump.rdb";
-    std::string appendonly_file = "appendonly.aof";
-    // 是否需要压缩rdb-file
-    bool rdb_compress = true;
+    std::string ip = "127.0.0.1";
+    int engine = ENGINE_MMDB;
     // master-slave连接超时时间
     int repl_timeout = 60 * 1000;
     // 从服务器向主服务器发送PING的周期
     int repl_ping_period = 10 * 1000;
     // 复制积压缓冲区的大小
-    size_t repl_backlog_size = 1024 * 1024;
-    // 每次定期删除过期键时检查的数据库个数
-    int expire_check_dbnums = 16;
-    // 每个数据库检查的键数
-    int expire_check_keys = 20;
-    // 服务器可使用的最大内存
-    size_t maxmemory = 0;
-    // 内存淘汰策略
-    int maxmemory_policy = EVICT_NO;
-    // 内存淘汰时的随机取样精度
-    int maxmemory_samples = 5;
+    int repl_backlog_size = 1024 * 1024;
     int slowlog_log_slower_than = 10000;
     int slowlog_max_len = 128;
     // 将要去复制的主服务器
     std::string master_ip;
-    int master_port = 0;
+    int master_port;
+    // 要创建多少个数据库
+    int mmdb_databases = 16;
+    // 每次定期删除过期键时检查的数据库个数
+    int mmdb_expire_check_dbnums = 16;
+    // 每个数据库检查的键数
+    int mmdb_expire_check_keys = 20;
+    // 服务器可使用的最大内存
+    int mmdb_maxmemory = 0;
+    // 内存淘汰策略
+    int mmdb_maxmemory_policy = EVICT_NO;
+    // 内存淘汰时的随机取样精度
+    int mmdb_maxmemory_samples = 5;
+    std::vector<std::tuple<time_t, int>> mmdb_save_params;
+    // 是否压缩rdb文件
+    bool mmdb_rdb_compress = true;
+    // len(value)大于多少时进行压缩
+    int mmdb_rdb_compress_limit = 20;
+    // rdb文件的存储位置
+    std::string mmdb_rdb_file = "dump.rdb";
+    // 是否开启aof持久化
+    bool mmdb_enable_appendonly = false;
+    // aof持久化的模式
+    int mmdb_aof_mode = AOF_EVERYSEC;
+    // aof文件的存储位置
+    std::string mmdb_appendonly_file = "appendonly.aof";
+    // ssdb-options
+    std::string ssdb_leveldb_dbname = ".testdb";
+    bool ssdb_leveldb_create_if_missing = true;
+    int ssdb_leveldb_write_buffer_size = 4 * 1024 * 1024;
+    int ssdb_leveldb_max_open_files = 65535;
+    int ssdb_leveldb_max_file_size = 2 * 1024 * 1024;
 };
 
-struct SentinelConf {
+struct sentinel_instance_conf_t {
+    std::string name;
+    std::string ip;
+    int port;
+    int quorum;
+    int down_after_period;
+};
+
+struct sentinel_conf_t {
     int port = 12960;
-    std::string addr = "127.0.0.1";
-    SentinelInstance::SentinelInstanceMap masters;
+    std::string ip = "127.0.0.1";
+    std::unordered_map<std::string, sentinel_instance_conf_t> insmap;
 };
 
-extern struct ServerConf g_server_conf;
-extern struct SentinelConf g_sentinel_conf;
+extern struct server_conf_t server_conf;
+extern struct sentinel_conf_t sentinel_conf;
 
 }
 

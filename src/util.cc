@@ -1,3 +1,5 @@
+#include <angel/util.h>
+
 #include <time.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -7,12 +9,18 @@
 #include <vector>
 #include <string>
 
+#include "db_base.h"
 #include "util.h"
 
-namespace Alice {
+#if defined (__APPLE__)
+#include <mach/task.h>
+#include <mach/mach_init.h>
+#endif
+
+namespace alice {
 
 // buflen >= 33
-void setSelfRunId(char *buf)
+void set_run_id(char *buf)
 {
     struct timespec tsp;
     clock_gettime(_CLOCK_REALTIME, &tsp);
@@ -22,15 +30,61 @@ void setSelfRunId(char *buf)
     snprintf(buf + 16, 17, "%lx", u(e));
 }
 
+// if ok, return parsed-bytes
+// if not enough data, return 0
+// if error, return -1
+ssize_t parse_request(argv_t& argv, angel::buffer& buf)
+{
+    const char *s = buf.peek();
+    const char *es = s + buf.readable();
+    const char *ps = s;
+    size_t argc, len;
+    // 解析命令个数
+    const char *next = std::find(s, es, '\n');
+    if (next == es) goto clr;
+    if (s[0] != '*' || next[-1] != '\r') goto err;
+    argc = atol(s + 1);
+    s = next + 1;
+    // 解析各个命令
+    while (argc > 0) {
+        next = std::find(s, es, '\n');
+        if (next == es) goto clr;
+        if (s[0] != '$' || next[-1] != '\r') goto err;
+        len = atol(s + 1);
+        s = next + 1;
+        if (es - s < len + 2) goto clr;
+        if (s[len] != '\r' || s[len+1] != '\n') goto err;
+        argv.emplace_back(s, len);
+        s += len + 2;
+        argc--;
+    }
+    return s - ps;
+clr: // not enough data
+    argv.clear();
+    return 0;
+err: // error
+    argv.clear();
+    return -1;
+}
+
+void conv2resp(std::string& buffer, const argv_t& argv)
+{
+    context_t con;
+    con.append_reply_multi(argv.size());
+    for (auto& it : argv)
+        con.append_reply_string(it);
+    con.buf.swap(buffer);
+}
+
 thread_local char convert_buf[64];
 
-const char *convert2f(double value)
+const char *d2s(double value)
 {
     snprintf(convert_buf, sizeof(convert_buf), "%g", value);
     return convert_buf;
 }
 
-thread_local bool str2numerr;
+thread_local bool str2numerror;
 
 #define STR2LONG 1
 #define STR2LLONG 2
@@ -38,7 +92,7 @@ thread_local bool str2numerr;
 
 #define str2number(ptr, val, opt) \
     do { \
-        str2numerr = false; \
+        str2numerror = false; \
         errno = 0; \
         char *eptr = nullptr; \
         switch (opt) { \
@@ -47,36 +101,36 @@ thread_local bool str2numerr;
         case STR2DOUBLE: val = strtod(ptr, &eptr); break; \
         } \
         if (errno == ERANGE || eptr == ptr || *eptr != '\0') { \
-            str2numerr = true; \
+            str2numerror = true; \
             val = 0; \
         } \
     } while (0)
 
 // if str2l/ll/f convert error, return true
 // this func is thread-safe
-bool str2numberErr()
+bool str2numerr()
 {
-    return str2numerr;
+    return str2numerror;
 }
 
-long str2l(const char *nptr)
+long str2l(const std::string& nstr)
 {
     long lval;
-    str2number(nptr, lval, STR2LONG);
+    str2number(nstr.c_str(), lval, STR2LONG);
     return lval;
 }
 
-long long str2ll(const char *nptr)
+long long str2ll(const std::string& nstr)
 {
     long long llval;
-    str2number(nptr, llval, STR2LLONG);
+    str2number(nstr.c_str(), llval, STR2LLONG);
     return llval;
 }
 
-double str2f(const char *nptr)
+double str2f(const std::string& nstr)
 {
     double dval;
-    str2number(nptr, dval, STR2DOUBLE);
+    str2number(nstr.c_str(), dval, STR2DOUBLE);
     return dval;
 }
 
@@ -85,7 +139,7 @@ double str2f(const char *nptr)
 // set key value -> [set] [key] [value]
 // set key "hello, wrold" -> [set] [key] [hello, world]
 // if this line is all whitespace or parse error, return -1; else return 0
-int parseLine(std::vector<std::string>& argv, const char *line, const char *linep)
+int parse_line(argv_t& argv, const char *line, const char *linep)
 {
     bool iter = false;
     const char *start;
@@ -123,10 +177,10 @@ err:
 
 // if c == ','
 // for [a,b,c,d] return [a][b][c][d]
-void splitLine(std::vector<std::string>& argv,
-               const char *s,
-               const char *es,
-               char c)
+void split_line(std::vector<std::string>& argv,
+                const char *s,
+                const char *es,
+                char c)
 {
     const char *p;
     while (true) {
@@ -138,23 +192,23 @@ void splitLine(std::vector<std::string>& argv,
     argv.emplace_back(s, p);
 }
 
-void writeToFile(int fd, const char *buf, size_t nbytes)
+int fwrite(int fd, const char *buf, size_t nbytes)
 {
     while (nbytes > 0) {
         ssize_t n = ::write(fd, buf, nbytes);
-        // 由于是向文件中写，所以几乎不可能出错
-        if (n < 0) break;
+        if (n < 0) return -1;
         nbytes -= n;
         buf += n;
     }
+    return 0;
 }
 
-void parseConf(ConfParamList& confParamList, const char *filename)
+void parse_conf(conf_param_list& paramlist, const char *filename)
 {
     char buf[1024];
     FILE *fp = fopen(filename, "r");
     if (!fp) {
-        fprintf(stderr, "can't open %s\n", filename);
+        fprintf(stderr, "open %s error: %s", filename, angel::util::strerrno());
         abort();
     }
     while (fgets(buf, sizeof(buf), fp)) {
@@ -169,7 +223,7 @@ next:
             p = std::find_if(s, es, isspace);
             if (p == es) continue;
             param.emplace_back(s, p);
-            confParamList.emplace_back(std::move(param));
+            paramlist.emplace_back(std::move(param));
             continue;
         }
         param.emplace_back(s, p);
@@ -179,19 +233,53 @@ next:
     fclose(fp);
 }
 
-off_t getfilesize(int fd)
+off_t get_filesize(int fd)
 {
     struct stat st;
     fstat(fd, &st);
     return st.st_size;
 }
 
-bool fileExists(const char *filename)
+bool is_file_exists(const std::string& filename)
 {
+    FILE *fp = fopen(filename.c_str(), "r");
+    if (fp) {
+        fclose(fp);
+        return true;
+    }
+    return false;
+}
+
+ssize_t get_proc_memory()
+{
+#if defined (__APPLE__)
+    task_t task;
+    struct task_basic_info tbi;
+    mach_msg_type_number_t count = TASK_BASIC_INFO_COUNT;
+    if (task_for_pid(mach_task_self(), ::getpid(), &task) != KERN_SUCCESS)
+        return -1;
+    task_info(task, TASK_BASIC_INFO, (task_info_t)&tbi, &count);
+    return tbi.resident_size;
+#elif defined (__linux__)
+    char filename[32] = { 0 };
+    char buf[1024] = { 0 };
+    int vmrss = -1;
+    snprintf(filename, sizeof(filename), "/proc/%d/status", ::getpid());
     FILE *fp = fopen(filename, "r");
-    bool exists = fp ? true : false;
+    if (fp == nullptr) return -1;
+    while (fgets(buf, sizeof(buf), fp)) {
+        if (strncasecmp(buf, "vmrss:", 6) == 0) {
+            sscanf(buf, "%*s %d", &vmrss);
+            vmrss *= 1024;
+            break;
+        }
+    }
     fclose(fp);
-    return exists;
+    return vmrss;
+#else
+    assert(0);
+    return -1;
+#endif
 }
 
 }

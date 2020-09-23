@@ -6,18 +6,18 @@
 
 #include "util.h"
 
-namespace Alice {
+namespace alice {
 // 一个固定长度的fifo队列，如果到达末尾，就会重新绕回到开头，并覆盖掉旧的数据
 // 从而使队列中总是保存着最新的数据
-// e.g: r是一个大小为3的RingBuffer，将'hello'加入r中的过程如下：
+// e.g: r是一个大小为3的ring_buffer，将'hello'加入r中的过程如下：
 // [h e l] -> [l e l] -> [l o l]
 // index=3    index=4    index=5
 // 要取出r中的数据，则必须以index为起始索引，因此上述过程可以更直观地表示为：
 // [h e l] -> [e l l] -> [l l o]
 //            pop 'h'    pop 'e'
-class RingBuffer {
+class ring_buffer {
 public:
-    explicit RingBuffer(unsigned size)
+    explicit ring_buffer(unsigned size)
     {
         if (!is_power_of_2(size))
             size = round_up_power_of_2(size);
@@ -25,13 +25,13 @@ public:
         _size = size;
         _index = 0;
     }
-    // 目前RingBuffer中已经存放有多少数据
+    // 目前ring_buffer中已经存放有多少数据
     unsigned size() const
     {
         if (_index < _size) return _index;
         else return _size;
     }
-    // get只dup一份需要的数据，并不会对RingBuffer作任何修改
+    // get只dup一份需要的数据，并不会对ring_buffer作任何修改
     void get(char *to, unsigned len)
     {
         len = std::min(len, size(), std::less<unsigned>());

@@ -40,277 +40,267 @@
 #include <assert.h>
 
 #include "sentinel.h"
+#include "config.h"
+
+using namespace alice;
+
+#define BIND(f) std::bind(&Sentinel::f, this, std::placeholders::_1)
 
 // 选举领头和投票时设置的超时定时器的基值
 #define ELECT_TIMEOUT 1000
 
-using namespace Alice;
+using namespace alice;
 
-Sentinel::Sentinel(Angel::EventLoop *loop, Angel::InetAddr inetAddr)
-    : _loop(loop),
-    _server(loop, inetAddr),
-    _masters(&g_sentinel_conf.masters),
-    _currentEpoch(0)
+Sentinel::Sentinel(angel::evloop *loop, angel::inet_addr listen_addr)
+    : loop(loop),
+    server(loop, listen_addr),
+    current_epoch(0)
 {
-    for (auto& db : _server.dbServer().dbs()) {
-        db->commandMap() = {
-            { "PING",       { -1, IS_READ, std::bind(&DB::pingCommand, db.get(), _1) } },
-            { "INFO",       { -3, IS_READ, std::bind(&Sentinel::infoCommand, this, _1) } },
-            { "SENTINEL",   {  2, IS_READ, std::bind(&Sentinel::sentinelCommand, this, _1) } },
-        };
+    server.set_connection_handler([this](const angel::connection_ptr& conn){
+            this->connection_handler(conn);
+            });
+    server.set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->message_handler(conn, buf);
+            });
+    cmdtable = {
+        { "PING",       { -1, 0, BIND(ping) } },
+        { "INFO",       { -3, 0, BIND(info) } },
+        { "SENTINEL",   {  2, 0, BIND(sentinel) } },
+    };
+    set_run_id(run_id);
+    // server.daemon();
+}
+
+void Sentinel::executor(context_t& con)
+{
+    std::transform(con.argv[0].begin(), con.argv[0].end(), con.argv[0].begin(), ::toupper);
+    auto c = cmdtable.find(con.argv[0]);
+    if (c == cmdtable.end()) {
+        con.append("-ERR unknown command `" + con.argv[0] + "`\r\n");
+        goto end;
     }
+    if ((c->second.arity > 0 && con.argv.size() < c->second.arity) ||
+        (c->second.arity < 0 && con.argv.size() != -c->second.arity)) {
+        con.append("-ERR wrong number of arguments for '" + con.argv[0] + "'\r\n");
+        goto end;
+    }
+    c->second.command_cb(con);
+end:
+    con.argv.clear();
 }
 
 // sentinel在连接主服务器或从服务器时，需要同时创建命令连接和订阅连接，
 // 这是因为sentinel需要通过主服务器或从服务器发送来的频道信息来发现新的sentinel
 // 而在连接新发现的sentinel时，只需要创建命令连接即可
-void Sentinel::init()
+void Sentinel::start()
 {
-    for (auto& it : *_masters) {
-        it.second->creatCmdConnection();
-        it.second->creatPubConnection();
+    server.start();
+    for (auto& ins : sentinel_conf.insmap) {
+        auto master = new SentinelInstance;
+        master->sentinel = this;
+        master->flags |= SentinelInstance::MASTER;
+        master->name = ins.second.name;
+        master->inet_addr = angel::inet_addr(ins.second.ip, ins.second.port);
+        master->quorum = ins.second.quorum;
+        master->down_after_period = ins.second.down_after_period;
+        master->creat_cmd_connection();
+        master->creat_sub_connection();
+        masters.emplace(master->name, master);
     }
-    _loop->runEvery(1000, [this]{ this->sendPingToServers(); });
-    _loop->runEvery(1000 * 2, [this]{ this->sendPubMessageToServers(); });
-    _loop->runEvery(1000 * 2, [this]{ this->sendInfoToServers(); });
-    _loop->runEvery(100, [this]{ this->sentinelCron(); });
+    loop->run_every(1000, [this]{ this->send_ping_to_servers(); });
+    loop->run_every(1000 * 2, [this]{ this->send_pub_message_to_servers(); });
+    loop->run_every(1000 * 2, [this]{ this->send_info_to_servers(); });
+    loop->run_every(100, [this]{ this->sentinel_cron(); });
 }
 
-// 对于SentinelInstance对象来说，当它调用creatCmdConnection时，
-// 需要保存当前对象的this指针，如果该对象是在栈上分配的，则该对象很快就会
-// 被销毁，而this指针则会失效，这样，当延后回调发生的时候，就会访问到错误
-// 的内存空间，从而造成一些意想不到的结果
-// 因此，这种情况下，需要new一个对象，这样才能保证在该对象被释放前this指针
-// 一定是有效的
-// 这也是SentinelInstanceMap为什么要保存unique_ptr的原因
-// @@@ debug this for two weeks @@@
-//
 // 向(master slave or sentinel)创建一条命令连接
-void SentinelInstance::creatCmdConnection()
+void SentinelInstance::creat_cmd_connection()
 {
-    _clients[0].reset(
-            new Angel::TcpClient(g_sentinel->loop(), inetAddr()));
-    _clients[0]->setMessageCb(
-            std::bind(&SentinelInstance::recvReplyFromServer, this, _1, _2));
-    _clients[0]->setCloseCb(
-            std::bind(&SentinelInstance::closeConnection, this, _1));
-    _clients[0]->notExitLoop();
-    _clients[0]->start();
+    client[0].reset(new angel::client(sentinel->loop, inet_addr));
+    client[0]->set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->recv_reply_from_server(conn, buf);
+            });
+    client[0]->set_close_handler([this](const angel::connection_ptr& conn){
+            this->close_connection_handler(conn);
+            });
+    client[0]->not_exit_loop();
+    client[0]->start();
 }
 
 // 向(master slave or sentinel)创建一条订阅连接
-void SentinelInstance::creatPubConnection()
+void SentinelInstance::creat_sub_connection()
 {
-    _clients[1].reset(
-            new Angel::TcpClient(g_sentinel->loop(), inetAddr()));
-    _clients[1]->setConnectionCb(
-            std::bind(&Sentinel::subServer, g_sentinel, _1));
-    _clients[1]->setMessageCb(
-            std::bind(&Sentinel::recvPubMessageFromServer, g_sentinel, _1, _2));
-    _clients[1]->notExitLoop();
-    _clients[1]->start();
+    client[1].reset(new angel::client(sentinel->loop, inet_addr));
+    client[1]->set_connection_handler([this](const angel::connection_ptr& conn){
+            this->sentinel->sub_server(conn);
+            });
+    client[1]->set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->sentinel->recv_pub_message_from_server(conn, buf);
+            });
+    client[1]->not_exit_loop();
+    client[1]->start();
 }
 
 // 对端断开连接时被调用
-void SentinelInstance::closeConnection(const Angel::TcpConnectionPtr& conn)
+void SentinelInstance::close_connection_handler(const angel::connection_ptr& conn)
 {
-    setFlag(S_DOWN);
-    if (flag() & MASTER) askMasterStateForOtherSentinels();
+    flags |= S_DOWN;
+    if (flags & MASTER)
+        ask_master_state_for_others();
+    log_info("connection reset by %s", conn->get_peer_addr().to_host());
 }
 
 // 向监视同一master的所有sentinel发送SENTINEL is-master-down-by-addr命令
-void SentinelInstance::askForSentinels(const char *runid)
+void SentinelInstance::ask_for_sentinels(const char *runid)
 {
     std::string message;
-    Context::CommandList cmdlist = { "SENTINEL", "is-master-down-by-addr" };
-    cmdlist.emplace_back(inetAddr().toIpAddr());
-    cmdlist.emplace_back(convert(inetAddr().toIpPort()));
-    cmdlist.emplace_back(convert(g_sentinel->currentEpoch()));
-    cmdlist.emplace_back(runid);
-    DBServer::CONVERT2RESP(message, cmdlist);
-    for (auto& sentinel : sentinels()) {
-        auto& cli = sentinel.second->clients()[0];
-        if (cli->isConnected()) {
+    argv_t argv = { "SENTINEL", "is-master-down-by-addr" };
+    argv.emplace_back(inet_addr.to_host_ip());
+    argv.emplace_back(i2s(inet_addr.to_host_port()));
+    argv.emplace_back(i2s(sentinel->current_epoch));
+    argv.emplace_back(runid);
+    conv2resp(message, argv);
+    for (auto& it : sentinels) {
+        auto& cli = it.second->client[0];
+        if (cli->is_connected())
             cli->conn()->send(message);
-        }
     }
 }
 
 // 向其他sentinel询问当前已进入主观下线状态的master的状态
-void SentinelInstance::askMasterStateForOtherSentinels()
+void SentinelInstance::ask_master_state_for_others()
 {
-    if (sentinels().empty()) {
+    if (sentinels.empty()) {
         // 只有一个sentinel，不必询问master的状态和选举leader
-        setFlag(O_DOWN | HAVE_LEADER);
-        selectNewMaster();
+        flags |= O_DOWN | HAVE_LEADER;
+        select_new_master();
         return;
     }
-    logInfo("%s ask master %s state for other sentinels",
-            g_sentinel->runId(), name().c_str());
-    askForSentinels("*");
+    log_info("%s ask master %s state for other sentinels",
+            sentinel->get_run_id(), name.c_str());
+    ask_for_sentinels("*");
 }
 
-// 判断并移除已下线的从服务器和sentinel
-static bool isSubjectiveDownForSlaveOrSentinel(SentinelInstance::SentinelInstanceMap& smap,
-                                               const std::unique_ptr<SentinelInstance>& si)
+static void send_ping(const std::unique_ptr<SentinelInstance>& si)
 {
-    if (si->flag() & SentinelInstance::S_DOWN) {
-        smap.erase(si->name());
-        return true;
-    } else
-        return false;
-}
-
-static bool isSubjectiveDownForMaster(const std::unique_ptr<SentinelInstance>& master)
-{
-    return master->flag() & SentinelInstance::S_DOWN;
-}
-
-static bool canRemoveMaster(const std::unique_ptr<SentinelInstance>& master)
-{
-    return master->flag() & SentinelInstance::DELETE;
-}
-
-static void sendPing(const std::unique_ptr<SentinelInstance>& si)
-{
-    auto& cli = si->clients()[0];
-    if (cli->isConnected()) {
+    auto& cli = si->client[0];
+    if (cli->is_connected()) {
         cli->conn()->send("*1\r\n$4\r\nPING\r\n");
     }
 }
 
-static void sendPubMessage(const std::unique_ptr<SentinelInstance>& si)
+static void send_pub_message(const std::unique_ptr<SentinelInstance>& si)
 {
-    auto& cli = si->clients()[0];
-    if (cli->isConnected()) si->pubMessage(cli->conn());
+    auto& cli = si->client[0];
+    if (cli->is_connected()) {
+        si->pub_message(cli->conn());
+    }
 }
 
-static void sendInfo(const std::unique_ptr<SentinelInstance>& si)
+static void send_info(const std::unique_ptr<SentinelInstance>& si)
 {
-    auto& cli = si->clients()[0];
-    if (cli->isConnected()) cli->conn()->send("*1\r\n$4\r\nINFO\r\n");
+    auto& cli = si->client[0];
+    if (cli->is_connected()) {
+        cli->conn()->send("*1\r\n$4\r\nINFO\r\n");
+    }
+}
+
+void Sentinel::for_each_instance(functor&& func, bool have_sentinel)
+{
+    for (auto it = masters.begin(); it != masters.end(); ) {
+        auto master = it++;
+        if (!(master->second->flags & SentinelInstance::S_DOWN))
+            func(master->second);
+        if (master->second->flags & SentinelInstance::DELETE) {
+            masters.erase(master);
+            continue;
+        }
+        auto& slaves = master->second->slaves;
+        for (auto it = slaves.begin(); it != slaves.end(); ) {
+            auto slave = it++;
+            if (slave->second->flags & SentinelInstance::S_DOWN) {
+                slaves.erase(slave);
+                continue;
+            }
+            func(slave->second);
+        }
+        if (!have_sentinel) continue;
+        auto& sentinels = master->second->sentinels;
+        for (auto it = sentinels.begin(); it != sentinels.end(); ) {
+            auto sentinel = it++;
+            if (sentinel->second->flags & SentinelInstance::S_DOWN) {
+                sentinels.erase(sentinel);
+                continue;
+            }
+            func(sentinel->second);
+        }
+    }
 }
 
 // 向所有被监控的主从服务器以及对应的sentinel发送PING，
 // 以维持心跳连接
-void Sentinel::sendPingToServers()
+void Sentinel::send_ping_to_servers()
 {
-    for (auto it = masters().begin(); it != masters().end(); ) {
-        auto master = it++;
-        if (!isSubjectiveDownForMaster(master->second))
-            sendPing(master->second);
-        if (canRemoveMaster(master->second)) {
-            masters().erase(master);
-            continue;
-        }
-        auto& slaves = master->second->slaves();
-        for (auto it = slaves.begin(); it != slaves.end(); ) {
-            auto slave = it++;
-            if (isSubjectiveDownForSlaveOrSentinel(slaves, slave->second))
-                continue;
-            sendPing(slave->second);
-        }
-        auto& sentinels = master->second->sentinels();
-        for (auto it = sentinels.begin(); it != sentinels.end(); ) {
-            auto sentinel = it++;
-            if (isSubjectiveDownForSlaveOrSentinel(sentinels, sentinel->second))
-                continue;
-            sendPing(sentinel->second);
-        }
-    }
+    for_each_instance(send_ping, true);
 }
 
 // 向所有被监控的主从服务器发送频道消息
-void Sentinel::sendPubMessageToServers()
+void Sentinel::send_pub_message_to_servers()
 {
-    for (auto it = masters().begin(); it != masters().end(); ) {
-        auto master = it++;
-        if (!isSubjectiveDownForMaster(master->second))
-            sendPubMessage(master->second);
-        if (canRemoveMaster(master->second)) {
-            masters().erase(master);
-            continue;
-        }
-        auto& slaves = master->second->slaves();
-        for (auto it = slaves.begin(); it != slaves.end(); ) {
-            auto slave = it++;
-            if (isSubjectiveDownForSlaveOrSentinel(slaves, slave->second))
-                continue;
-            sendPubMessage(slave->second);
-        }
-    }
+    for_each_instance(send_pub_message, false);
 }
 
 // 向所有被监控的主从服务器发送INFO命令
-void Sentinel::sendInfoToServers()
+void Sentinel::send_info_to_servers()
 {
-    for (auto it = masters().begin(); it != masters().end(); ) {
-        auto master = it++;
-        if (!isSubjectiveDownForMaster(master->second))
-            sendInfo(master->second);
-        if (canRemoveMaster(master->second)) {
-            masters().erase(master);
-            continue;
-        }
-        auto& slaves = master->second->slaves();
-        for (auto it = slaves.begin(); it != slaves.end(); ) {
-            auto slave = it++;
-            if (isSubjectiveDownForSlaveOrSentinel(slaves, slave->second))
-                continue;
-            sendInfo(slave->second);
-        }
-    }
+    for_each_instance(send_info, false);
 }
 
-void SentinelInstance::pubMessage(const Angel::TcpConnectionPtr& conn)
+void SentinelInstance::pub_message(const angel::connection_ptr& conn)
 {
-    std::string buffer, message;
-    Server& server = g_sentinel->server();
-    conn->send("*3\r\n$7\r\nPUBLISH\r\n$18\r\n__sentinel__:hello\r\n$");
-    buffer += server.server().listenAddr()->toIpAddr();
-    buffer += ",";
-    buffer += convert(server.server().listenAddr()->toIpPort());
-    buffer += ",";
-    buffer += server.dbServer().selfRunId();
-    buffer += ",";
-    buffer += convert(g_sentinel->currentEpoch());
-    buffer += ",";
-    buffer += name();
-    buffer += ",";
-    buffer += inetAddr().toIpAddr();
-    buffer += ",";
-    buffer += convert(inetAddr().toIpPort());
-    buffer += ",";
-    buffer += convert(configEpoch());
-    message += convert(buffer.size());
-    message += "\r\n";
-    message += buffer;
-    message += "\r\n";
+    std::string message;
+    message += sentinel->server.listen_addr().to_host_ip();
+    message += ",";
+    message += i2s(sentinel->server.listen_addr().to_host_port());
+    message += ",";
+    message += sentinel->get_run_id();
+    message += ",";
+    message += i2s(sentinel->current_epoch);
+    message += ",";
+    message += name;
+    message += ",";
+    message += inet_addr.to_host_ip();
+    message += ",";
+    message += i2s(inet_addr.to_host_port());
+    message += ",";
+    message += i2s(config_epoch);
+    argv_t argv = { "PUBLISH", "__sentinel__:hello", message };
+    conv2resp(message, argv);
     conn->send(message);
 }
 
 // 接收来自主从服务器的回复信息
-void SentinelInstance::recvReplyFromServer(const Angel::TcpConnectionPtr& conn,
-                                           Angel::Buffer& buf)
+void SentinelInstance::recv_reply_from_server(const angel::connection_ptr& conn,
+                                              angel::buffer& buf)
 {
     while (buf.readable() >= 2) {
-        int crlf = buf.findCrlf();
+        int crlf = buf.find_crlf();
         if (crlf >= 0) {
-            if (buf.strcasecmp("+PONG\r\n")) {
-                setLastHeartBeatTime(Angel::nowMs());
-            } else if (buf.strcasecmp("+LOADING\r\n")) {
-                setLastHeartBeatTime(Angel::nowMs());
-            } else if (buf.strcasecmp("+MASTERDOWN\r\n")) {
-                setLastHeartBeatTime(Angel::nowMs());
+            if (buf.starts_with("+PONG\r\n")) {
+                last_heartbeat_time = angel::util::get_cur_time_ms();
+            } else if (buf.starts_with("+LOADING\r\n")) {
+                last_heartbeat_time = angel::util::get_cur_time_ms();
+            } else if (buf.starts_with("+MASTERDOWN\r\n")) {
+                last_heartbeat_time = angel::util::get_cur_time_ms();
             } else {
                 const char *s = buf.peek();
                 const char *es = s + crlf + 2;
-                if (flag() & MASTER)
-                    parseInfoReplyFromMaster(s, es);
-                else if (flag() & SLAVE)
-                    parseInfoReplyFromSlave(s, es);
-                else if (flag() & SENTINEL)
-                    parseReplyFromSentinel(s, es);
+                if (flags & MASTER)
+                    parse_info_reply_from_master(s, es);
+                else if (flags & SLAVE)
+                    parse_info_reply_from_slave(s, es);
+                else if (flags & SENTINEL)
+                    parse_reply_from_sentinel(s, es);
             }
             buf.retrieve(crlf + 2);
         } else
@@ -318,7 +308,7 @@ void SentinelInstance::recvReplyFromServer(const Angel::TcpConnectionPtr& conn,
     }
 }
 
-void SentinelInstance::parseInfoReplyFromMaster(const char *s, const char *es)
+void SentinelInstance::parse_info_reply_from_master(const char *s, const char *es)
 {
     if (s[0] != '+') return;
     s += 1;
@@ -326,20 +316,20 @@ void SentinelInstance::parseInfoReplyFromMaster(const char *s, const char *es)
         const char *p = std::find(s, es, '\n');
         if (p[-1] == '\r') p -= 1;
         if (strncasecmp(s, "run_id:", 7) == 0) {
-            setRunId(std::string(s + 7, p));
+            std::copy(s + 7, p, run_id);
         } else if (strncasecmp(s, "role:", 5) == 0) {
 
         } else if (strncasecmp(s, "connected_slaves:", 17) == 0) {
 
         } else if (strncasecmp(s, "slave", 5) == 0) {
-            updateSlaves(s, es);
+            update_slaves(s, es);
         }
         if (p[0] == '\r') break;
         s = p + 1;
     }
 }
 
-void SentinelInstance::parseInfoReplyFromSlave(const char *s, const char *es)
+void SentinelInstance::parse_info_reply_from_slave(const char *s, const char *es)
 {
     if (s[0] != '+') return;
     s += 1;
@@ -347,27 +337,27 @@ void SentinelInstance::parseInfoReplyFromSlave(const char *s, const char *es)
         const char *p = std::find(s, es, '\n');
         if (p[-1] == '\r') p -= 1;
         if (strncasecmp(s, "run_id:", 7) == 0) {
-            setRunId(std::string(s + 7, p));
+            std::copy(s + 7, p, run_id);
         } else if (strncasecmp(s, "role:", 5) == 0) {
             std::string role;
             role.assign(s + 5, p);
             // 将此次选举中由leader选出的从服务器被提升为主服务器
             if (strcasecmp(role.c_str(), "master") == 0) {
-                logInfo("new master is %s", name().c_str());
-                auto master = g_sentinel->masters().find(this->master());
-                assert(master != g_sentinel->masters().end());
-                master->second->convertSlaveToMaster(this);
-                master->second->clearFlag(S_DOWN | O_DOWN);
+                log_info("new master is %s", name.c_str());
+                auto master = sentinel->masters.find(this->master);
+                assert(master != sentinel->masters.end());
+                master->second->convert_slave_to_master(this);
+                master->second->flags &= ~(S_DOWN | O_DOWN);
                 return;
             }
         } else if (strncasecmp(s, "master_host:", 12) == 0) {
-            setInetAddr(Angel::InetAddr(inetAddr().toIpPort(), std::string(s + 12, p).c_str()));
+            inet_addr = angel::inet_addr(std::string(s+12,p).c_str(), inet_addr.to_host_port());
         } else if (strncasecmp(s, "master_port:", 12) == 0) {
-            setInetAddr(Angel::InetAddr(atoi(s + 12), inetAddr().toIpAddr()));
+            inet_addr = angel::inet_addr(inet_addr.to_host_ip(), atoi(s+12));
         } else if (strncasecmp(s, "master_link_status:", 20) == 0) {
 
         } else if (strncasecmp(s, "slave_repl_offset:", 18) == 0) {
-            setOffset(atol(s + 18));
+            offset = atol(s + 18);
         } else if (strncasecmp(s, "slave_priority:", 15) == 0) {
 
         }
@@ -376,7 +366,7 @@ void SentinelInstance::parseInfoReplyFromSlave(const char *s, const char *es)
     }
 }
 
-void SentinelInstance::updateSlaves(const char *s, const char *es)
+void SentinelInstance::update_slaves(const char *s, const char *es)
 {
     s = std::find(s, es, ':') + 1;
     std::string ip, name;
@@ -390,22 +380,23 @@ void SentinelInstance::updateSlaves(const char *s, const char *es)
         } else if (strncasecmp(s, "offset=", 7) == 0) {
             size_t offset = atoll(s + 7);
             name = ip + ":";
-            name.append(convert(port));
-            auto it = slaves().find(name);
-            if (it == slaves().end()) {
-                logInfo("found a new slave %s", name.c_str());
+            name.append(i2s(port));
+            auto it = slaves.find(name);
+            if (it == slaves.end()) {
+                log_info("found a new slave %s", name.c_str());
                 auto slave = new SentinelInstance;
-                slave->setFlag(SentinelInstance::SLAVE);
-                slave->setMaster(this->name());
-                slave->setName(name);
-                slave->setInetAddr(Angel::InetAddr(port, ip.c_str()));
-                slave->setOffset(offset);
-                slave->setDownAfterPeriod(downAfterPeriod());
-                slave->creatCmdConnection();
-                slave->creatPubConnection();
-                slaves().emplace(name, slave);
+                slave->sentinel = sentinel;
+                slave->flags |= SentinelInstance::SLAVE;
+                slave->master = name;
+                slave->name = name;
+                slave->inet_addr = angel::inet_addr(ip, port);
+                slave->offset = offset;
+                slave->down_after_period = down_after_period;
+                slave->creat_cmd_connection();
+                slave->creat_sub_connection();
+                slaves.emplace(name, slave);
             } else {
-                it->second->setOffset(offset);
+                it->second->offset = offset;
             }
         }
         if (f == es) break;
@@ -414,184 +405,193 @@ void SentinelInstance::updateSlaves(const char *s, const char *es)
 }
 
 // 处理SENTINEL is-master-down-by-addr命令的回复
-void SentinelInstance::parseReplyFromSentinel(const char *s, const char *es)
+void SentinelInstance::parse_reply_from_sentinel(const char *s, const char *es)
 {
-    auto master = g_sentinel->masters().find(this->master());
-    assert(master != g_sentinel->masters().end());
-    auto half = (master->second->sentinels().size() + 1) / 2 + 1;
+    auto master = sentinel->masters.find(this->master);
+    assert(master != sentinel->masters.end());
+    auto half = (master->second->sentinels.size() + 1) / 2 + 1;
 
-    std::vector<std::string> argv;
-    splitLine(argv, s + 1, es, ',');
+    argv_t argv;
+    split_line(argv, s + 1, es, ',');
     auto& down_state = argv[0], &leader_runid = argv[1];
     uint64_t leader_epoch = atoll(argv[2].c_str());
 
     // 有关master是否进入主观下线状态的回复
     if (leader_runid.compare("*") == 0) {
-        if (master->second->flag() & O_DOWN) return;
+        if (master->second->flags & O_DOWN) return;
         // 对方同意该master进入主观下线状态
         if (down_state.compare("1") == 0) {
-            master->second->votesIncr();
+            master->second->votes++;
             // 多数sentinel达成一致，该master进入客观下线状态，并开始进行
             // 故障转移操作
-            if (master->second->votes() >= half
-                    && master->second->votes() >= master->second->quorum()) {
-                master->second->votesReset();
-                master->second->setFlag(O_DOWN);
-                if (!(master->second->flag() & FOLLOWER))
-                    master->second->startFailover();
+            if (master->second->votes >= half
+                    && master->second->votes >= master->second->quorum) {
+                master->second->votes = 0;
+                master->second->flags |= O_DOWN;
+                if (!(master->second->flags & FOLLOWER))
+                    master->second->start_failover();
             }
         }
-    } else if (leader_runid.compare(g_sentinel->runId()) == 0) {
-        if (master->second->flag() & HAVE_LEADER) return;
+    } else if (leader_runid.compare(sentinel->get_run_id()) == 0) {
+        if (master->second->flags & HAVE_LEADER) return;
         // 选举领头的回复
-        if (master->second->failoverEpoch() == leader_epoch) {
-            master->second->votesIncr();
-            if (master->second->votes() >= half
-                    && master->second->votes() >= master->second->quorum()) {
+        if (master->second->failover_epoch == leader_epoch) {
+            master->second->votes++;
+            if (master->second->votes >= half
+                    && master->second->votes >= master->second->quorum) {
                 // 当前sentinel成为领头
-                master->second->votesReset();
-                master->second->setFlag(HAVE_LEADER);
-                master->second->noticeLeaderToOtherSentinels();
-                master->second->cancelElectTimeoutTimer();
-                logInfo("%s become leader", g_sentinel->runId());
-                master->second->selectNewMaster();
+                master->second->votes = 0;
+                master->second->flags |= HAVE_LEADER;
+                master->second->notice_leader_to_others();
+                master->second->cancel_elect_timeout_timer();
+                log_info("%s become leader", sentinel->get_run_id());
+                master->second->select_new_master();
             }
         }
     }
 }
 
 // 请求被其他sentinel选举为领头
-void SentinelInstance::startFailover()
+void SentinelInstance::start_failover()
 {
-    logInfo("%s start electing", g_sentinel->runId());
-    g_sentinel->currentEpochIncr();
-    setLeader(g_sentinel->runId());
-    setLeaderEpoch(g_sentinel->currentEpoch());
-    setFailoverEpoch(g_sentinel->currentEpoch());
-    votesIncr();
-    setElectTimeoutTimer();
-    askForSentinels(g_sentinel->runId());
+    log_info("%s start electing", sentinel->get_run_id());
+    sentinel->current_epoch++;
+    leader = sentinel->get_run_id();
+    leader_epoch = sentinel->current_epoch;
+    failover_epoch = sentinel->current_epoch;
+    votes++;
+    set_elect_timeout_timer();
+    ask_for_sentinels(sentinel->get_run_id());
 }
 
 // 设置一个随机的超时定时器
-void SentinelInstance::setElectTimeoutTimer()
+void SentinelInstance::set_elect_timeout_timer()
 {
-    std::srand(::clock());
-    int64_t timeout = ELECT_TIMEOUT + std::rand() % 300;
-    _electTimeoutTimerId = g_sentinel->loop()->runAfter(timeout,
-            [this]{ this->electTimeout(); });
+    srand(clock());
+    int64_t timeout = ELECT_TIMEOUT + rand() % 300;
+    elect_timeout_timer_id = sentinel->loop->run_after(timeout,
+            [this]{ this->elect_timeout_handler(); });
 }
 
-void SentinelInstance::electTimeout()
+void SentinelInstance::elect_timeout_handler()
 {
-    startFailover();
+    start_failover();
 }
 
-void SentinelInstance::cancelElectTimeoutTimer()
+void SentinelInstance::cancel_elect_timeout_timer()
 {
-    if (_electTimeoutTimerId > 0)
-        g_sentinel->loop()->cancelTimer(_electTimeoutTimerId);
+    if (elect_timeout_timer_id > 0)
+        sentinel->loop->cancel_timer(elect_timeout_timer_id);
 }
 
-void Sentinel::subServer(const Angel::TcpConnectionPtr& conn)
+void Sentinel::sub_server(const angel::connection_ptr& conn)
 {
-    conn->send("*2\r\n$9\r\nSUBSCRIBE\r\n$18\r\n__sentinel__:hello\r\n");
+    std::string message;
+    argv_t argv = { "SUBSCRIBE", "__sentinel__:hello" };
+    conv2resp(message, argv);
+    conn->send(message);
 }
 
-void Sentinel::recvPubMessageFromServer(const Angel::TcpConnectionPtr& conn,
-                                        Angel::Buffer& buf)
+void Sentinel::recv_pub_message_from_server(const angel::connection_ptr& conn,
+                                            angel::buffer& buf)
 {
-    Context context(nullptr, nullptr);
+    argv_t argv;
     while (buf.readable() >= 2) {
         // skip subscribe's reply
         if (buf[0] == '+') {
-            int crlf = buf.findCrlf();
+            int crlf = buf.find_crlf();
             if (crlf >= 0) {
                 buf.retrieve(crlf + 2);
                 continue;
             } else
                 break;
         }
-        ssize_t n = Server::parseRequest(context, buf);
+        ssize_t n = parse_request(argv, buf);
         if (n == 0) break;
         if (n < 0) {
-            buf.retrieveAll();
+            buf.retrieve_all();
             break;
         }
-        auto& message = context.commandList()[2];
-        updateSentinels(message.data(), message.data() + message.size());
+        auto& message = argv[2];
+        update_sentinels(message.data(), message.data() + message.size());
         buf.retrieve(n);
     }
 }
 
-void Sentinel::updateSentinels(const char *s, const char *es)
+void Sentinel::update_sentinels(const char *s, const char *es)
 {
-    std::vector<std::string> argv;
-    splitLine(argv, s, es, ',');
+    argv_t argv;
+    split_line(argv, s, es, ',');
     auto& s_ip = argv[0], &s_port = argv[1], &s_runid = argv[2], &s_epoch = argv[3];
     auto& m_name = argv[4], &m_ip = argv[5], &m_port = argv[6], &m_epoch = argv[7];
     UNUSED(m_ip);
     UNUSED(m_port);
     UNUSED(m_epoch);
-    if (s_runid.compare(_server.dbServer().selfRunId()) == 0)
+    if (s_runid.compare(get_run_id()) == 0)
         return;
     auto s_name = s_ip + ":" + s_port;
-    auto master = masters().find(m_name);
-    if (master == masters().end()) return;
-    auto it = master->second->sentinels().find(s_name);
-    if (it == master->second->sentinels().end()) {
-        logInfo("found a new sentinel %s", s_name.c_str());
+    auto master = masters.find(m_name);
+    if (master == masters.end()) return;
+    auto it = master->second->sentinels.find(s_name);
+    if (it == master->second->sentinels.end()) {
+        log_info("found a new sentinel %s", s_name.c_str());
         auto sentinel = new SentinelInstance;
-        sentinel->setFlag(SentinelInstance::SENTINEL);
-        sentinel->setMaster(m_name);
-        sentinel->setName(s_name);
-        sentinel->setInetAddr(Angel::InetAddr(atoi(s_port.c_str()), s_ip.c_str()));
-        sentinel->setRunId(s_runid);
-        sentinel->setConfigEpoch(atoll(s_epoch.c_str()));
-        sentinel->setDownAfterPeriod(master->second->downAfterPeriod());
-        sentinel->creatCmdConnection();
-        master->second->sentinels().emplace(s_name, sentinel);
+        sentinel->sentinel = this;
+        sentinel->flags |= SentinelInstance::SENTINEL;
+        sentinel->master = m_name;
+        sentinel->name = s_name;
+        sentinel->inet_addr = angel::inet_addr(s_ip, atoi(s_port.c_str()));
+        strncpy(sentinel->run_id, s_runid.c_str(), RUNID_LEN);
+        sentinel->config_epoch = atoll(s_epoch.c_str());
+        sentinel->down_after_period = master->second->down_after_period;
+        sentinel->creat_cmd_connection();
+        master->second->sentinels.emplace(s_name, sentinel);
     } else {
-        it->second->setConfigEpoch(atoll(s_epoch.c_str()));
+        it->second->config_epoch = atoll(s_epoch.c_str());
     }
 }
 
 // 检查是否有服务器下线
-static void checkSubjectiveDown(const std::unique_ptr<SentinelInstance>& si, int64_t now)
+static void check_subjective_down(const std::unique_ptr<SentinelInstance>& si, int64_t now)
 {
-    if (si->flag() & SentinelInstance::O_DOWN) return;
-    if (si->flag() & SentinelInstance::S_DOWN) return;
-    if (now - si->lastHeartBeatTime() >= si->downAfterPeriod()) {
-        si->setFlag(SentinelInstance::S_DOWN);
-        if (si->flag() & SentinelInstance::MASTER)
-            si->askMasterStateForOtherSentinels();
+    if (si->flags & SentinelInstance::O_DOWN) return;
+    if (si->flags & SentinelInstance::S_DOWN) return;
+    if (now - si->last_heartbeat_time >= si->down_after_period) {
+        si->flags |= SentinelInstance::S_DOWN;
+        if (si->flags & SentinelInstance::MASTER)
+            si->ask_master_state_for_others();
     }
 }
 
-void Sentinel::sentinelCron()
+void Sentinel::sentinel_cron()
 {
-    int64_t now = Angel::nowMs();
-    for (auto& master : masters()) {
-        checkSubjectiveDown(master.second, now);
-        for (auto& slave : master.second->slaves()) {
-            checkSubjectiveDown(slave.second, now);
+    int64_t now = angel::util::get_cur_time_ms();
+    for (auto& master : masters) {
+        check_subjective_down(master.second, now);
+        for (auto& slave : master.second->slaves) {
+            check_subjective_down(slave.second, now);
         }
-        for (auto& sentinel : master.second->sentinels()) {
-            checkSubjectiveDown(sentinel.second, now);
+        for (auto& sentinel : master.second->sentinels) {
+            check_subjective_down(sentinel.second, now);
         }
     }
 }
 
-void Sentinel::infoCommand(Context& con)
+void Sentinel::ping(context_t& con)
+{
+    con.append("+PONG\r\n");
+}
+
+void Sentinel::info(context_t& con)
 {
 
 }
 
-static SentinelInstance *getMasterByAddr(const std::string& ip, int port)
+SentinelInstance *Sentinel::get_master_by_addr(const std::string& ip, int port)
 {
-    for (auto& master : g_sentinel->masters()) {
-        if (ip.compare(master.second->inetAddr().toIpAddr()) == 0
-                && port == master.second->inetAddr().toIpPort()) {
+    for (auto& master : masters) {
+        if (ip.compare(master.second->inet_addr.to_host_ip()) == 0
+                && port == master.second->inet_addr.to_host_port()) {
             return master.second.get();
         }
     }
@@ -601,49 +601,48 @@ static SentinelInstance *getMasterByAddr(const std::string& ip, int port)
 // is-master-down-by-addr <ip> <port> <epoch> <runid>
 // 如果runid为*，则是询问master的状态，如果runid为0，则是告知
 // 已经选出的leader，否则的话，就是在选举领头，请求投票
-void Sentinel::sentinelCommand(Context& con)
+void Sentinel::sentinel(context_t& con)
 {
-    auto& cmdlist = con.commandList();
-    if (strcasecmp(cmdlist[1].c_str(), "is-master-down-by-addr") == 0) {
-        auto& ip = cmdlist[2];
-        int port = atoi(cmdlist[3].c_str());
-        uint64_t epoch = atoll(cmdlist[4].c_str());
-        auto& runid = cmdlist[5];
-        auto master = getMasterByAddr(ip, port);
+    if (con.isequal(1, "is-master-down-by-addr")) {
+        auto& ip = con.argv[2];
+        int port = atoi(con.argv[3].c_str());
+        uint64_t epoch = atoll(con.argv[4].c_str());
+        auto& runid = con.argv[5];
+        auto master = get_master_by_addr(ip, port);
         if (!master) return;
         // 回复询问的master是否进入主观下线状态
         if (runid.compare("*") == 0) {
-            con.append((master->flag() & SentinelInstance::S_DOWN)
+            con.append((master->flags & SentinelInstance::S_DOWN)
                     ? "+1,*,0\r\n" : "+0,*,0\r\n");
         } else { // 向请求的sentinel投票
             if (runid.compare("0") == 0) {
-                master->cancelElectTimeoutTimer();
-                master->clearFlag(SentinelInstance::FOLLOWER);
-                if (master->slaves().empty()) {
-                    g_sentinel->masters().erase(master->name());
+                master->cancel_elect_timeout_timer();
+                master->flags &= ~SentinelInstance::FOLLOWER;
+                if (master->slaves.empty()) {
+                    masters.erase(master->name);
                 }
-                logInfo("has already elected leader");
+                log_info("has already elected leader");
                 return;
             }
-            if (g_sentinel->currentEpoch() < epoch) {
-                g_sentinel->setCurrentEpoch(epoch);
+            if (current_epoch < epoch) {
+                current_epoch = epoch;
             }
             con.append("+0,");
-            if (master->leaderEpoch() < epoch && g_sentinel->currentEpoch() <= epoch) {
-                master->setFlag(SentinelInstance::FOLLOWER);
-                master->cancelElectTimeoutTimer();
-                master->setLeader(runid);
-                master->setLeaderEpoch(epoch);
-                master->setElectTimeoutTimer();
+            if (master->leader_epoch < epoch && current_epoch <= epoch) {
+                master->flags |= SentinelInstance::FOLLOWER;
+                master->cancel_elect_timeout_timer();
+                master->leader = runid;
+                master->leader_epoch = epoch;
+                master->set_elect_timeout_timer();
                 con.append(runid);
                 con.append(",");
-                con.append(cmdlist[4]);
+                con.append(con.argv[4]);
                 con.append("\r\n");
-                logInfo("%s voted for %s", g_sentinel->runId(), runid.c_str());
+                log_info("%s voted for %s", get_run_id(), runid.c_str());
             } else { // 返回投过票的局部领头
-                con.append(master->leader());
+                con.append(master->leader);
                 con.append(",");
-                con.append(convert(master->leaderEpoch()));
+                con.append(i2s(master->leader_epoch));
                 con.append("\r\n");
             }
         }
@@ -651,78 +650,83 @@ void Sentinel::sentinelCommand(Context& con)
 }
 
 // 将选出的领头通知给其他sentinel
-void SentinelInstance::noticeLeaderToOtherSentinels()
+void SentinelInstance::notice_leader_to_others()
 {
-    askForSentinels("0");
+    ask_for_sentinels("0");
 }
 
 // 从下线master的所有从服务器中挑选出合适的一个作为新的master
-void SentinelInstance::selectNewMaster()
+void SentinelInstance::select_new_master()
 {
-    if (slaves().empty()) {
-        setFlag(DELETE);
+    if (slaves.empty()) {
+        flags |= DELETE;
         return;
     }
     // 暂时随便选一个
-    auto randkey = getRandHashKey(slaves());
-    size_t bucketNumber = std::get<0>(randkey);
+    auto randkey = get_rand_hash_key(slaves);
+    size_t bucket = std::get<0>(randkey);
     size_t where = std::get<1>(randkey);
-    for (auto it = slaves().begin(bucketNumber);
-            it != slaves().end(bucketNumber); it++)
+    for (auto it = slaves.begin(bucket); it != slaves.end(bucket); ++it)
         if (where-- == 0) {
-            logInfo("selected new master is %s by %s",
-                    it->second->name().c_str(), name().c_str());
-            it->second->stopToReplicateMaster();
-            convertSlaveToMaster(it->second.get());
-            clearFlag(S_DOWN | O_DOWN | HAVE_LEADER);
+            log_info("selected new master is %s by %s",
+                    it->second->name.c_str(), name.c_str());
+            it->second->stop_replicate_master();
+            convert_slave_to_master(it->second.get());
+            flags &= ~(S_DOWN | O_DOWN | HAVE_LEADER);
             break;
         }
     // 让其他slave复制新的master
-    for (auto& slave : slaves()) {
-        slave.second->replicateMaster(inetAddr());
+    for (auto& slave : slaves) {
+        slave.second->replicate_master(inet_addr);
     }
 }
 
-void SentinelInstance::stopToReplicateMaster()
+void SentinelInstance::stop_replicate_master()
 {
-    _clients[0]->conn()->send("*3\r\n$7\r\nSLAVEOF\r\n$2\r\nNO\r\n$3\r\nONE\r\n");
+    context_t con;
+    con.append_reply_multi(3);
+    con.append_reply_string("SLAVEOF");
+    con.append_reply_string("NO");
+    con.append_reply_string("ONE");
+    client[0]->conn()->send(con.buf);
 }
 
-void SentinelInstance::replicateMaster(Angel::InetAddr& masterAddr)
+void SentinelInstance::replicate_master(angel::inet_addr& master_addr)
 {
-    Context con(nullptr, nullptr);
-    con.appendReplyMulti(3);
-    con.appendReplyString("SLAVEOF");
-    con.appendReplyString(masterAddr.toIpAddr());
-    con.appendReplyString(convert(masterAddr.toIpPort()));
-    _clients[0]->conn()->send(con.reply());
+    context_t con;
+    con.append_reply_multi(3);
+    con.append_reply_string("SLAVEOF");
+    con.append_reply_string(master_addr.to_host_ip());
+    con.append_reply_string(i2s(master_addr.to_host_port()));
+    client[0]->conn()->send(con.buf);
 }
 
 // 将slave转换成一个master
-void SentinelInstance::convertSlaveToMaster(SentinelInstance *slave)
+void SentinelInstance::convert_slave_to_master(SentinelInstance *slave)
 {
-    setFlag(DELETE);
+    flags |= DELETE;
     // 新的master的地址仍会被保存到将要被移除的已下线的master中，
     // 因为我们之后会用到这个地址，如果不保存的话，我们就需要在
-    // g_sentinel->masters()中去找这个新的master，而这通常需要引入
+    // sentinel->masters中去找这个新的master，而这通常需要引入
     // 一些额外的标志位
-    setInetAddr(slave->inetAddr());
+    inet_addr = slave->inet_addr;
     // 这个master将会替代那个已下线的master成为new master
     auto master = new SentinelInstance;
-    master->setFlag(MASTER);
-    master->setName(slave->name());
-    master->setRunId(slave->runId());
-    master->setConfigEpoch(slave->configEpoch());
-    master->setInetAddr(slave->inetAddr());
-    master->creatCmdConnection();
-    master->creatPubConnection();
-    master->setOffset(slave->offset());
-    master->setLastHeartBeatTime(slave->lastHeartBeatTime());
-    master->setDownAfterPeriod(slave->downAfterPeriod());
+    master->sentinel = sentinel;
+    master->flags |= MASTER;
+    master->name = slave->name;
+    strcpy(master->run_id, slave->run_id);
+    master->config_epoch = slave->config_epoch;
+    master->inet_addr = slave->inet_addr;
+    master->creat_cmd_connection();
+    master->creat_sub_connection();
+    master->offset = slave->offset;
+    master->last_heartbeat_time = slave->last_heartbeat_time;
+    master->down_after_period = slave->down_after_period;
     // then, there is still something to do
-    // 1) move this->slaves() and this->sentinels() to new master
+    // 1) move this->slaves and this->sentinels to new master
     // 2) new master can discovery sentinel and slave automatically
     // there, we choose 2), so we do nothing
-    g_sentinel->masters().emplace(master->name(), master);
-    slaves().erase(slave->name());
+    sentinel->masters.emplace(master->name, master);
+    slaves.erase(slave->name);
 }

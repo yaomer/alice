@@ -1,730 +1,691 @@
 #include <fcntl.h>
-#include <sys/wait.h>
-#include <errno.h>
-#include <getopt.h>
-#include <algorithm>
-#include <vector>
-#include <tuple>
 
 #include "server.h"
 #include "sentinel.h"
+#include "util.h"
 
-using namespace Alice;
+using namespace alice;
 
-// if parse error, return -1
-// if not enough data, return 0
-// else return length of request
-ssize_t Server::parseRequest(Context& con, Angel::Buffer& buf)
-{
-    const char *s = buf.peek();
-    const char *es = s + buf.readable();
-    const char *ps = s;
-    size_t argc, len;
-    // 解析命令个数
-    const char *next = std::find(s, es, '\n');
-    if (next == es) goto clr;
-    if (s[0] != '*' || next[-1] != '\r') goto err;
-    argc = atol(s + 1);
-    s = next + 1;
-    // 解析各个命令
-    while (argc > 0) {
-        next = std::find(s, es, '\n');
-        if (next == es) goto clr;
-        if (s[0] != '$' || next[-1] != '\r') goto err;
-        len = atol(s + 1);
-        s = next + 1;
-        if (es - s < len + 2) goto clr;
-        if (s[len] != '\r' || s[len+1] != '\n') goto err;
-        con.commandList().emplace_back(s, len);
-        s += len + 2;
-        argc--;
-    }
-    return s - ps;
-clr:
-    con.commandList().clear();
-    return 0;
-err:
-    return -1;
+namespace alice {
+
+    shared_obj shared;
+    int64_t lru_clock = angel::util::get_cur_time_ms();
+    dbserver *__server;
 }
 
-void Server::executeCommand(Context& con, const char *query, size_t len)
+void dbserver::executor(context_t& con, const char *query, size_t len)
 {
-    int arity;
-    int64_t start, end;
-    auto& cmdlist = con.commandList();
-    std::transform(cmdlist[0].begin(), cmdlist[0].end(), cmdlist[0].begin(), ::toupper);
-    auto it = _dbServer.db()->commandMap().find(cmdlist[0]);
-    if (it == _dbServer.db()->commandMap().end()) {
-        con.append("-ERR unknown command `" + cmdlist[0] + "`\r\n");
-        goto err;
+    size_t pos;
+    time_t start, end;
+    std::transform(con.argv[0].begin(), con.argv[0].end(), con.argv[0].begin(), ::toupper);
+    auto c = db->find_command(con.argv[0]);
+    if (c == nullptr) {
+        c = find_command(con.argv[0]);
+        if (c == nullptr) {
+            con.append("-ERR unknown command `" + con.argv[0] + "`\r\n");
+            goto err;
+        }
     }
-    // 校验客户端是否有权限执行该命令
-    if (!(con.perm() & it->second.perm())) {
+    if (!(con.perms & c->perm)) {
         con.append("-ERR permission denied\r\n");
         goto err;
     }
-    // 校验命令参数是否合法
-    arity = it->second.arity();
-    if ((arity > 0 && cmdlist.size() < arity) || (arity < 0 && cmdlist.size() != -arity)) {
-        con.append("-ERR wrong number of arguments for '" + it->first + "'\r\n");
+    if ((c->arity > 0 && con.argv.size() < c->arity) ||
+        (c->arity < 0 && con.argv.size() != -c->arity)) {
+        con.append("-ERR wrong number of arguments for '" + con.argv[0] + "'\r\n");
         goto err;
     }
-    con.setLastcmd(it->first);
-    // 执行事务时，只有遇见MULTI，EXEC，WATCH，DISCARD命令时才会直接执行，
-    // 其他命令则加入事务队列
-    if (con.flag() & Context::EXEC_MULTI) {
-        if (cmdlist[0].compare("MULTI")
-         && cmdlist[0].compare("EXEC")
-         && cmdlist[0].compare("WATCH")
-         && cmdlist[0].compare("DISCARD")) {
-            // 检查事务中是否有写命令，如果有写命令，并且该服务器是主服务器，
-            // 则进行必要的命令传播操作
-            if (!(con.flag() & Context::EXEC_MULTI_WRITE) && (it->second.perm() & IS_WRITE))
-                con.setFlag(Context::EXEC_MULTI_WRITE);
-            con.transactionList().emplace_back(cmdlist);
+    con.last_cmd = con.argv[0];
+    if (con.flags & context_t::EXEC_MULTI) {
+        if (con.argv[0].compare("MULTI") &&
+            con.argv[0].compare("EXEC") &&
+            con.argv[0].compare("WATCH") &&
+            con.argv[0].compare("DISCARD")) {
+            if (!(con.flags & context_t::EXEC_MULTI_WRITE) && (c->perm & IS_WRITE))
+                con.flags |= context_t::EXEC_MULTI_WRITE;
+            con.transaction_list.emplace_back(con.argv);
             con.append("+QUEUED\r\n");
             goto end;
         }
     }
-    if (it->second.perm() & IS_WRITE) _dbServer.freeMemoryIfNeeded();
-    con.updateLastBufsize();
-    start = Angel::nowUs();
-    it->second._commandCb(con);
-    end = Angel::nowUs();
-    _dbServer.addSlowlogIfNeeded(cmdlist, start, end);
-    // 命令执行未出错
-    if ((it->second.perm() & IS_WRITE) && (con.curReply()[0] != '-')) {
-        _dbServer.doWriteCommand(cmdlist, query, len);
+    if (c->perm & IS_WRITE)
+        db->free_memory_if_needed();
+    pos = con.buf.size();
+    start = angel::util::get_cur_time_us();
+    c->command_cb(con);
+    end = angel::util::get_cur_time_us();
+    slowlog.add_slowlog_if_needed(con.argv, start, end);
+    if ((c->perm & IS_WRITE) && con.buf[pos] != '-') {
+        do_write_command(con.argv, query, len);
     }
     goto end;
 err:
-    if (con.flag() & Context::EXEC_MULTI) {
-        con.clearFlag(Context::EXEC_MULTI);
-        con.setFlag(Context::EXEC_MULTI_ERR);
+    if (con.flags & context_t::EXEC_MULTI) {
+        con.flags &= ~context_t::EXEC_MULTI;
+        con.flags |= context_t::EXEC_MULTI_ERR;
     }
 end:
-    cmdlist.clear();
+    con.argv.clear();
 }
 
-void Server::replyResponse(const Angel::TcpConnectionPtr& conn)
+void dbserver::server_cron()
 {
-    auto& context = std::any_cast<Context&>(conn->getContext());
-    // 从服务器不应向主服务器发送回复信息
-    if (!(context.flag() & Context::MASTER))
-        conn->send(context.reply());
-    context.reply().clear();
+    lru_clock = angel::util::get_cur_time_ms();
+
+    if (db->is_created_snapshot()) {
+        if (flags & PSYNC) {
+            flags &= ~PSYNC;
+            send_snapshot_to_slaves();
+        }
+        if (flags & PSYNC_DELAY) {
+            flags &= ~PSYNC_DELAY;
+            flags |= PSYNC;
+            db->creat_snapshot();
+        }
+    }
+
+    if (flags & DISCONNECT_WITH_MASTER) {
+        flags &= ~DISCONNECT_WITH_MASTER;
+        connect_master_server();
+    }
+
+    db->server_cron();
 }
 
 // [query, len]是RESP形式的请求字符串，如果query为真，则使用[query, len]，这样可以避免许多低效的拷贝；
-// 如果query为假，则使用cmdlist，然后将其转换为RESP形式的字符串，不过这种情况很少见
-void DBServer::doWriteCommand(const Context::CommandList& cmdlist,
-                              const char *query, size_t len)
+// 如果query为假，则使用argv，然后将其转换为RESP形式的字符串，不过这种情况很少见
+void dbserver::do_write_command(const argv_t& argv, const char *query, size_t len)
 {
-    dirtyIncr();
-    appendWriteCommand(cmdlist, query, len);
-    if (!_slaves.empty()) {
+    append_write_command(argv, query, len);
+    if (!slaves.empty()) {
         if (!query) {
             std::string buffer;
-            CONVERT2RESP(buffer, cmdlist);
-            sendSyncCommandToSlave(buffer.data(), buffer.size());
+            conv2resp(buffer, argv);
+            sync_command_to_slaves(buffer.data(), buffer.size());
         } else
-            sendSyncCommandToSlave(query, len);
+            sync_command_to_slaves(query, len);
     }
-    if (flag() & SLAVE) {
-        slaveOffsetIncr(len);
-    }
+    if (flags & SLAVE) slave_offset += len;
 }
 
-namespace Alice {
-
-    // 键的空转时间不需要十分精确
-    thread_local int64_t _lru_cache = Angel::nowMs();
-    Alice::Server *g_server;
-    Alice::Sentinel *g_sentinel;
-}
-
-void Server::serverCron()
+void dbserver::append_write_command(const argv_t& argv, const char *query, size_t len)
 {
-    int64_t now = Angel::nowMs();
-    _lru_cache = now;
-
-    // 服务器后台正在进行rdb持久化
-    if (_dbServer.rdb()->childPid() != -1) {
-        pid_t pid = waitpid(_dbServer.rdb()->childPid(), nullptr, WNOHANG);
-        if (pid > 0) {
-            _dbServer.rdb()->childPidReset();
-            if (_dbServer.flag() & DBServer::PSYNC) {
-                _dbServer.clearFlag(DBServer::PSYNC);
-                _dbServer.sendRdbfileToSlave();
-            }
-            if (_dbServer.flag() & DBServer::PSYNC_DELAY) {
-                _dbServer.clearFlag(DBServer::PSYNC_DELAY);
-                _dbServer.setFlag(DBServer::PSYNC);
-                _dbServer.rdb()->saveBackground();
-            }
-            logInfo("DB saved on disk");
+    db->do_after_exec_write_cmd(argv, query, len);
+    if (flags & PSYNC) {
+        if (query) {
+            sync_buffer.append(query, len);
+        } else {
+            conv2resp(sync_buffer, argv);
         }
     }
-    // 服务器后台正在进行aof持久化
-    if (_dbServer.aof()->childPid() != -1) {
-        pid_t pid = waitpid(_dbServer.aof()->childPid(), nullptr, WNOHANG);
-        if (pid > 0) {
-            _dbServer.aof()->childPidReset();
-            _dbServer.aof()->appendRewriteBufferToAof();
-            logInfo("Background AOF rewrite finished successfully");
-        }
-    }
-    if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
-        if (_dbServer.flag() & DBServer::REWRITEAOF_DELAY) {
-            _dbServer.clearFlag(DBServer::REWRITEAOF_DELAY);
-            _dbServer.aof()->rewriteBackground();
-        }
-    }
-
-    // 是否需要进行rdb持久化
-    int saveInterval = (now - _dbServer.lastSaveTime()) / 1000;
-    for (auto& it : g_server_conf.save_params) {
-        int seconds = std::get<0>(it);
-        int changes = std::get<1>(it);
-        if (saveInterval >= seconds && _dbServer.dirty() >= changes) {
-            if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
-                logInfo("%d changes in %d seconds. Saving...", changes, seconds);
-                _dbServer.rdb()->saveBackground();
-                _dbServer.setLastSaveTime(now);
-                _dbServer.dirtyReset();
-            }
-            break;
-        }
-    }
-
-    // 是否需要进行aof持久化
-    if (_dbServer.aof()->rewriteIsOk()) {
-        if (_dbServer.rdb()->childPid() == -1 && _dbServer.aof()->childPid() == -1) {
-            _dbServer.aof()->rewriteBackground();
-            _dbServer.setLastSaveTime(now);
-        }
-    }
-
-    // 如果slave与master意外断开连接，则slave会尝试重连master
-    if (_dbServer.flag() & DBServer::CONNECT_RESET_BY_MASTER) {
-        _dbServer.clearFlag(DBServer::CONNECT_RESET_BY_MASTER);
-        _dbServer.connectMasterServer();
-    }
-
-    _dbServer.checkBlockedClients(now);
-
-    _dbServer.checkExpireCycle(now);
-
-    _dbServer.aof()->appendAof(now);
-}
-
-// 随机删除一定数量的过期键
-void DBServer::checkExpireCycle(int64_t now)
-{
-    int dbnums = g_server_conf.expire_check_dbnums;
-    int keys = g_server_conf.expire_check_keys;
-    if (dbs().size() < dbnums) dbnums = dbs().size();
-    for (int i = 0; i < dbnums; i++) {
-        if (_curCheckDb == dbs().size())
-            _curCheckDb = 0;
-        DB *db = selectDb(_curCheckDb);
-        _curCheckDb++;
-        if (keys > db->expireMap().size())
-            keys = db->expireMap().size();
-        for (int j = 0; j < keys; j++) {
-            if (db->expireMap().empty()) break;
-            auto randkey = getRandHashKey(db->expireMap());
-            size_t bucketNumber = std::get<0>(randkey);
-            size_t where = std::get<1>(randkey);
-            for (auto it = db->expireMap().cbegin(bucketNumber);
-                    it != db->expireMap().cend(bucketNumber); ++it) {
-                if (where-- == 0) {
-                    if (it->second <= now) {
-                        db->delKeyWithExpire(it->first);
-                    }
-                    break;
-                }
-            }
-        }
+    if (!slaves.empty()) {
+        if (!query) {
+            std::string buffer;
+            conv2resp(buffer, argv);
+            append_copy_backlog_buffer(buffer.data(), buffer.size());
+        } else
+            append_copy_backlog_buffer(query, len);
     }
 }
 
-// 检查是否有阻塞的客户端超时
-void DBServer::checkBlockedClients(int64_t now)
+void dbserver::sync_command_to_slaves(const char *query, size_t len)
 {
-    std::string message;
-    for (auto it = _blockedClients.begin(); it != _blockedClients.end(); ) {
-        auto e = it++;
-        auto conn = g_server->server().getConnection(*e);
+    for (auto& it : slaves) {
+        auto conn = server.get_connection(it.first);
         if (!conn) continue;
-        auto& context = std::any_cast<Context&>(conn->getContext());
-        DB *db = selectDb(context.blockDbnum());
-        if (context.blockTimeout() != 0 && context.blockStartTime() + context.blockTimeout() <= now) {
-            message.append("*-1\r\n+(");
-            double seconds = 1.0 * (now - context.blockStartTime()) / 1000;
-            message.append(convert2f(seconds));
-            message.append("s)\r\n");
-            conn->send(message);
-            message.clear();
-            _blockedClients.erase(e);
-            db->clearBlockingKeysForContext(context);
-        }
-    }
-}
-
-void DBServer::removeBlockedClient(size_t id)
-{
-    for (auto c : _blockedClients)
-        if (c == id)
-            break;
-}
-
-// 将目前已连接的所有客户端设置为只读
-void DBServer::setAllSlavesToReadonly()
-{
-    auto& maps = g_server->server().connectionMaps();
-    for (auto& it : maps) {
-        if (it.second->getContext().has_value()) {
-            auto& context = std::any_cast<Context&>(it.second->getContext());
-            if (!(context.flag() & Context::SYNC_WAIT))
-                context.clearPerm(IS_WRITE);
-        }
-    }
-}
-
-// 从服务器创建向主服务器的连接
-void DBServer::connectMasterServer()
-{
-    disconnectMasterServer();
-    _client.reset(new Angel::TcpClient(g_server->loop(), *_masterAddr.get()));
-    _client->notExitLoop();
-    _client->setConnectionCb(
-            std::bind(&DBServer::sendPingToMaster, this, _1));
-    _client->setMessageCb(
-            std::bind(&DBServer::recvSyncFromMaster, this, _1, _2));
-    _client->setCloseCb(
-            std::bind(&DBServer::slaveClientCloseCb, this, _1));
-    _client->start();
-}
-
-void DBServer::disconnectMasterServer()
-{
-    if (_client) {
-        if (_heartBeatTimerId > 0)
-            g_server->loop()->cancelTimer(_heartBeatTimerId);
-        if (_replTimeoutTimerId > 0)
-            g_server->loop()->cancelTimer(_replTimeoutTimerId);
-        _client.reset();
-    }
-}
-
-void DBServer::slaveClientCloseCb(const Angel::TcpConnectionPtr& conn)
-{
-    g_server->loop()->cancelTimer(_heartBeatTimerId);
-    g_server->loop()->cancelTimer(_replTimeoutTimerId);
-    _flag |= CONNECT_RESET_BY_MASTER;
-}
-
-void DBServer::sendPingToMaster(const Angel::TcpConnectionPtr& conn)
-{
-    Context context(this, conn.get());
-    context.setFlag(Context::SYNC_RECV_PING);
-    conn->setContext(context);
-    conn->send("*1\r\n$4\r\nPING\r\n");
-    // 从服务器向主服务器发送完PING之后，如果repl_timeout时间后没有收到
-    // 有效回复，就会认为此次复制失败，然后会重连主服务器
-    _replTimeoutTimerId = g_server->loop()->runAfter(g_server_conf.repl_timeout,
-            [this, &context]{
-            if (context.flag() & Context::SYNC_RECV_PING)
-                this->connectMasterServer();
-            });
-}
-
-// 从服务器向主服务器发送自己的ip和port
-void DBServer::sendInetAddrToMaster(const Angel::TcpConnectionPtr& conn)
-{
-    std::string buffer;
-    Angel::InetAddr *inetAddr = g_server->server().listenAddr();
-    buffer += "*4\r\n$8\r\nreplconf\r\n$4\r\naddr\r\n$";
-    buffer += convert(strlen(convert(inetAddr->toIpPort())));
-    buffer += "\r\n";
-    buffer += convert(inetAddr->toIpPort());
-    buffer += "\r\n$";
-    buffer += convert(strlen(inetAddr->toIpAddr()));
-    buffer += "\r\n";
-    buffer += inetAddr->toIpAddr();
-    buffer += "\r\n";
-    conn->send(buffer);
-}
-
-// 从服务器向主服务器发送PSYNC命令
-void DBServer::sendSyncToMaster(const Angel::TcpConnectionPtr& conn)
-{
-    auto& context = std::any_cast<Context&>(conn->getContext());
-    context.setFlag(Context::SYNC_WAIT);
-    if (!(_flag & SLAVE)) {
-        // slave -> master: 第一次复制
-        setFlag(SLAVE);
-        setAllSlavesToReadonly();
-        const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-        conn->send(sync);
-    } else {
-        std::string buffer;
-        buffer += "*3\r\n$5\r\nPSYNC\r\n$32\r\n";
-        buffer += masterRunId();
-        buffer += "\r\n$";
-        buffer += convert(strlen(convert(slaveOffset())));
-        buffer += "\r\n";
-        buffer += convert(slaveOffset());
-        buffer += "\r\n";
-        conn->send(buffer);
-    }
-}
-
-// +FULLRESYNC\r\n<runid>\r\n<offset>\r\n
-// +CONTINUE\r\n
-// <rdbfilesize>\r\n\r\n<rdbfile>
-// <sync command>
-// SYNC_RECV_PING -> SYNC_WAIT -> SYNC_FULL -> SYNC_COMMAND
-//                             -> SYNC_COMMAND
-void DBServer::recvSyncFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
-{
-    auto& context = std::any_cast<Context&>(conn->getContext());
-    while (true) {
-        if (context.flag() & Context::SYNC_RECV_PING) {
-            if (!buf.strcasecmp("+PONG\r\n")) return;
-            buf.retrieve(7);
-            context.clearFlag(Context::SYNC_RECV_PING);
-            context.setFlag(Context::SYNC_WAIT);
-            sendInetAddrToMaster(conn);
-            sendSyncToMaster(conn);
-        } else if (context.flag() & Context::SYNC_WAIT) {
-            if (buf.strcasecmp("+FULLRESYNC\r\n")) {
-                char *s = buf.peek();
-                const char *ps = s;
-                s += 13;
-                int crlf = buf.findStr(s, "\r\n");
-                if (crlf < 0) return;
-                setMasterRunId(s);
-                s += crlf + 2;
-                crlf = buf.findStr(s, "\r\n");
-                if (crlf < 0) return;
-                _slaveOffset = atoll(s);
-                s += crlf + 2;
-                buf.retrieve(s - ps);
-                context.clearFlag(Context::SYNC_WAIT);
-                context.setFlag(Context::SYNC_FULL);
-            } else if (buf.strcasecmp("+CONTINUE\r\n")) {
-                buf.retrieve(11);
-                context.clearFlag(Context::SYNC_WAIT);
-                context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
-                _client->conn()->setMessageCb(
-                        std::bind(&Server::slaveOnMessage, g_server, _1, _2));
-                setHeartBeatTimer(conn);
-            } else
-                break;
-        } else if (context.flag() & Context::SYNC_FULL) {
-            recvRdbfileFromMaster(conn, buf);
-            break;
-        } else if (context.flag() & Context::SYNC_COMMAND) {
-            g_server->slaveOnMessage(conn, buf);
-            break;
-        }
-    }
-}
-
-void DBServer::recvPingFromMaster()
-{
-    int64_t now = Angel::nowMs();
-    if (lastRecvHeartBeatTime() == 0) {
-        setLastRecvHeartBeatTime(now);
-        return;
-    }
-    if (now - lastRecvHeartBeatTime() > g_server_conf.repl_timeout) {
-        connectMasterServer();
-    } else
-        setLastRecvHeartBeatTime(now);
-}
-
-// 从服务器接受来自主服务器的rdb快照
-void DBServer::recvRdbfileFromMaster(const Angel::TcpConnectionPtr& conn, Angel::Buffer& buf)
-{
-    auto& context = std::any_cast<Context&>(conn->getContext());
-    if (_syncRdbFilesize == 0) {
-        int crlf = buf.findStr("\r\n\r\n");
-        if (crlf <= 0) return;
-        _syncRdbFilesize = atoll(buf.peek());
-        buf.retrieve(crlf + 4);
-        strcpy(_tmpfile, "tmp.XXXXX");
-        mktemp(_tmpfile);
-        _syncFd = open(_tmpfile, O_RDWR | O_APPEND | O_CREAT, 0660);
-        if (buf.readable() == 0) return;
-    }
-    size_t writeBytes = buf.readable();
-    if (writeBytes >= _syncRdbFilesize) {
-        writeBytes = _syncRdbFilesize;
-        _syncRdbFilesize = 0;
-    } else {
-        _syncRdbFilesize -= writeBytes;
-    }
-    ssize_t n = write(_syncFd, buf.peek(), writeBytes);
-    if (n > 0) buf.retrieve(n);
-    if (_syncRdbFilesize > 0) return;
-    g_server->fsyncBackground(_syncFd);
-    rename(_tmpfile, g_server_conf.rdb_file.c_str());
-    clear();
-    rdb()->load();
-    context.clearFlag(Context::SYNC_FULL);
-    context.setFlag(Context::MASTER | Context::SYNC_COMMAND);
-    _client->conn()->setMessageCb(
-            std::bind(&Server::slaveOnMessage, g_server, _1, _2));
-    setHeartBeatTimer(conn);
-}
-
-// 主服务器将生成的rdb快照发送给从服务器
-void DBServer::sendRdbfileToSlave()
-{
-    int fd = open(g_server_conf.rdb_file.c_str(), O_RDONLY);
-    if (fd < 0) {
-        logError("can't open %s:%s", g_server_conf.rdb_file.c_str(), Angel::strerrno());
-        return;
-    }
-    Angel::Buffer buf;
-    while (buf.readFd(fd) > 0) {
-    }
-    for (auto& it : slaves()) {
-        auto conn = g_server->server().getConnection(it.first);
-        if (!conn) continue;
-        auto& context = std::any_cast<Context&>(conn->getContext());
-        if (context.flag() & Context::SYNC_RDB_FILE) {
-            conn->send(convert(buf.readable()));
-            conn->send("\r\n\r\n");
-            conn->send(buf.peek(), buf.readable());
-            if (rdb()->syncBuffer().size() > 0)
-                conn->send(rdb()->syncBuffer());
-            context.clearFlag(Context::SYNC_RDB_FILE);
-            context.setFlag(Context::SYNC_COMMAND);
-        }
-    }
-    rdb()->syncBuffer().clear();
-    close(fd);
-}
-
-// 主服务器将写命令传播给所有从服务器
-void DBServer::sendSyncCommandToSlave(const char *query, size_t len)
-{
-    for (auto& it : _slaves) {
-        auto conn = g_server->server().getConnection(it.first);
-        if (!conn) continue;
-        auto& context = std::any_cast<Context&>(conn->getContext());
-        if (context.flag() & Context::SYNC_COMMAND)
+        auto& con = get_context(conn);
+        if (con.flags & context_t::SYNC_COMMAND) {
+            std::string s(query, len);
+            log_warn("send: %s", s.c_str());
             conn->send(query, len);
+        }
     }
-}
-
-// 从服务器定时向主服务器发送ACK
-void DBServer::sendAckToMaster(const Angel::TcpConnectionPtr& conn)
-{
-    std::string buffer;
-    buffer += "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$";
-    buffer += convert(strlen(convert(slaveOffset())));
-    buffer += "\r\n";
-    buffer += convert(slaveOffset());
-    buffer += "\r\n";
-    conn->send(buffer);
 }
 
 // 主服务器将命令写入到复制积压缓冲区中
-void DBServer::appendCopyBacklogBuffer(const char *query, size_t len)
+void dbserver::append_copy_backlog_buffer(const char *query, size_t len)
 {
-    masterOffsetIncr(len);
-    _copyBacklogBuffer.put(query, len);
+    master_offset += len;
+    copy_backlog_buffer.put(query, len);
 }
 
-void DBServer::appendPartialResyncData(Context& con, size_t off)
+void dbserver::append_partial_resync_data(context_t& con, size_t off)
 {
     std::string buffer;
     buffer.reserve(off);
-    _copyBacklogBuffer.get(buffer.data(), off);
-    con.append(std::move(buffer));
+    copy_backlog_buffer.get(buffer.data(), off);
+    con.append(buffer);
 }
 
-void DBServer::appendWriteCommand(const Context::CommandList& cmdlist,
-                                  const char *query, size_t len)
+static void append_timestamp(context_t& con, const std::string& timestr, bool is_seconds)
 {
-    if (g_server_conf.enable_appendonly)
-        aof()->append(cmdlist, query, len);
-    if (aof()->childPid() != -1)
-        aof()->appendRewriteBuffer(cmdlist, query, len);
-    if (flag() & DBServer::PSYNC)
-        rdb()->appendSyncBuffer(cmdlist, query, len);
-    if (!slaves().empty()) {
-        if (!query) {
-            std::string buffer;
-            CONVERT2RESP(buffer, cmdlist);
-            appendCopyBacklogBuffer(buffer.data(), buffer.size());
-        } else
-            appendCopyBacklogBuffer(query, len);
-    }
-}
-
-static void appendCommandHead(std::string& buffer, size_t len)
-{
-    buffer += "*";
-    buffer += convert(len);
-    buffer += "\r\n";
-}
-
-static void appendCommandArg(std::string& buffer, const std::string& s1,
-        const std::string& s2)
-{
-    buffer += "$";
-    buffer += s1 + "\r\n" + s2 + "\r\n";
-}
-
-static void appendTimeStamp(std::string& buffer, int64_t timeval, bool is_seconds)
-{
-    if (is_seconds) timeval *= 1000;
-    int64_t ms = timeval + Angel::nowMs();
-    appendCommandArg(buffer, convert(strlen(convert(ms))), convert(ms));
-}
-
-// 将解析后的命令转换成RESP形式的命令
-void DBServer::CONVERT2RESP(std::string& buffer, const Context::CommandList& cmdlist)
-{
-    appendCommandHead(buffer, cmdlist.size());
-    for (auto& it : cmdlist) {
-        appendCommandArg(buffer, convert(it.size()), it);
-    }
+    auto tv = atoll(timestr.c_str());
+    if (is_seconds) tv *= 1000;
+    std::string value = i2s(tv + angel::util::get_cur_time_ms());
+    con.append_reply_string(value);
 }
 
 // 将解析后的命令转换成RESP形式的命令
 // EXPIRE命令将被转换为PEXPIRE
-void DBServer::CONVERT2RESP(std::string& buffer, const Context::CommandList& cmdlist,
-                             const char *query, size_t len)
+void dbserver::conv2resp_with_expire(std::string& buffer, const argv_t& argv,
+                                     const char *query, size_t len)
 {
-    size_t size = cmdlist.size();
-    if (strcasecmp(cmdlist[0].c_str(), "SET") == 0 && size >= 5) {
-        appendCommandHead(buffer, size);
+    context_t con;
+    size_t size = con.argv.size();
+    if (con.iscmd("SET") && size >= 5) {
+        con.append_reply_multi(size);
         for (size_t i = 0; i < size; i++) {
-            if (i > 3 && strcasecmp(cmdlist[i-1].c_str(), "EX") == 0) {
-                appendTimeStamp(buffer, atoll(cmdlist[i].c_str()), true);
-            } else if (i > 3 && strcasecmp(cmdlist[i-1].c_str(), "PX") == 0) {
-                appendTimeStamp(buffer, atoll(cmdlist[i].c_str()), false);
+            if (i > 3 && con.isequal(i-1, "EX")) {
+                append_timestamp(con, con.argv[i], true);
+            } else if (i > 3 && con.isequal(i-1, "PX")) {
+                append_timestamp(con, con.argv[i], false);
             } else {
-                appendCommandArg(buffer, convert(cmdlist[i].size()), cmdlist[i]);
+                con.append_reply_string(con.argv[i]);
             }
         }
-    } else if (strcasecmp(cmdlist[0].c_str(), "EXPIRE") == 0) {
-        appendCommandHead(buffer, size);
-        appendCommandArg(buffer, "7", "PEXPIRE");
-        appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
-        appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), true);
-    } else if (strcasecmp(cmdlist[0].c_str(), "PEXPIRE") == 0) {
-        appendCommandHead(buffer, size);
-        appendCommandArg(buffer, "7", "PEXPIRE");
-        appendCommandArg(buffer, convert(cmdlist[1].size()), cmdlist[1]);
-        appendTimeStamp(buffer, atoll(cmdlist[2].c_str()), false);
+    } else if (con.iscmd("EXPIRE")) {
+        con.append_reply_multi(size);
+        con.append_reply_string("PEXPIRE");
+        con.append_reply_string(con.argv[1]);
+        append_timestamp(con, con.argv[2], true);
+    } else if (con.iscmd("PEXPIRE")) {
+        con.append_reply_multi(size);
+        con.append_reply_string("PEXPIRE");
+        con.append_reply_string(con.argv[1]);
+        append_timestamp(con, con.argv[2], true);
     } else {
-        if (!query) CONVERT2RESP(buffer, cmdlist);
-        else buffer.append(query, len);
+        if (query)
+            con.append(query, len);
+        else
+            conv2resp(con.buf, argv);
+    }
+    con.buf.swap(buffer);
+}
+
+void dbserver::connect_master_server()
+{
+    reset_connection_with_master();
+    master_cli.reset(new angel::client(loop, master_addr));
+    master_cli->not_exit_loop();
+    master_cli->set_connection_handler([this](const angel::connection_ptr& conn){
+            this->send_ping_to_master(conn);
+            });
+    master_cli->set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->recv_sync_from_master(conn, buf);
+            });
+    master_cli->set_close_handler([this](const angel::connection_ptr& conn){
+            this->slave_close_handler(conn);
+            });
+    master_cli->start();
+}
+
+void dbserver::reset_connection_with_master()
+{
+    if (!master_cli) return;
+    if (heartbeat_timer_id > 0)
+        loop->cancel_timer(heartbeat_timer_id);
+    if (repl_timeout_timer_id > 0)
+        loop->cancel_timer(repl_timeout_timer_id);
+    master_cli.reset();
+}
+
+void dbserver::send_ping_to_master(const angel::connection_ptr& conn)
+{
+    db->slave_connection_handler(conn);
+    auto& con = get_context(conn);
+    con.flags |= context_t::SYNC_PING;
+    conn->send("*1\r\n$4\r\nPING\r\n");
+    // 从服务器向主服务器发送完PING之后，如果repl_timeout时间后没有收到
+    // 有效回复，就会认为此次复制失败，然后会重连主服务器
+    repl_timeout_timer_id = loop->run_after(server_conf.repl_timeout,
+            [this, &con]{
+            if (con.flags & context_t::SYNC_PING)
+                this->connect_master_server();
+            });
+}
+
+// +FULLRESYNC\r\n<runid>\r\n<offset>\r\n
+// +CONTINUE\r\n
+// <snapshot-file-size>\r\n\r\n<snapshot>
+// <sync command>
+// SYNC_PING -> SYNC_WAIT -> SYNC_FULL -> SYNC_COMMAND
+//                             -> SYNC_COMMAND
+void dbserver::recv_sync_from_master(const angel::connection_ptr& conn, angel::buffer& buf)
+{
+    auto& con = get_context(conn);
+    while (true) {
+        if (con.flags & context_t::SYNC_PING) {
+            // 等待接收PING的有效回复PONG，如果长时间没有收到就会
+            // 触发repl_timeout_timer超时
+            if (!buf.starts_with("+PONG\r\n"))
+                return;
+            log_info("recvd +PONG");
+            con.flags &= ~context_t::SYNC_PING;
+            con.flags |= context_t::SYNC_WAIT;
+            send_addr_to_master(conn);
+            send_sync_command_to_master(conn);
+            buf.retrieve(7);
+        } else if (con.flags & context_t::SYNC_WAIT) {
+            if (buf.starts_with("+FULLRESYNC\r\n")) {
+                log_info("recvd +FULLRESYNC");
+                // 进行完全重同步
+                char *s = buf.peek();
+                const char *ps = s;
+                s += 13;
+                int crlf = buf.find(s, "\r\n");
+                if (crlf < 0) return;
+                set_run_id(master_run_id);
+                s += crlf + 2;
+                crlf = buf.find(s, "\r\n");
+                if (crlf < 0) return;
+                slave_offset = atoll(s);
+                s += crlf + 2;
+                buf.retrieve(s - ps);
+                con.flags &= ~context_t::SYNC_WAIT;
+                con.flags |= context_t::SYNC_FULL;
+            } else if (buf.starts_with("+CONTINUE\r\n")) {
+                log_info("recvd +CONTINUE");
+                // 进行部分重同步
+                buf.retrieve(11);
+                con.flags &= ~context_t::SYNC_WAIT;
+                con.flags |= context_t::CONNECT_WITH_MASTER | context_t::SYNC_COMMAND;
+                master_cli->conn()->set_message_handler(
+                        [this](const angel::connection_ptr& conn, angel::buffer& buf){
+                        this->slave_message_handler(conn, buf);
+                        });
+                set_heartbeat_timer(conn);
+            } else
+                break;
+        } else if (con.flags & context_t::SYNC_FULL) {
+            recv_snapshot_from_master(conn, buf);
+            break;
+        } else if (con.flags & context_t::SYNC_COMMAND) {
+            slave_message_handler(conn, buf);
+            break;
+        }
     }
 }
 
-void DBServer::setHeartBeatTimer(const Angel::TcpConnectionPtr& conn)
+void dbserver::slave_close_handler(const angel::connection_ptr& conn)
 {
-    _heartBeatTimerId = g_server->loop()->runEvery(g_server_conf.repl_ping_period, [this, conn]{
-            this->sendAckToMaster(conn);
+    db->slave_close_handler(conn);
+}
+
+// 从服务器向主服务器发送自己的ip和port
+void dbserver::send_addr_to_master(const angel::connection_ptr& conn)
+{
+    std::string message;
+    message += "*4\r\n$8\r\nreplconf\r\n$4\r\naddr\r\n$";
+    message += i2s(strlen(i2s(server.listen_addr().to_host_port())));
+    message += "\r\n";
+    message += i2s(server.listen_addr().to_host_port());
+    message += "\r\n$";
+    message += i2s(strlen(server.listen_addr().to_host_ip()));
+    message += "\r\n";
+    message += server.listen_addr().to_host_ip();
+    message += "\r\n";
+    conn->send(message);
+}
+
+// 从服务器向主服务器发送PSYNC命令
+void dbserver::send_sync_command_to_master(const angel::connection_ptr& conn)
+{
+    if (flags & SLAVE) {
+        std::string message;
+        message += "*3\r\n$5\r\nPSYNC\r\n$32\r\n";
+        message += master_run_id;
+        message += "\r\n$";
+        message += i2s(strlen(i2s(slave_offset)));
+        message += "\r\n";
+        message += i2s(slave_offset);
+        message += "\r\n";
+        conn->send(message);
+    } else {
+        // slave -> master: 第一次复制
+        flags &= ~MASTER;
+        flags |= SLAVE;
+        // setAllSlavesToReadonly();
+        const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+        conn->send(sync);
+    }
+}
+
+void dbserver::set_heartbeat_timer(const angel::connection_ptr& conn)
+{
+    heartbeat_timer_id = loop->run_every(server_conf.repl_ping_period, [this, conn]{
+            this->send_ack_to_master(conn);
             conn->send("*1\r\n$4\r\nPING\r\n");
             });
 }
 
-void DBServer::subChannel(const Key& key, size_t id)
+void dbserver::update_heartbeat_time()
 {
-    auto channel = _pubsubChannels.find(key);
-    if (channel == _pubsubChannels.end()) {
-        std::vector<size_t> idlist = { id };
-        _pubsubChannels[key] = std::move(idlist);
+    auto now = angel::util::get_cur_time_ms();
+    if (last_recv_heartbeat_time == 0) {
+        last_recv_heartbeat_time = now;
+        return;
+    }
+    if (now - last_recv_heartbeat_time > server_conf.repl_timeout) {
+        connect_master_server();
+    } else
+        last_recv_heartbeat_time = now;
+}
+
+// 从服务器定时向主服务器发送ACK
+void dbserver::send_ack_to_master(const angel::connection_ptr& conn)
+{
+    std::string message;
+    message += "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$";
+    message += i2s(strlen(i2s(slave_offset)));
+    message += "\r\n";
+    message += i2s(slave_offset);
+    message += "\r\n";
+    conn->send(message);
+}
+
+// 从服务器接收来自主服务器的快照
+void dbserver::recv_snapshot_from_master(const angel::connection_ptr& conn, angel::buffer& buf)
+{
+    auto& con = get_context(conn);
+    if (sync_file_size == 0) {
+        int crlf = buf.find("\r\n\r\n");
+        if (crlf <= 0) return;
+        sync_file_size = atoll(buf.peek());
+        buf.retrieve(crlf + 4);
+        strcpy(sync_tmp_file, "tmp.XXXXX");
+        mktemp(sync_tmp_file);
+        sync_fd = open(sync_tmp_file, O_RDWR | O_APPEND | O_CREAT, 0660);
+        if (buf.readable() == 0) return;
+    }
+    size_t write_bytes = buf.readable();
+    if (write_bytes >= sync_file_size) {
+        write_bytes = sync_file_size;
+        sync_file_size = 0;
     } else {
-        channel->second.push_back(id);
+        sync_file_size -= write_bytes;
+    }
+    ssize_t n = write(sync_fd, buf.peek(), write_bytes);
+    if (n > 0) buf.retrieve(n);
+    if (sync_file_size > 0) return;
+    fsync(sync_fd);
+    rename(sync_tmp_file, db->get_snapshot_name().c_str());
+    db->load_snapshot();
+    con.flags &= ~context_t::SYNC_FULL;
+    con.flags |= context_t::CONNECT_WITH_MASTER | context_t::SYNC_COMMAND;
+    master_cli->conn()->set_message_handler(
+            [this, conn](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->slave_message_handler(conn, buf);
+            });
+    set_heartbeat_timer(conn);
+    log_info("recvd snapshot from master");
+}
+
+// 主服务器将生成的rdb快照发送给从服务器
+void dbserver::send_snapshot_to_slaves()
+{
+    int fd = open(db->get_snapshot_name().c_str(), O_RDONLY);
+    if (fd < 0) {
+        // logError("can't open %s:%s", server_conf.rdb_file.c_str(), angel::strerrno());
+        return;
+    }
+    off_t filesize = get_filesize(fd);
+    for (auto& it : slaves) {
+        auto conn = server.get_connection(it.first);
+        if (!conn) continue;
+        auto& con = get_context(conn);
+        if (con.flags & context_t::SYNC_SNAPSHOT) {
+            conn->send(i2s(filesize));
+            conn->send("\r\n\r\n");
+        }
+    }
+    angel::buffer buf;
+    while (buf.read_fd(fd) > 0) {
+        for (auto& it : slaves) {
+            auto conn = server.get_connection(it.first);
+            if (!conn) continue;
+            auto& con = get_context(conn);
+            if (con.flags & context_t::SYNC_SNAPSHOT) {
+                conn->send(buf.peek(), buf.readable());
+            }
+        }
+    }
+    for (auto& it : slaves) {
+        auto conn = server.get_connection(it.first);
+        if (!conn) continue;
+        auto& con = get_context(conn);
+        if (con.flags & context_t::SYNC_SNAPSHOT) {
+            con.flags &= ~context_t::SYNC_SNAPSHOT;
+            con.flags |= context_t::SYNC_COMMAND;
+            if (sync_buffer.size() > 0)
+                conn->send(sync_buffer);
+        }
+    }
+    sync_buffer.clear();
+    close(fd);
+}
+
+// SLAVEOF host port
+// SLAVEOF no one
+void dbserver::slaveof(context_t& con)
+{
+    if (con.isequal(1, "no") && con.isequal(2, "one")) {
+        reset_connection_with_master();
+        flags &= ~SLAVE;
+        ret(con, shared.ok);
+    }
+    int port = str2l(con.argv[2]);
+    if (str2numerr()) ret(con, shared.integer_err);
+    con.append(shared.ok);
+    if (port == server_conf.port && con.argv[1].compare(server_conf.ip) == 0) {
+        log_warn("try connect to self");
+        return;
+    }
+    log_info("connect to %s:%d", con.argv[1].c_str(), port);
+    master_addr = angel::inet_addr(con.argv[1].c_str(), port);
+    connect_master_server();
+}
+
+// PSYNC ? -1
+// PSYNC run_id repl_off
+void dbserver::psync(context_t& con)
+{
+    if (!con.isequal(1, "?") && !con.isequal(2, "-1")) {
+        // try partial sync
+        if (con.isequal(1, run_id)) goto sync;
+        size_t slave_off = atoll(con.argv[2].c_str());
+        size_t off = master_offset - slave_off;
+        if (off > copy_backlog_buffer.size()) goto sync;
+        // 执行部分重同步
+        con.flags |= context_t::SYNC_COMMAND;
+        con.append("+CONTINUE\r\n");
+        append_partial_resync_data(con, off);
+        return;
+    }
+sync:
+    // 执行完整重同步
+    con.flags |= context_t::CONNECT_WITH_SLAVE | context_t::SYNC_SNAPSHOT;
+    con.append("+FULLRESYNC\r\n");
+    con.append(run_id);
+    con.append("\r\n");
+    con.append(i2s(master_offset));
+    con.append("\r\n");
+    if (db->is_creating_snapshot()) {
+        // 虽然服务器后台正在生成快照，但没有从服务器在等待，即服务器并没有
+        // 记录此期间执行的写命令，所以之后仍然需要重新生成一次快照
+        if (!(flags & PSYNC)) flags |= PSYNC_DELAY;
+        return;
+    }
+    flags |= MASTER | PSYNC;
+    db->creat_snapshot();
+}
+
+// REPLCONF addr <port> <ip>
+// REPLCONF ack repl_off
+void dbserver::replconf(context_t& con)
+{
+    if (con.isequal(1, "addr")) {
+        auto it = slaves.find(con.conn->id());
+        if (it == slaves.end()) {
+            log_info("found a new slave %s:%s", con.argv[3].c_str(), con.argv[2].c_str());
+            slaves.emplace(con.conn->id(), master_offset);
+        }
+        con.slave_addr = angel::inet_addr(con.argv[3].c_str(), atoi(con.argv[2].c_str()));
+    } else if (con.isequal(1, "ack")) {
+        size_t slave_off = atoll(con.argv[2].c_str());
+        auto it = slaves.find(con.conn->id());
+        assert(it != slaves.end());
+        it->second = slave_off;
     }
 }
 
-size_t DBServer::pubMessage(const std::string& msg, const std::string& channel, size_t id)
+void dbserver::ping(context_t& con)
 {
-    auto idlist = _pubsubChannels.find(channel);
-    if (idlist == _pubsubChannels.end()) return 0;
-    std::string buffer;
-    size_t pubClients = 0;
+    con.append("+PONG\r\n");
+}
+
+// PUBLISH channel message
+void dbserver::publish(context_t& con)
+{
+    auto& channel = con.argv[1];
+    auto& message = con.argv[2];
+    size_t sub_clients = pub_message(message, channel);
+    con.append_reply_number(sub_clients);
+}
+
+// SUBSCRIBE channel [channel ...]
+void dbserver::subscribe(context_t& con)
+{
+    con.append("+Reading messages... (press Ctrl-C to quit)\r\n");
+    for (size_t i = 1; i < con.argv.size(); i++) {
+        sub_channel(con.argv[i], con.conn->id());
+        con.append_reply_multi(3);
+        con.append_reply_string("SUBSCRIBE");
+        con.append_reply_string(con.argv[i]);
+        con.append_reply_number(i);
+    }
+}
+
+size_t dbserver::pub_message(const std::string& msg, const std::string& channel)
+{
+    auto idlist = pubsub_channels.find(channel);
+    if (idlist == pubsub_channels.end()) return 0;
+    std::string message;
+    size_t pub_clients = 0;
     for (auto& id : idlist->second) {
-        auto conn = g_server->server().getConnection(id);
+        auto conn = server.get_connection(id);
         if (!conn) continue;
-        buffer.append("*3\r\n$7\r\nmessage\r\n$");
-        buffer.append(convert(channel.size()));
-        buffer.append("\r\n" + channel + "\r\n$");
-        buffer.append(convert(msg.size()));
-        buffer.append("\r\n");
-        conn->send(buffer);
+        message.append("*3\r\n$7\r\nmessage\r\n$");
+        message.append(i2s(channel.size()));
+        message.append("\r\n" + channel + "\r\n$");
+        message.append(i2s(msg.size()));
+        message.append("\r\n");
+        conn->send(message);
         conn->send(msg);
         conn->send("\r\n");
-        buffer.clear();
-        pubClients++;
+        message.clear();
+        pub_clients++;
     }
-    return pubClients;
+    return pub_clients;
 }
 
-void DBServer::addSlowlogIfNeeded(Context::CommandList& cmdlist, int64_t start, int64_t end)
+void dbserver::sub_channel(const std::string& channel, size_t id)
 {
-    int64_t duration = end - start;
-    if (g_server_conf.slowlog_max_len == 0) return;
-    if (duration < g_server_conf.slowlog_log_slower_than) return;
-    Slowlog slowlog;
-    slowlog._id = _slowlogId++;
-    slowlog._time = start;
-    slowlog._duration = duration;
-    for (auto& it : cmdlist)
-        slowlog._args.emplace_back(it);
-    if (slowlogQueue().size() >= g_server_conf.slowlog_max_len)
-        slowlogQueue().pop_front();
-    slowlogQueue().emplace_back(std::move(slowlog));
-}
-
-void DBServer::clear()
-{
-    for (auto& db : dbs()) {
-        db->clear();
+    auto idlist = pubsub_channels.find(channel);
+    if (idlist == pubsub_channels.end()) {
+        pubsub_channels[channel] = { id };
+    } else {
+        idlist->second.push_back(id);
     }
 }
 
-void Server::fsyncBackground(int fd)
+void dbserver::info(context_t& con)
 {
-    _server.executor([fd]{ ::fsync(fd); ::close(fd); });
+    int i = 0;
+    con.append("+run_id:");
+    con.append(run_id);
+    con.append("\n");
+    con.append("role:");
+    if ((flags & MASTER) && (flags & SLAVE)) con.append("master-slave\n");
+    else if (flags & MASTER) con.append("master\n");
+    else if (flags & SLAVE) ret(con, "slave\r\n");
+    con.append("connected_slaves:");
+    con.append(i2s(slaves.size()));
+    con.append("\n");
+    for (auto& it : slaves) {
+        auto conn = server.get_connection(it.first);
+        if (!conn) continue;
+        auto& context = get_context(conn);
+        con.append("slave");
+        con.append(i2s(i));
+        con.append(":ip=");
+        con.append(context.slave_addr.to_host_ip());
+        con.append(",port=");
+        con.append(i2s(context.slave_addr.to_host_port()));
+        con.append(",offset=");
+        con.append(i2s(it.second));
+        con.append("\n");
+        i++;
+    }
+    con.append("\r\n");
 }
 
-void Server::start()
+int dbserver::check_range(context_t& con, int& start, int& stop, int lower, int upper)
 {
-    _loop->runEvery(100, []{ g_server->serverCron(); });
-    Angel::addSignal(SIGINT, []{
-            g_server->dbServer().rdb()->saveBackground();
-            g_server->dbServer().aof()->rewriteBackground();
-            g_server->loop()->quit();
-            });
-    // 优先使用AOF文件来载入数据
-    if (fileExists(g_server_conf.appendonly_file.c_str()))
-        _dbServer.aof()->load();
-    else
-        _dbServer.rdb()->load();
+    if (start > upper || stop < lower) {
+        con.append(shared.nil);
+        return C_ERR;
+    }
+    if (start < 0 && start >= lower) {
+        start += upper + 1;
+    }
+    if (stop < 0 && stop >= lower) {
+        stop += upper + 1;
+    }
+    if (start < lower) {
+        start = 0;
+    }
+    if (stop > upper) {
+        stop = upper;
+    }
+    if (start > stop) {
+        con.append(shared.nil);
+        return C_ERR;
+    }
+    return C_OK;
+}
+
+#define BIND(f) std::bind(&dbserver::f, this, std::placeholders::_1)
+
+void dbserver::start()
+{
+    __server = this;
+    cmdtable = {
+        { "SLAVEOF",    { -3, IS_READ, BIND(slaveof) } },
+        { "PSYNC",      { -3, IS_READ, BIND(psync) } },
+        { "REPLCONF",   {  3, IS_READ, BIND(replconf) } },
+        { "PING",       { -1, IS_READ, BIND(ping) } },
+        { "PUBLISH",    { -3, IS_READ, BIND(publish) } },
+        { "SUBSCRIBE",   {  2, IS_READ, BIND(subscribe) } },
+        { "CONFIG",     {  3, IS_READ, BIND(config) } },
+        { "INFO",       { -1, IS_READ, BIND(info) } }
+    };
+    db->start();
+    loop->run_every(100, [this]{ this->server_cron(); });
+    server.set_exit_handler([this]{ this->db->exit(); });
     // 服务器以从服务器方式运行
-    if (g_server_conf.master_port > 0) {
-        Context con(nullptr, nullptr);
-        auto& cmdlist = con.commandList();
-        cmdlist.emplace_back("SLAVEOF");
-        cmdlist.emplace_back(g_server_conf.master_ip);
-        cmdlist.emplace_back(convert(g_server_conf.master_port));
-        executeCommand(con, nullptr, 0);
+    if (server_conf.master_port > 0) {
+        context_t con(nullptr, db.get());
+        con.argv.emplace_back("SLAVEOF");
+        con.argv.emplace_back(server_conf.master_ip);
+        con.argv.emplace_back(i2s(server_conf.master_port));
+        executor(con, nullptr, 0);
     }
-    _server.start();
+    server.start();
 }
+
+///////////////////////main function/////////////////////////////
+
+#include <getopt.h>
 
 static struct option opts[] = {
     { "serverconf", 1, NULL, 'a' },
@@ -739,7 +700,6 @@ static void help()
                     "--serverconf <file>\n"
                     "--sentinel [run as a sentinel] <sentinel-conf-file=sentinel.conf>\n"
                     "--sentinelconf <file> [run as a sentinel] <sentinel-conf-file=file>\n");
-    abort();
 }
 
 int main(int argc, char *argv[])
@@ -753,30 +713,25 @@ int main(int argc, char *argv[])
         case 'a': server_conf_file = optarg; break;
         case 'b': startup_sentinel = true; break;
         case 'c': startup_sentinel = true; sentinel_conf_file = optarg; break;
-        case 'h': help();
+        case 'h': help(); return 0;
         }
     }
 
-    Angel::setLoggerLevel(Angel::Logger::INFO);
-    Alice::readServerConf(server_conf_file.c_str());
+    angel::evloop loop;
+    alice::read_server_conf(server_conf_file);
     if (startup_sentinel) {
-        Alice::readSentinelConf(sentinel_conf_file.c_str());
-        Angel::EventLoop loop;
-        Angel::InetAddr listenAddr(g_sentinel_conf.port, g_sentinel_conf.addr.c_str());
-        Sentinel sentinel(&loop, listenAddr);
-        logInfo("sentinel %s:%d runId is %s", g_sentinel_conf.addr.c_str(),
-                g_sentinel_conf.port, sentinel.server().dbServer().selfRunId());
-        g_sentinel = &sentinel;
+        alice::read_sentinel_conf(sentinel_conf_file);
+        std::cout << sentinel_conf_file << "\n";
+        angel::inet_addr listen_addr(sentinel_conf.ip, sentinel_conf.port);
+        Sentinel sentinel(&loop, listen_addr);
+        log_info("sentinel %s runid is %s", listen_addr.to_host(), sentinel.get_run_id());
         sentinel.start();
         loop.run();
         return 0;
     }
-    Angel::EventLoop loop;
-    Angel::InetAddr listenAddr(g_server_conf.port, g_server_conf.addr.c_str());
-    Alice::Server server(&loop, listenAddr);
-    logInfo("server %s:%d runId is %s", g_server_conf.addr.c_str(),
-            g_server_conf.port, server.dbServer().selfRunId());
-    g_server = &server;
+    angel::inet_addr listen_addr(server_conf.ip, server_conf.port);
+    dbserver server(&loop, listen_addr);
+    log_info("server %s runid is %s", listen_addr.to_host(), server.get_run_id());
     server.start();
     loop.run();
 }

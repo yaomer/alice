@@ -1,76 +1,71 @@
-cmake_minimum_required (VERSION 3.0)
+cmake_minimum_required (VERSION 2.8)
 
-project (Alice)
+project (alice)
 
 set (CMAKE_CXX_FLAGS "-std=c++17 -Wall -O2")
 
-set (SERVER_DIR "${PROJECT_SOURCE_DIR}/src")
-set (CLIENT_DIR "${PROJECT_SOURCE_DIR}/client")
-set (PROXY_DIR "${PROJECT_SOURCE_DIR}/proxy")
+set (SERVER "${PROJECT_SOURCE_DIR}/src")
+set (MMDB "${SERVER}/mmdb")
+set (SSDB "${SERVER}/ssdb")
 
-find_library (ALICE_HAVE_SNAPPY NAMES snappy)
+set (PROXY "${PROJECT_SOURCE_DIR}/proxy")
+set (CLIAPI "${PROJECT_SOURCE_DIR}/client")
 
-configure_file (
-    "${SERVER_DIR}/configure.h.in"
-    "${SERVER_DIR}/configure.h"
+set (SERVER_SRC
+    ${SERVER}/server.cc
+    ${SERVER}/config.cc
+    ${SERVER}/util.cc
+    ${SERVER}/sentinel.cc
+    ${MMDB}/mmdb.cc
+    ${MMDB}/mm_string.cc
+    ${MMDB}/mm_list.cc
+    ${MMDB}/mm_hash.cc
+    ${MMDB}/mm_set.cc
+    ${MMDB}/mm_zset.cc
+    ${MMDB}/mm_sort.cc
+    ${MMDB}/rdb.cc
+    ${MMDB}/aof.cc
+    ${MMDB}/evict.cc
+    ${SSDB}/ssdb.cc
+    ${SSDB}/ss_list.cc
 )
 
-set (SERVER_FILES
-    ${SERVER_DIR}/server.cc
-    ${SERVER_DIR}/db.cc
-    ${SERVER_DIR}/db_string.cc
-    ${SERVER_DIR}/db_list.cc
-    ${SERVER_DIR}/db_hash.cc
-    ${SERVER_DIR}/db_set.cc
-    ${SERVER_DIR}/db_zset.cc
-    ${SERVER_DIR}/db_sort.cc
-    ${SERVER_DIR}/evict.cc
-    ${SERVER_DIR}/rdb.cc
-    ${SERVER_DIR}/aof.cc
-    ${SERVER_DIR}/sentinel.cc
-    ${SERVER_DIR}/config.cc
-    ${SERVER_DIR}/util.cc
+set (CLIENT_SRC
+    ${SERVER}/client.cc
+    ${SERVER}/hint.cc
+    ${SERVER}/util.cc
 )
 
-set (CLI_CLIENT_FILES
-    ${SERVER_DIR}/client.cc
-    ${SERVER_DIR}/hint.cc
-    ${SERVER_DIR}/util.cc
-)
+# set (PROXY_SRC
+    # ${PROXY}/proxy.cc
+    # ${SERVER}/util.cc)
 
-set (PROXY_FILES
-    ${PROXY_DIR}/proxy.cc
-    ${SERVER_DIR}/util.cc
-)
+# set (CLIAPI_SRC
+    # ${CLIAPI}/client.cc
+    # ${SERVER}/util.cc)
 
-set (CLIENT_FILES
-    ${CLIENT_DIR}/client.cc
-    ${SERVER_DIR}/util.cc
-)
+set (EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR})
 
 add_library(angel STATIC IMPORTED)
 set_target_properties(angel PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libangel.a")
 
+add_library(leveldb STATIC IMPORTED)
+set_target_properties(leveldb PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libleveldb.a")
+
+add_library(snappy STATIC IMPORTED)
+set_target_properties(snappy PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libsnappy.a")
+
 add_library(linenoise STATIC IMPORTED)
 set_target_properties(linenoise PROPERTIES IMPORTED_LOCATION "/usr/local/lib/liblinenoise.a")
 
-if (ALICE_HAVE_SNAPPY)
-    add_library(snappy STATIC IMPORTED)
-    set_target_properties(snappy PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libsnappy.a")
-endif()
+add_executable(alice-server ${SERVER_SRC})
+target_link_libraries(alice-server angel leveldb snappy)
 
-add_executable(alice-server ${SERVER_FILES})
-target_link_libraries(alice-server angel)
-
-if (ALICE_HAVE_SNAPPY)
-    target_link_libraries(alice-server snappy)
-endif()
-
-add_executable(alice-cli ${CLI_CLIENT_FILES})
+add_executable(alice-cli ${CLIENT_SRC})
 target_link_libraries(alice-cli angel linenoise)
 
-add_executable(alice-proxy ${PROXY_FILES})
-target_link_libraries(alice-proxy angel)
+# add_executable(alice-proxy ${PROXY_SRC})
+# target_link_libraries(alice-proxy angel)
 
-add_library(alice-api STATIC ${CLIENT_FILES})
-target_link_libraries(alice-api angel)
+# add_library(alice-api STATIC ${CLIAPI_SRC})
+# target_link_libraries(alice-api angel)
