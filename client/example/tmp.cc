@@ -1,26 +1,25 @@
-#include <iostream>
 #include "../client.h"
+
+#include <iostream>
 
 int main()
 {
-    Alice::AliceContext alice;
-    alice.connect("127.0.0.1", 1296);
-    if (alice.err()) {
-        std::cout << alice.errStr() << "\n";
+    AliceClient c;
+    c.connect("127.0.0.1", 1296);
+    if (!c.isok()) {
+        std::cout << c.get_error() << "\n";
         return 1;
     }
-    alice.executor("set key hello");
-    std::cout << alice.reply()[0] << "\n";
-    alice.executor("get key");
-    std::cout << alice.reply()[0] << "\n";
-    alice.executor("del name");
+    c.executor("set key hello");
+    std::cout << c.get_reply()[0] << "\n";
+    c.executor("get key");
+    std::cout << c.get_reply()[0] << "\n";
+    c.executor("del name");
     for (int i = 0; i < 10; i++)
-        alice.executor("lpush name #%d#", i);
-    alice.executor("lrange name 0 -1");
+        c.executor("lpush name #%d#", i);
+    c.executor("lrange name 0 -1");
     std::cout << "name(list):\n";
-    for (auto& it : alice.reply())
+    for (auto& it : c.get_reply())
         std::cout << it << "\n";
-    // std::cout << alice.lock("hello") << "\n";
-    // alice.release("hello");
-    alice.close();
+    c.close();
 }
