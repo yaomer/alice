@@ -17,6 +17,7 @@
 ### 依赖
 + 网络模块使用[Angel](https://github.com/yaomer/Angel)
 + 客户端的命令提示使用[linenoise](https://github.com/antirez/linenoise)
++ ssdb底层需要使用[leveldb](https://github.com/google/leveldb)
 + mmdb-rdb和ssdb-leveldb需要使用`snappy`
 + 我们默认libangel.a liblinenoise.a libsnappy.a都安装到了/usr/local/lib目录
 
