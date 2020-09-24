@@ -1,50 +1,33 @@
 #ifndef _ALICE_CLIENT_H
 #define _ALICE_CLIENT_H
 
-#include <Angel/Buffer.h>
+#include <angel/buffer.h>
 
-#include <string>
-#include <vector>
+#include "../src/util.h"
 
-namespace Alice {
-
-class AliceContext {
+class AliceClient {
 public:
-    AliceContext()
-        : _err(0),
-        _fd(-1)
-    {
-    }
-    enum {
-        CONNECT_ERR = 1,
-        PROTOCOL_ERR,
-        OTHER_ERR,
-    };
-    using List = std::vector<std::string>;
-    void connect(const char *ip, int port);
+    void connect(const std::string& ip, int port);
     void executor(const char *fmt, ...);
-    List& reply() { return _reply; }
-    int err() { return _err; }
-    std::string& errStr() { return _errStr; }
+    const alice::argv_t& get_reply() const { return reply; }
+    bool isok() const { return error.empty(); }
+    const std::string& get_error() { return error; }
     void close();
-    // bool lock(const std::string& key);
-    // void release(const std::string& key);
 private:
-    void sendRequest();
-    void parseStatusReply();
-    void parseIntegerReply();
-    void parseBulkReply();
-    void parseMultiBulkReply();
-    void recvResponse();
-    void read() { _buf.readFd(_fd); }
+    void send_request();
+    void parse_status_reply();
+    void parse_integer_reply();
+    void parse_bulk_reply();
+    void parse_multi_bulk_reply();
+    void recv_response();
+    void read() { _buf.read_fd(_fd); }
 
-    List _reply;
-    int _err;
-    std::string _errStr;
-    List _argv;
-    int _fd;
-    Angel::Buffer _buf;
+    alice::argv_t argv;
+    alice::argv_t reply;
+    std::string error;
+    angel::buffer _buf;
+    int _fd = -1;
+    bool protocolerr = false;
 };
-}
 
 #endif // _ALICE_CLIENT_H

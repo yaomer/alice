@@ -1,38 +1,37 @@
 //
 // 提供一个简易的C++ SYNC API
 //
-#include <Angel/SockOps.h>
-#include <Angel/InetAddr.h>
-#include <Angel/util.h>
+
+#include <angel/sockops.h>
+#include <angel/inet_addr.h>
+#include <angel/util.h>
 
 #include <stdarg.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 #include <iostream>
 
 #include "client.h"
-#include "../src/util.h"
 
-using namespace Alice;
-
-void AliceContext::sendRequest()
+void AliceClient::send_request()
 {
     std::string message;
     message += "*";
-    message += convert(_argv.size());
+    message += alice::i2s(argv.size());
     message += "\r\n";
-    for (auto& it : _argv) {
+    for (auto& it : argv) {
         message += "$";
-        message += convert(it.size());
+        message += alice::i2s(it.size());
         message += "\r\n";
         message += it;
         message += "\r\n";
     }
-    _argv.clear();
-    writeToFile(_fd, message.data(), message.size());
+    argv.clear();
+    alice::fwrite(_fd, message.data(), message.size());
 }
 
-void AliceContext::executor(const char *fmt, ...)
+void AliceClient::executor(const char *fmt, ...)
 {
     va_list ap, ap1;
     va_start(ap, fmt);
@@ -46,72 +45,73 @@ void AliceContext::executor(const char *fmt, ...)
     vsnprintf(&buf[0], buf.size(), fmt, ap);
     va_end(ap);
     buf[len] = '\n';
-    parseLine(_argv, &buf[0], &buf[0] + len + 1);
-    if (_argv.empty()) return;
-    sendRequest();
-    recvResponse();
+    alice::parse_line(argv, &buf[0], &buf[0] + len + 1);
+    if (argv.empty()) return;
+    send_request();
+    recv_response();
+    if (protocolerr)
+        error = "protocol error";
 }
 
-void AliceContext::parseStatusReply()
+void AliceClient::parse_status_reply()
 {
 next:
     char *s = _buf.peek();
-    int crlf = _buf.findCrlf();
+    int crlf = _buf.find_crlf();
     if (crlf < 0) { read(); goto next; }
     if (s[0] == '-') {
-        _err = OTHER_ERR;
-        _errStr.assign(s + 1, crlf);
+        error.assign(s + 1, crlf);
     } else {
-        _reply.emplace_back(s + 1, crlf);
+        reply.emplace_back(s + 1, crlf);
     }
     _buf.retrieve(crlf + 2);
 }
 
-void AliceContext::parseIntegerReply()
+void AliceClient::parse_integer_reply()
 {
 next:
     char *s = _buf.peek();
-    int crlf = _buf.findCrlf();
+    int crlf = _buf.find_crlf();
     if (crlf < 0) { read(); goto next; }
-    _reply.emplace_back(s + 1, crlf);
+    reply.emplace_back(s + 1, crlf);
     _buf.retrieve(crlf + 2);
 }
 
-void AliceContext::parseBulkReply()
+void AliceClient::parse_bulk_reply()
 {
 next:
     char *s = _buf.peek();
     const char *es = s + _buf.readable();
     const char *ps = s;
-    int crlf = _buf.findCrlf();
+    int crlf = _buf.find_crlf();
     if (crlf < 0) { read(); goto next; }
     int len = atoi(s + 1);
     if (len < 0 && len != -1) goto protocolerr;
     if (len == 0 || len == -1) {
-        _reply.emplace_back("(nil)");
+        reply.emplace_back("(nil)");
         _buf.retrieve(crlf + 2);
         return;
     }
     s += crlf + 2;
     if (es - s < len + 2) { read(); goto next; }
-    _reply.emplace_back(s, len);
+    reply.emplace_back(s, len);
     _buf.retrieve(s + len + 2 - ps);
     return;
 protocolerr:
-    _err = PROTOCOL_ERR;
+    protocolerr = true;
 }
 
-void AliceContext::parseMultiBulkReply()
+void AliceClient::parse_multi_bulk_reply()
 {
 next:
     char *s = _buf.peek();
-    int i = _buf.findCrlf();
+    int i = _buf.find_crlf();
     if (i < 0) { read(); goto next; }
     int len = atoi(s + 1);
     if (len < 0 && len != -1) goto protocolerr;
     if (len == 0 || len == -1) {
-        if (len == 0) _reply.emplace_back("(empty array)");
-        else _reply.emplace_back("(nil)");
+        if (len == 0) reply.emplace_back("(empty array)");
+        else reply.emplace_back("(nil)");
         _buf.retrieve(i + 2);
         return;
     }
@@ -119,64 +119,50 @@ next:
     _buf.retrieve(i + 2);
     while (len-- > 0) {
         switch (s[0]) {
-        case '+': case '-': parseStatusReply(); break;
-        case ':': parseIntegerReply(); break;
-        case '$': parseBulkReply(); break;
-        case '*': parseMultiBulkReply(); break;
+        case '+': case '-': parse_status_reply(); break;
+        case ':': parse_integer_reply(); break;
+        case '$': parse_bulk_reply(); break;
+        case '*': parse_multi_bulk_reply(); break;
         default: goto protocolerr;
         }
-        if (_err == PROTOCOL_ERR) return;
+        if (protocolerr) return;
         if (len > 0 && _buf.readable() == 0) read();
         s = _buf.peek();
     }
     return;
 protocolerr:
-    _err = PROTOCOL_ERR;
+    protocolerr = true;
 }
 
-void AliceContext::recvResponse()
+void AliceClient::recv_response()
 {
-    _reply.clear();
-    _errStr.clear();
-    _err = 0;
+    reply.clear();
+    protocolerr = false;
+    error.clear();
     read();
 next:
     char *s = _buf.peek();
     switch (s[0]) {
-    case '+': case '-': parseStatusReply(); break;
-    case ':': parseIntegerReply(); break;
-    case '$': parseBulkReply(); break;
-    case '*': parseMultiBulkReply(); break;
-    default: _err = PROTOCOL_ERR; break;
+    case '+': case '-': parse_status_reply(); break;
+    case ':': parse_integer_reply(); break;
+    case '$': parse_bulk_reply(); break;
+    case '*': parse_multi_bulk_reply(); break;
+    default: protocolerr = true; break;
     }
-    if (_err == PROTOCOL_ERR) return;
+    if (protocolerr) return;
     if (_buf.readable() > 0) goto next;
 }
 
-void AliceContext::connect(const char *ip, int port)
+void AliceClient::connect(const std::string& ip, int port)
 {
-    _fd = Angel::SockOps::socket();
-    int ret = Angel::SockOps::connect(
-            _fd, Angel::InetAddr(port, ip));
+    _fd = angel::sockops::socket();
+    int ret = angel::sockops::connect(_fd, &angel::inet_addr(ip, port).addr());
     if (ret < 0) {
-        _err = CONNECT_ERR;
-        _errStr.assign(Angel::strerrno());
+        error = angel::util::strerrno();
     }
 }
 
-void AliceContext::close()
+void AliceClient::close()
 {
     ::close(_fd);
 }
-
-// bool AliceContext::lock(const std::string& key)
-// {
-//    executor("set %s unique_id nx", key.c_str());
-//    return strncasecmp(reply()[0].data(), "OK", 2) == 0;
-// }
-
-// void AliceContext::release(const std::string& key)
-// {
-//    executor("eval \"if redis.call('get', KEYS[1]) == 'unique_id' "
-//             "then redis.call('del', KEYS[1]) end\" 1 %s", key.c_str());
-// }

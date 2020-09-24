@@ -41,11 +41,13 @@ set (PROXY_SRC
     ${PROXY}/proxy.cc
     ${SERVER}/util.cc)
 
-# set (CLIAPI_SRC
-    # ${CLIAPI}/client.cc
-    # ${SERVER}/util.cc)
+set (CLIAPI_SRC
+    ${CLIAPI}/client.cc
+    ${SERVER}/util.cc)
 
 set (EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR})
+
+set (LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR})
 
 add_library(angel STATIC IMPORTED)
 set_target_properties(angel PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libangel.a")
@@ -68,5 +70,5 @@ target_link_libraries(alice-cli angel linenoise)
 add_executable(alice-proxy ${PROXY_SRC})
 target_link_libraries(alice-proxy angel)
 
-# add_library(alice-api STATIC ${CLIAPI_SRC})
-# target_link_libraries(alice-api angel)
+add_library(alice-api STATIC ${CLIAPI_SRC})
+target_link_libraries(alice-api angel)
