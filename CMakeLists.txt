@@ -9,6 +9,7 @@ set (MMDB "${SERVER}/mmdb")
 set (SSDB "${SERVER}/ssdb")
 
 set (PROXY "${PROJECT_SOURCE_DIR}/proxy")
+
 set (CLIAPI "${PROJECT_SOURCE_DIR}/client")
 
 set (SERVER_SRC
@@ -36,9 +37,9 @@ set (CLIENT_SRC
     ${SERVER}/util.cc
 )
 
-# set (PROXY_SRC
-    # ${PROXY}/proxy.cc
-    # ${SERVER}/util.cc)
+set (PROXY_SRC
+    ${PROXY}/proxy.cc
+    ${SERVER}/util.cc)
 
 # set (CLIAPI_SRC
     # ${CLIAPI}/client.cc
@@ -64,8 +65,8 @@ target_link_libraries(alice-server angel leveldb snappy)
 add_executable(alice-cli ${CLIENT_SRC})
 target_link_libraries(alice-cli angel linenoise)
 
-# add_executable(alice-proxy ${PROXY_SRC})
-# target_link_libraries(alice-proxy angel)
+add_executable(alice-proxy ${PROXY_SRC})
+target_link_libraries(alice-proxy angel)
 
 # add_library(alice-api STATIC ${CLIAPI_SRC})
 # target_link_libraries(alice-api angel)

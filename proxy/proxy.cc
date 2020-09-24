@@ -8,178 +8,161 @@
 // 分布式集群解决方案，使用一致性哈希
 //
 
-Proxy::Proxy(Angel::EventLoop *loop, Angel::InetAddr& inetAddr)
-    : _loop(loop),
-    _server(loop, inetAddr)
+Node::Node(Proxy *proxy, angel::inet_addr conn_addr)
+    : proxy(proxy), rnode(nullptr)
 {
-    _server.setMessageCb(
-            std::bind(&Proxy::onMessage, this, _1, _2));
-    for (auto& node : g_proxy_conf.nodes) {
-        addNode(std::get<0>(node.second), std::get<1>(node.second));
+    if (!proxy) {
+        is_vnode = true;
+        return;
+    }
+    client.reset(new angel::client(proxy->loop, conn_addr));
+    client->set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->forward_response_to_client(conn, buf);
+            });
+    client->set_close_handler([this](const angel::connection_ptr& conn){
+            this->proxy->del_node(this->name);
+            });
+    client->not_exit_loop();
+    client->start();
+}
+
+Proxy::Proxy(angel::evloop *loop, angel::inet_addr& listen_addr)
+    : loop(loop),
+    server(loop, listen_addr)
+{
+    server.set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->message_handler(conn, buf);
+            });
+    for (auto& node : proxy_conf.nodes) {
+        add_node(std::get<0>(node.second), std::get<1>(node.second));
     }
 }
 
-void Proxy::addNode(std::string s1, const std::string& s,
+void Proxy::add_node(std::string s1, const std::string& s,
                     const std::string& sep, Node *node, int& index)
 {
     // 实际上发生冲突的概率是很小的
     while (true) {
-        auto it = _nodes.emplace(hash(s1), node);
+        auto it = nodes.emplace(hash(s1), node);
         if (it.second) {
-            node->setName(s1);
+            node->name = s1;
             break;
         }
         s1 = s;
         s1 += sep;
-        s1 += Alice::convert(index++);
+        s1 += alice::i2s(index++);
     }
 }
 
-void Proxy::addNode(const std::string& ip, int port)
+void Proxy::add_node(const std::string& ip, int port)
 {
     std::string name;
     name += ip;
     name += ":";
-    name += Alice::convert(port);
-    Angel::InetAddr inetAddr(port, ip.c_str());
-    size_t vnodes = getVNodesPerNode();
-    auto node = new Node(_loop, inetAddr);
-    node->setVNodes(vnodes);
+    name += alice::i2s(port);
+    angel::inet_addr addr(ip, port);
+    size_t vnodes = proxy_conf.vnodes;
+    auto node = new Node(this, addr);
+    node->vnodes = vnodes;
     int index = 1;
-    addNode(name, name, ":", node, index);
+    add_node(name, name, ":", node, index);
     std::string vname;
     int vindex = 1;
     while (vnodes-- > 0) {
         vname = name;
         vname += "#";
-        vname += Alice::convert(vindex++);
-        auto vnode = new Node(nullptr, inetAddr);
-        vnode->setRNodeForVNode(node);
-        addNode(vname, name, "#", vnode, vindex);
+        vname += alice::i2s(vindex++);
+        auto vnode = new Node(nullptr, addr);
+        vnode->rnode = node;
+        add_node(vname, name, "#", vnode, vindex);
     }
-    auto it = g_proxy_conf.nodes.find(name);
-    if (it == g_proxy_conf.nodes.end())
-        g_proxy_conf.nodes.emplace(name, std::make_tuple(ip, port));
+    auto it = proxy_conf.nodes.find(name);
+    if (it == proxy_conf.nodes.end())
+        proxy_conf.nodes.emplace(name, std::make_tuple(ip, port));
 }
 
-size_t Proxy::delNode(std::string s1, const std::string& s,
+size_t Proxy::del_node(std::string s1, const std::string& s,
                       const std::string& sep, int& index)
 {
     while (true) {
-        auto it = _nodes.find(hash(s1));
-        assert(it != _nodes.end());
-        if (it->second->name() == s1) {
-            size_t vnodes = it->second->vnodes();
-            _nodes.erase(it);
+        auto it = nodes.find(hash(s1));
+        assert(it != nodes.end());
+        if (it->second->name == s1) {
+            size_t vnodes = it->second->vnodes;
+            nodes.erase(it);
             return vnodes;
         }
         s1 = s;
         s1 += sep;
-        s1 += Alice::convert(index++);
+        s1 += alice::i2s(index++);
     }
 }
 
-void Proxy::delNode(const std::string& ip, int port)
+void Proxy::del_node(const std::string& ip, int port)
 {
     std::string name;
     name += ip;
     name += ":";
-    name += Alice::convert(port);
-    delNode(name);
+    name += alice::i2s(port);
+    del_node(name);
 }
 
-void Proxy::delNode(const std::string& name)
+void Proxy::del_node(const std::string& name)
 {
-    auto it = g_proxy_conf.nodes.find(name);
-    if (it == g_proxy_conf.nodes.end()) return;
-    g_proxy_conf.nodes.erase(it);
+    auto it = proxy_conf.nodes.find(name);
+    if (it == proxy_conf.nodes.end()) return;
+    proxy_conf.nodes.erase(it);
     int index = 1;
-    size_t vnodes = delNode(name, name, ":", index);
+    size_t vnodes = del_node(name, name, ":", index);
     std::string vname;
     int vindex = 1;
     while (vnodes-- > 0) {
         vname = name;
         vname += "#";
-        vname += Alice::convert(vindex++);
-        delNode(vname, name, "#", vindex);
+        vname += alice::i2s(vindex++);
+        del_node(vname, name, "#", vindex);
     }
-}
-
-void Node::removeNode(const Angel::TcpConnectionPtr& conn)
-{
-    g_proxy->delNode(this->name());
 }
 
 // 由于server是单线程的，所以先发送的请求总是先接收到响应，这样可以保证
 // id和response总是匹配的
 // 并且由于每个连接的id是唯一的，所以就算新到来的连接恰好复用了刚才意外断开
 // (发送了请求，但还未接收响应)的连接也不会导致串话
-void Node::forwardRequestToServer(size_t id, Angel::Buffer& buf, size_t n)
+void Node::forward_request_to_server(size_t id, angel::buffer& buf, size_t n)
 {
-    _idQueue.push(id);
-    _client->conn()->send(buf.peek(), n);
-    _requests++;
+    id_queue.push(id);
+    client->conn()->send(buf.peek(), n);
+    requests++;
 }
 
-void Node::forwardResponseToClient(const Angel::TcpConnectionPtr& conn,
-                                   Angel::Buffer& buf)
+void Node::forward_response_to_client(const angel::connection_ptr& conn,
+                                      angel::buffer& buf)
 {
-    ssize_t n = Proxy::parseResponse(buf);
+    ssize_t n = Proxy::parse_response(buf);
     if (n < 0) {
-        buf.retrieveAll();
+        buf.retrieve_all();
         return;
     }
     if (n == 0) return;
-    size_t id = _idQueue.front();
-    _idQueue.pop();
-    auto node = g_proxy->server().getConnection(id);
+    size_t id = id_queue.front();
+    id_queue.pop();
+    auto node = proxy->server.get_connection(id);
     if (!node) return;
     node->send(buf.peek(), n);
     buf.retrieve(n);
 }
 
-// if parse error, return -1
-// if not enough data, return 0
-// else return length of response
-ssize_t Proxy::parseRequest(Angel::Buffer& buf, CommandList& cmdlist)
+static ssize_t parse_single(angel::buffer& buf, size_t pos)
 {
-    const char *s = buf.peek();
-    const char *es = s + buf.readable();
-    const char *ps = s;
-    size_t argc;
-    // 解析命令个数
-    const char *next = std::find(s, es, '\n');
-    if (next == es) return 0;
-    if (s[0] != '*' || next[-1] != '\r') return -1;
-    argc = atol(s + 1);
-    s = next + 1;
-    // 解析各个命令
-    while (argc > 0) {
-        next = std::find(s, es, '\n');
-        if (next == es) return 0;
-        if (s[0] != '$' || next[-1] != '\r') return -1;
-        int len = atol(s + 1);
-        s = next + 1;
-        if (es - s < len + 2) return 0;
-        if (s[len] != '\r' || s[len+1] != '\n') return -1;
-        cmdlist.emplace_back(s, len);
-        s += len + 2;
-        argc--;
-    }
-    return s - ps;
-}
-
-static ssize_t parseSingle(Angel::Buffer& buf, size_t pos)
-{
-    int crlf = buf.findStr(buf.peek() + pos, "\r\n");
+    int crlf = buf.find(buf.peek() + pos, "\r\n");
     return crlf >= 0 ? crlf + 2 : 0;
 }
 
-static ssize_t parseBulk(Angel::Buffer& buf, size_t pos)
+static ssize_t parse_bulk(angel::buffer& buf, size_t pos)
 {
     char *s = buf.peek() + pos;
     const char *es = buf.peek() + buf.readable();
-    int crlf = buf.findStr(s, "\r\n");
+    int crlf = buf.find(s, "\r\n");
     if (crlf < 0) return 0;
     int len = atoi(s + 1);
     if (len < 0 && len != -1) return -1;
@@ -189,10 +172,10 @@ static ssize_t parseBulk(Angel::Buffer& buf, size_t pos)
     return crlf + 2 + len + 2;
 }
 
-static ssize_t parseMultiBulk(Angel::Buffer& buf, size_t curpos)
+static ssize_t parse_multi_bulk(angel::buffer& buf, size_t curpos)
 {
     char *s = buf.peek() + curpos;
-    int i = buf.findStr(s, "\r\n");
+    int i = buf.find(s, "\r\n");
     int pos = 0;
     if (i < 0) return 0;
     int len = atoi(s + 1);
@@ -202,9 +185,9 @@ static ssize_t parseMultiBulk(Angel::Buffer& buf, size_t curpos)
     pos += i + 2;
     while (len-- > 0) {
         switch (s[0]) {
-        case '+': case '-': case ':': i = parseSingle(buf, pos); break;
-        case '$': i = parseBulk(buf, pos); break;
-        case '*': i = parseMultiBulk(buf, pos); break;
+        case '+': case '-': case ':': i = parse_single(buf, pos); break;
+        case '$': i = parse_bulk(buf, pos); break;
+        case '*': i = parse_multi_bulk(buf, pos); break;
         default: return -1;
         }
         if (i < 0) return -1;
@@ -217,54 +200,54 @@ static ssize_t parseMultiBulk(Angel::Buffer& buf, size_t curpos)
 // if parse error, return -1
 // if not enough data, return 0
 // else return length of response
-ssize_t Proxy::parseResponse(Angel::Buffer& buf)
+ssize_t Proxy::parse_response(angel::buffer& buf)
 {
     switch (buf[0]) {
-    case '+': case '-': case ':': return parseSingle(buf, 0);
-    case '$': return parseBulk(buf, 0);
-    case '*': return parseMultiBulk(buf, 0);
+    case '+': case '-': case ':': return parse_single(buf, 0);
+    case '$': return parse_bulk(buf, 0);
+    case '*': return parse_multi_bulk(buf, 0);
     default: return -1;
     }
 }
 
-void Proxy::readConf(const char *proxy_conf_file)
+static void read_conf(const std::string& filename)
 {
-    Alice::ConfParamList paramlist;
-    Alice::parseConf(paramlist, proxy_conf_file);
+    alice::conf_param_list paramlist;
+    alice::parse_conf(paramlist, filename.c_str());
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "ip") == 0) {
-            g_proxy_conf.ip = it[1];
+            proxy_conf.ip = it[1];
         } else if (strcasecmp(it[0].c_str(), "port") == 0) {
-            g_proxy_conf.port = atoi(it[1].c_str());
+            proxy_conf.port = atoi(it[1].c_str());
         } else if (strcasecmp(it[0].c_str(), "node") == 0) {
             std::string name = it[1] + ":" + it[2];
             auto tuple = std::make_tuple(it[1], atoi(it[2].c_str()));
-            g_proxy_conf.nodes.emplace(name, tuple);
+            proxy_conf.nodes.emplace(name, tuple);
         } else if (strcasecmp(it[0].c_str(), "vnodes") == 0) {
-            g_proxy_conf.vnodes = atoi(it[1].c_str());
+            proxy_conf.vnodes = atoi(it[1].c_str());
         }
     }
 }
 
 // PROXY [add | del] <node-ip> <node-port>
-void Proxy::proxyCommand(const Angel::TcpConnectionPtr& conn,
-                         const CommandList& cmdlist)
+void Proxy::proxyCommand(const angel::connection_ptr& conn,
+                         const alice::argv_t& argv)
 {
-    if (cmdlist.size() != 4) {
+    if (argv.size() != 4) {
         conn->send("-ERR wrong number of arguments\r\n");
         return;
     }
-    auto& ip = cmdlist[2];
-    int port = Alice::str2l(cmdlist[3].c_str());
-    if (Alice::str2numberErr()) {
+    auto& ip = argv[2];
+    int port = alice::str2l(argv[3].c_str());
+    if (alice::str2numerr()) {
         conn->send("-ERR value is not an integer or out of range\r\n");
         return;
     }
-    if (strcasecmp(cmdlist[1].c_str(), "add") == 0) {
-        addNode(ip, port);
+    if (strcasecmp(argv[1].c_str(), "add") == 0) {
+        add_node(ip, port);
         conn->send("+OK\r\n");
-    } else if (strcasecmp(cmdlist[1].c_str(), "del") == 0) {
-        delNode(ip, port);
+    } else if (strcasecmp(argv[1].c_str(), "del") == 0) {
+        del_node(ip, port);
         conn->send("+OK\r\n");
     } else
         conn->send("-ERR subcommand error\r\n");
@@ -322,17 +305,14 @@ Proxy::CommandTable Proxy::commandTable = {
     "ZREVRANGEBYSCORE", "ZREMRANGEBYRANK", "ZREMRANGEBYSCORE",
 };
 
-Proxy *g_proxy;
-
 int main(int argc, char *argv[])
 {
     const char *proxy_conf_file = "proxy.conf";
     if (argc > 1) proxy_conf_file = argv[1];
-    Proxy::readConf(proxy_conf_file);
-    Angel::EventLoop loop;
-    Angel::InetAddr inetAddr(g_proxy_conf.port, g_proxy_conf.ip.c_str());
-    Proxy proxy(&loop, inetAddr);
-    g_proxy = &proxy;
+    read_conf(proxy_conf_file);
+    angel::evloop loop;
+    angel::inet_addr listen_addr(proxy_conf.ip, proxy_conf.port);
+    Proxy proxy(&loop, listen_addr);
     proxy.start();
     loop.run();
 }
