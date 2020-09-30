@@ -14,23 +14,26 @@
 #include "../db_base.h"
 #include "../config.h"
 
-#define STRING  1
-#define LIST    2
-#define HASH    3
-#define SET     4
-#define ZSET    5
+#include "coder.h"
 
-//
-// string:
-//     meta-key key@:[type:len]
-//     real-key key$:value
-// list:
-//     meta-key key@:[type:left-number:right-number]
-//     real-key [[key:number1$]:value1, [key:number2$]:value2 ...]
-// hash:
-//     meta-key key@:[type:size]
-//     real-key [[key:field$]:value1, [key:field$]:value2 ...]
-//
+#define adderr(con, s) \
+    do { \
+        std::string __str = "-ERR " + s.ToString(); \
+        con.append(__str); \
+        __str = argv2str(con.argv); \
+        log_error("leveldb: %s error: %s", __str.c_str(), s.ToString().c_str()); \
+    } while (0)
+
+#define reterr(con, s) \
+    do { \
+        adderr(con, s); \
+        return; \
+    } while (0)
+
+#define check_status(con, s) \
+    do { \
+        if (!s.ok()) reterr(con, s); \
+    } while (0)
 
 namespace alice {
 
@@ -86,6 +89,7 @@ private:
 
 class DB {
 public:
+    using key_t = std::string;
     DB()
     {
         leveldb::Options ops;
@@ -93,8 +97,8 @@ public:
         ops.max_open_files = server_conf.ssdb_leveldb_max_open_files;
         ops.max_file_size = server_conf.ssdb_leveldb_max_file_size;
         ops.write_buffer_size = server_conf.ssdb_leveldb_write_buffer_size;
-        auto status = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
-        assert(status.ok());
+        auto s = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
+        if (!s.ok()) log_fatal("leveldb: %s", s.ToString().c_str());
         set_builtin_keys();
     }
     ~DB()
@@ -102,7 +106,21 @@ public:
         delete db;
     }
 
+    void del_key(const key_t& key);
+    void del_expire_key(const key_t& key)
+    {
+        expire_keys.erase(key);
+    }
+    void del_key_with_expire(const key_t& key)
+    {
+        del_expire_key(key);
+        del_key(key);
+    }
+
+    void check_expire(const key_t& key);
+
     void keys(context_t& con);
+    void del(context_t& con);
 
     void lpush(context_t& con);
     void lpushx(context_t& con);
@@ -111,12 +129,12 @@ public:
     void lpop(context_t& con);
     void rpop(context_t& con);
     void rpoplpush(context_t& con);
-    // void lrem(context_t& con);
+    void lrem(context_t& con);
     void llen(context_t& con);
-    // void lindex(context_t& con);
-    // void lset(context_t& con);
+    void lindex(context_t& con);
+    void lset(context_t& con);
     void lrange(context_t& con);
-    // void ltrim(context_t& con);
+    void ltrim(context_t& con);
     // void blpop(context_t& con);
     // void brpop(context_t& con);
     // void brpoplpush(context_t& con);
@@ -126,17 +144,22 @@ private:
     {
         return atoi(value.c_str()) != type;
     }
-    void del_list_key(const std::string& key);
-    std::string get_meta_key(const std::string& key)
-    {
-        return "@" + key;
-    }
+    void del_list_key(const key_t& key);
+    void del_string_key(const key_t& key){}
+    void del_hash_key(const key_t& key){}
+    void del_set_key(const key_t& key){}
+    void del_zset_key(const key_t& key){}
+
+    void _lpushx(context_t& con, bool is_lpushx);
+    void _lpop(context_t& con, bool is_lpop);
 
     leveldb::DB *db;
+    std::unordered_map<key_t, int64_t> expire_keys;
 };
 
 struct builtin_keys_t {
     const char *location = "@"; // 定位主键的起始位置
+    const char *size = "$size$"; // 存储的总键数
 };
 
 extern builtin_keys_t builtin_keys;

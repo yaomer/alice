@@ -175,6 +175,18 @@ err:
     return -1;
 }
 
+// [set] [key] [value] -> <set key value>
+std::string argv2str(const argv_t& argv)
+{
+    std::string s = "<";
+    for (auto& it : argv)
+        s.append(it).append(" ");
+    if (s.size() > 1)
+        s.pop_back();
+    s.append(">");
+    return s;
+}
+
 // if c == ','
 // for [a,b,c,d] return [a][b][c][d]
 void split_line(std::vector<std::string>& argv,

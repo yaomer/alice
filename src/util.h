@@ -44,6 +44,7 @@ double str2f(const std::string& nstr);
 bool str2numerr();
 
 int parse_line(argv_t& argv, const char *line, const char *linep);
+std::string argv2str(const argv_t& argv);
 
 // Hash可以是unordered_map或unorderd_set
 // get_rand_hash_key()从Hash中挑选出一个随机元素，并返回这个元素

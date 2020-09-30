@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <limits.h>
 
 #include <angel/inet_addr.h>
 #include <angel/connection.h>
@@ -113,12 +114,32 @@ struct context_t {
     {
         append_reply_string(d2s(dval));
     }
+    void reserve_multi_head()
+    {
+        buf_resize = buf.size();
+        // *(1) count(10) \r\n(2)
+        buf.resize(buf_resize + 13);
+    }
+    template <typename T>
+    void set_multi_head(T count)
+    {
+        std::string head = "*";
+        std::string cs = i2s(count);
+        int spaces = 10 - cs.size();
+        while (spaces-- > 0)
+            head.push_back(' ');
+        head.append(cs);
+        head.append("\r\n");
+        assert(head.size() == 13);
+        std::copy(head.begin(), head.end(), buf.data()+buf_resize);
+    }
 
     int flags;
     int perms;
     angel::connection *conn;
     argv_t argv; // 请求参数表 argv[0]为命令名
     std::string buf; // 回复缓冲区
+    size_t buf_resize = 0;
     std::vector<argv_t> transaction_list; // 事务队列
     argv_t watch_keys; // 客户监视的键
     angel::inet_addr slave_addr; // 从服务器的地址
