@@ -136,7 +136,6 @@ void dbserver::sync_command_to_slaves(const char *query, size_t len)
         auto& con = get_context(conn);
         if (con.flags & context_t::SYNC_COMMAND) {
             std::string s(query, len);
-            log_warn("send: %s", s.c_str());
             conn->send(query, len);
         }
     }
@@ -315,39 +314,29 @@ void dbserver::slave_close_handler(const angel::connection_ptr& conn)
 void dbserver::send_addr_to_master(const angel::connection_ptr& conn)
 {
     std::string message;
-    message += "*4\r\n$8\r\nreplconf\r\n$4\r\naddr\r\n$";
-    message += i2s(strlen(i2s(server.listen_addr().to_host_port())));
-    message += "\r\n";
-    message += i2s(server.listen_addr().to_host_port());
-    message += "\r\n$";
-    message += i2s(strlen(server.listen_addr().to_host_ip()));
-    message += "\r\n";
-    message += server.listen_addr().to_host_ip();
-    message += "\r\n";
+    std::string ip = server.listen_addr().to_host_ip();
+    std::string port = i2s(server.listen_addr().to_host_port());
+    argv_t argv = { "REPLCONF", "ADDR", ip, port };
+    conv2resp(message, argv);
     conn->send(message);
 }
 
 // 从服务器向主服务器发送PSYNC命令
 void dbserver::send_sync_command_to_master(const angel::connection_ptr& conn)
 {
+    argv_t argv;
+    std::string message;
     if (flags & SLAVE) {
-        std::string message;
-        message += "*3\r\n$5\r\nPSYNC\r\n$32\r\n";
-        message += master_run_id;
-        message += "\r\n$";
-        message += i2s(strlen(i2s(slave_offset)));
-        message += "\r\n";
-        message += i2s(slave_offset);
-        message += "\r\n";
-        conn->send(message);
+        argv = { "PSYNC", master_run_id, i2s(slave_offset) };
     } else {
         // slave -> master: 第一次复制
         flags &= ~MASTER;
         flags |= SLAVE;
         // setAllSlavesToReadonly();
-        const char *sync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-        conn->send(sync);
+        argv = { "PSYNC", "?", "-1" };
     }
+    conv2resp(message, argv);
+    conn->send(message);
 }
 
 void dbserver::set_heartbeat_timer(const angel::connection_ptr& conn)
@@ -375,11 +364,8 @@ void dbserver::update_heartbeat_time()
 void dbserver::send_ack_to_master(const angel::connection_ptr& conn)
 {
     std::string message;
-    message += "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$";
-    message += i2s(strlen(i2s(slave_offset)));
-    message += "\r\n";
-    message += i2s(slave_offset);
-    message += "\r\n";
+    argv_t argv = { "REPLCONF", "ACK", i2s(slave_offset) };
+    conv2resp(message, argv);
     conn->send(message);
 }
 
@@ -519,17 +505,17 @@ sync:
     db->creat_snapshot();
 }
 
-// REPLCONF addr <port> <ip>
+// REPLCONF addr <ip> <port>
 // REPLCONF ack repl_off
 void dbserver::replconf(context_t& con)
 {
     if (con.isequal(1, "addr")) {
         auto it = slaves.find(con.conn->id());
         if (it == slaves.end()) {
-            log_info("found a new slave %s:%s", con.argv[3].c_str(), con.argv[2].c_str());
+            log_info("found a new slave %s:%s", con.argv[2].c_str(), con.argv[3].c_str());
             slaves.emplace(con.conn->id(), master_offset);
         }
-        con.slave_addr = angel::inet_addr(con.argv[3].c_str(), atoi(con.argv[2].c_str()));
+        con.slave_addr = angel::inet_addr(con.argv[2].c_str(), atoi(con.argv[3].c_str()));
     } else if (con.isequal(1, "ack")) {
         size_t slave_off = atoll(con.argv[2].c_str());
         auto it = slaves.find(con.conn->id());
@@ -688,40 +674,39 @@ void dbserver::start()
 #include <getopt.h>
 
 static struct option opts[] = {
-    { "serverconf", 1, NULL, 'a' },
-    { "sentinel", 0, NULL, 'b' },
-    { "sentinelconf", 1, NULL, 'c' },
-    { "help", 0, NULL, 'h' },
+    { "server", 1, NULL, 'v' },
+    { "sentinel", 1, NULL, 'n' },
 };
 
 static void help()
 {
-    fprintf(stderr, "default <server-conf-file=alice.conf>\n"
-                    "--serverconf <file>\n"
-                    "--sentinel [run as a sentinel] <sentinel-conf-file=sentinel.conf>\n"
-                    "--sentinelconf <file> [run as a sentinel] <sentinel-conf-file=file>\n");
+    fprintf(stderr, "usage: [default=--server alice.conf]\n"
+                    "   --server      \t/path/to/alice.conf\n"
+                    "   --sentinel    \t/path/to/sentinel.conf\n");
+    exit(1);
 }
 
 int main(int argc, char *argv[])
 {
     int c;
+    bool show_help = true;
     bool startup_sentinel = false;
     std::string server_conf_file = "alice.conf";
     std::string sentinel_conf_file = "sentinel.conf";
-    while ((c = getopt_long(argc, argv, "a:bc:h", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "v:n:c", opts, NULL)) != -1) {
         switch (c) {
-        case 'a': server_conf_file = optarg; break;
-        case 'b': startup_sentinel = true; break;
-        case 'c': startup_sentinel = true; sentinel_conf_file = optarg; break;
-        case 'h': help(); return 0;
+        case 'v': server_conf_file = optarg; break;
+        case 'n': startup_sentinel = true; sentinel_conf_file = optarg; break;
+        case '?': help();
         }
+        show_help = false;
     }
+    if (show_help && argc != 1) help();
 
     angel::evloop loop;
     alice::read_server_conf(server_conf_file);
     if (startup_sentinel) {
         alice::read_sentinel_conf(sentinel_conf_file);
-        std::cout << sentinel_conf_file << "\n";
         angel::inet_addr listen_addr(sentinel_conf.ip, sentinel_conf.port);
         Sentinel sentinel(&loop, listen_addr);
         log_info("sentinel %s runid is %s", listen_addr.to_host(), sentinel.get_run_id());
