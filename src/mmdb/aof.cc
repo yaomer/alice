@@ -6,7 +6,7 @@
 #include "../config.h"
 #include "../server.h"
 
-#include "mmdb.h"
+#include "internal.h"
 #include "aof.h"
 
 using namespace alice;

@@ -14,6 +14,7 @@
 #include "../config.h"
 #include "../server.h"
 
+#include "internal.h"
 #include "rdb.h"
 
 using namespace alice;

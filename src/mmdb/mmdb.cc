@@ -2,7 +2,7 @@
 #include "../util.h"
 #include "../server.h"
 
-#include "mmdb.h"
+#include "internal.h"
 #include "rdb.h"
 #include "aof.h"
 
