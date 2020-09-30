@@ -215,7 +215,7 @@ void DB::rpoplpush(context_t& con)
     auto s = db->Get(leveldb::ReadOptions(), src_meta_key, &src_value);
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
-    check_type(con, value, ktype::tlist);
+    check_type(con, src_value, ktype::tlist);
     leveldb::WriteBatch batch;
     // get src_value
     int li, ri, size;
@@ -237,7 +237,7 @@ void DB::rpoplpush(context_t& con)
     s = db->Get(leveldb::ReadOptions(), des_meta_key, &des_value);
     if (!s.IsNotFound() && !s.ok()) reterr(con, s);
     if (s.ok()) {
-        check_type(con, value, ktype::tlist);
+        check_type(con, des_value, ktype::tlist);
         decode_list_meta_value(des_value, li, ri, size);
         li--;
     }
