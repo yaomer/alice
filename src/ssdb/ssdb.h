@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <optional> // for c++2a
 
 #include "../db_base.h"
 #include "../config.h"
@@ -26,10 +27,7 @@ class DB;
 class engine : public db_base_t {
 public:
     engine();
-    void server_cron() override
-    {
-
-    }
+    void server_cron() override;
     void set_context(const angel::connection_ptr& conn)
     {
         conn->set_context(context_t(conn.get(), this));
@@ -63,10 +61,13 @@ public:
     {
 
     }
+    void check_expire_keys();
 private:
     std::unordered_map<std::string, command_t> cmdtable;
     std::unique_ptr<DB> db;
 };
+
+using errstr_t = std::optional<leveldb::Status>;
 
 class DB {
 public:
@@ -87,21 +88,46 @@ public:
         delete db;
     }
 
-    void del_key(const key_t& key);
+    void add_expire_key(const key_t& key, int64_t expire)
+    {
+        expire_keys[key] = expire;
+    }
+    errstr_t del_key(const key_t& key);
+    errstr_t del_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     void del_expire_key(const key_t& key)
     {
         expire_keys.erase(key);
     }
-    void del_key_with_expire(const key_t& key)
+    errstr_t del_key_with_expire(const key_t& key)
     {
         del_expire_key(key);
-        del_key(key);
+        return del_key(key);
+    }
+    errstr_t del_key_with_expire_batch(leveldb::WriteBatch *batch, const key_t& key)
+    {
+        del_expire_key(key);
+        return del_key_batch(batch, key);
     }
 
     void check_expire(const key_t& key);
 
     void keys(context_t& con);
     void del(context_t& con);
+
+    void set(context_t& con);
+    void setnx(context_t& con);
+    void get(context_t& con);
+    void getset(context_t& con);
+    void strlen(context_t& con);
+    void append(context_t& con);
+    void mset(context_t& con);
+    void mget(context_t& con);
+    void incr(context_t& con);
+    void incrby(context_t& con);
+    void decr(context_t& con);
+    void decrby(context_t& con);
+    void setrange(context_t& con);
+    void getrange(context_t& con);
 
     void lpush(context_t& con);
     void lpushx(context_t& con);
@@ -125,17 +151,25 @@ private:
     {
         return atoi(value.c_str()) != type;
     }
-    void del_list_key(const key_t& key);
-    void del_string_key(const key_t& key){}
-    void del_hash_key(const key_t& key){}
-    void del_set_key(const key_t& key){}
-    void del_zset_key(const key_t& key){}
+    // return err-str if error else return null
+    errstr_t del_list_key(const key_t& key);
+    errstr_t del_list_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    errstr_t del_string_key(const key_t& key);
+    errstr_t del_string_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    // errstr_t del_hash_key(const key_t& key);
+    // errstr_t del_hash_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    // errstr_t del_set_key(const key_t& key);
+    // errstr_t del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    // errstr_t del_zset_key(const key_t& key);
+    // errstr_t del_zset_key_batch(leveldb::WriteBatch *batch, const key_t& key);
 
     void _lpushx(context_t& con, bool is_lpushx);
     void _lpop(context_t& con, bool is_lpop);
+    void _incr(context_t& con, int64_t incr);
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;
+    friend engine;
 };
 
 struct builtin_keys_t {

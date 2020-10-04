@@ -3,6 +3,8 @@
 
 #include "mmdb.h"
 
+#include "../parser.h"
+
 // type(it) is DB::iterator
 #define is_type(it, _type) \
     ((it)->second.value.type() == typeid(_type))

@@ -114,6 +114,11 @@ struct context_t {
     {
         append_reply_string(d2s(dval));
     }
+    void append_error(const std::string& s)
+    {
+        append("-ERR ");
+        append(s);
+    }
     void reserve_multi_head()
     {
         buf_resize = buf.size();

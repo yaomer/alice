@@ -2,7 +2,7 @@ cmake_minimum_required (VERSION 2.8)
 
 project (alice)
 
-set (CMAKE_CXX_FLAGS "-std=c++17 -Wall -O2")
+set (CMAKE_CXX_FLAGS "-std=c++2a -Wall -O2")
 
 set (SERVER "${PROJECT_SOURCE_DIR}/src")
 set (MMDB "${SERVER}/mmdb")
@@ -16,6 +16,7 @@ set (SERVER_SRC
     ${SERVER}/server.cc
     ${SERVER}/config.cc
     ${SERVER}/util.cc
+    ${SERVER}/parser.cc
     ${SERVER}/sentinel.cc
     ${MMDB}/mmdb.cc
     ${MMDB}/mm_string.cc
@@ -29,6 +30,7 @@ set (SERVER_SRC
     ${MMDB}/evict.cc
     ${SSDB}/ssdb.cc
     ${SSDB}/ss_list.cc
+    ${SSDB}/ss_string.cc
 )
 
 set (CLIENT_SRC

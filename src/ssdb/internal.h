@@ -3,12 +3,12 @@
 
 #include "ssdb.h"
 
+#include "../parser.h"
+
 #define adderr(con, s) \
     do { \
-        std::string __str = "-ERR " + s.ToString(); \
-        con.append(__str); \
-        __str = argv2str(con.argv); \
-        log_error("leveldb: %s error: %s", __str.c_str(), s.ToString().c_str()); \
+        con.append_error(s.ToString()); \
+        log_error("leveldb: %s error: %s", argv2str(con.argv).c_str(), s.ToString().c_str()); \
     } while (0)
 
 #define reterr(con, s) \

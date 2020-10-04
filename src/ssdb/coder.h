@@ -66,6 +66,23 @@ encode_list_key(const std::string& key, int number)
     return buf;
 }
 
+static inline std::string
+encode_string_meta_value()
+{
+    std::string buf;
+    buf.append(1, ktype::tstring);
+    return buf;
+}
+
+static inline std::string
+encode_string_key(const std::string& key)
+{
+    std::string buf;
+    buf.append(1, ktype::tstring);
+    buf.append(key);
+    return buf;
+}
+
 }
 }
 
