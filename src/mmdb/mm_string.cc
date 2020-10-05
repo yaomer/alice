@@ -204,18 +204,12 @@ void DB::setrange(context_t& con)
     }
     check_type(con, it, String);
     new_value.swap(get_string_value(it));
-    size_t size = offset + value.size();
-    if (new_value.capacity() < size) new_value.reserve(size);
-    if (offset < new_value.size()) {
-        for (size_t i = offset; i < size; i++) {
-            new_value[i] = value[i-offset];
-        }
-    } else {
-        for (size_t i = new_value.size(); i < offset; i++) {
-            new_value[i] = '\x00';
-        }
-        new_value.append(value);
-    }
+    size_t len = offset + value.size();
+    if (len > new_value.capacity()) new_value.reserve(len);
+    if (len > new_value.size()) new_value.resize(len);
+    if (offset > new_value.size())
+        new_value.resize(offset, '\x00');
+    std::copy(value.begin(), value.end(), new_value.begin()+offset);
     con.append_reply_number(new_value.size());
     insert(key, std::move(new_value));
 }

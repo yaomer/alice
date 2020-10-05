@@ -284,18 +284,12 @@ void DB::setrange(context_t& con)
     s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
     check_status(con, s);
     new_value.swap(value);
-    size_t size = offset + arg_value.size();
-    if (new_value.capacity() < size) new_value.reserve(size);
-    if (offset < new_value.size()) {
-        for (size_t i = offset; i < size; i++) {
-            new_value[i] = arg_value[i-offset];
-        }
-    } else {
-        for (size_t i = new_value.size(); i < offset; i++) {
-            new_value[i] = '\x00';
-        }
-        new_value.append(arg_value);
-    }
+    size_t len = offset + arg_value.size();
+    if (len > new_value.capacity()) new_value.reserve(len);
+    if (len > new_value.size()) new_value.resize(len);
+    if (offset > new_value.size())
+        new_value.resize(offset, '\x00');
+    std::copy(arg_value.begin(), arg_value.end(), new_value.begin()+offset);
     s = db->Put(leveldb::WriteOptions(), encode_string_key(key), new_value);
     check_status(con, s);
     con.append_reply_number(new_value.size());
