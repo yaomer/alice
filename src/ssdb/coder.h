@@ -83,6 +83,36 @@ encode_string_key(const std::string& key)
     return buf;
 }
 
+static inline std::string
+encode_hash_meta_value(size_t seq, size_t size)
+{
+    std::string buf;
+    buf.append(1, ktype::thash);
+    buf.append(i2s(seq));
+    buf.append(1, ':');
+    buf.append(i2s(size));
+    return buf;
+}
+
+static inline void
+decode_hash_meta_value(const std::string& value, size_t *seq, size_t *size)
+{
+    const char *s = value.c_str() + 1;
+    if (seq) *seq = atoll(s);
+    if (size) *size = atoi(strchr(s, ':') + 1);
+}
+
+static inline std::string
+encode_hash_key(size_t seq, const std::string& field)
+{
+    std::string buf;
+    buf.append(1, ktype::thash);
+    buf.append(i2s(seq));
+    buf.append(1, ':');
+    buf.append(field);
+    return buf;
+}
+
 }
 }
 

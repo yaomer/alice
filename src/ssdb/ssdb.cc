@@ -77,6 +77,19 @@ engine::engine()
         // { "BLPOP",      {  3, IS_READ,  BIND(blpop) } },
         // { "BRPOP",      {  3, IS_READ,  BIND(brpop) } },
         // { "BRPOPLPUSH", { -4, IS_READ,  BIND(brpoplpush) } },
+        { "HSET",       { -4, IS_WRITE, BIND(hset) } },
+        { "HSETNX",     { -4, IS_WRITE, BIND(hsetnx) } },
+        { "HGET",       { -3, IS_READ,  BIND(hget) } },
+        { "HEXISTS",    { -3, IS_READ,  BIND(hexists) } },
+        { "HDEL",       {  3, IS_WRITE, BIND(hdel) } },
+        { "HLEN",       { -2, IS_READ,  BIND(hlen) } },
+        { "HSTRLEN",    { -3, IS_READ,  BIND(hstrlen) } },
+        { "HINCRBY",    { -4, IS_WRITE, BIND(hincrby) } },
+        { "HMSET",      {  4, IS_WRITE, BIND(hmset) } },
+        { "HMGET",      {  3, IS_READ,  BIND(hmget) } },
+        { "HKEYS",      { -2, IS_READ,  BIND(hkeys) } },
+        { "HVALS",      { -2, IS_READ,  BIND(hvals) } },
+        { "HGETALL",    { -2, IS_READ,  BIND(hgetall) } },
     };
 }
 
@@ -91,6 +104,11 @@ void DB::set_builtin_keys()
     s = db->Get(leveldb::ReadOptions(), builtin_keys.size, &value);
     if (s.IsNotFound()) {
         s = db->Put(leveldb::WriteOptions(), builtin_keys.size, "0");
+        assert(s.ok());
+    }
+    s = db->Get(leveldb::ReadOptions(), builtin_keys.seq, &value);
+    if (s.IsNotFound()) {
+        s = db->Put(leveldb::WriteOptions(), builtin_keys.seq, "0");
         assert(s.ok());
     }
 }
@@ -118,10 +136,19 @@ void DB::keys(context_t& con)
 void DB::del(context_t& con)
 {
     int dels = 0;
+    std::string value;
+    leveldb::WriteBatch batch;
     for (size_t i = 1; i < con.argv.size(); i++) {
-        del_key_with_expire(con.argv[i]);
-        dels++;
+        auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(con.argv[i]), &value);
+        if (s.ok()) {
+            auto err = del_key_with_expire_batch(&batch, con.argv[i]);
+            if (err) reterr(con, s);
+            dels++;
+        } else if (!s.IsNotFound())
+            reterr(con, s);
     }
+    auto s = db->Write(leveldb::WriteOptions(), &batch);
+    check_status(con, s);
     con.append_reply_number(dels);
 }
 
@@ -146,7 +173,7 @@ errstr_t DB::del_key(const key_t& key)
     switch (type) {
     case ktype::tstring: return del_string_key(key);
     case ktype::tlist: return del_list_key(key);
-    // case ktype::thash: return del_hash_key(key);
+    case ktype::thash: return del_hash_key(key);
     // case ktype::tset: return del_set_key(key);
     // case ktype::tzset: return del_zset_key(key);
     }
@@ -164,9 +191,21 @@ errstr_t DB::del_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     switch (type) {
     case ktype::tstring: return del_string_key_batch(batch, key);
     case ktype::tlist: return del_list_key_batch(batch, key);
-    // case ktype::thash: return del_hash_key_batch(batch, key);
+    case ktype::thash: return del_hash_key_batch(batch, key);
     // case ktype::tset: return del_set_key_batch(batch, key);
     // case ktype::tzset: return del_zset_key_batch(batch, key);
     }
     assert(0);
+}
+
+size_t DB::get_next_seq()
+{
+    size_t seq;
+    std::string value;
+    auto s = db->Get(leveldb::ReadOptions(), builtin_keys.seq, &value);
+    assert(s.ok());
+    seq = atoll(value.c_str());
+    s = db->Put(leveldb::WriteOptions(), builtin_keys.seq, i2s(seq + 1));
+    assert(s.ok());
+    return seq;
 }

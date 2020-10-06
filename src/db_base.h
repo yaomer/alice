@@ -118,6 +118,7 @@ struct context_t {
     {
         append("-ERR ");
         append(s);
+        append("\r\n");
     }
     void reserve_multi_head()
     {

@@ -145,6 +145,20 @@ public:
     // void blpop(context_t& con);
     // void brpop(context_t& con);
     // void brpoplpush(context_t& con);
+
+    void hset(context_t& con);
+    void hsetnx(context_t& con);
+    void hget(context_t& con);
+    void hexists(context_t& con);
+    void hdel(context_t& con);
+    void hlen(context_t& con);
+    void hstrlen(context_t& con);
+    void hincrby(context_t& con);
+    void hmset(context_t& con);
+    void hmget(context_t& con);
+    void hkeys(context_t& con);
+    void hvals(context_t& con);
+    void hgetall(context_t& con);
 private:
     void set_builtin_keys();
     bool is_not_type(const std::string& value, int type)
@@ -156,16 +170,19 @@ private:
     errstr_t del_list_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     errstr_t del_string_key(const key_t& key);
     errstr_t del_string_key_batch(leveldb::WriteBatch *batch, const key_t& key);
-    // errstr_t del_hash_key(const key_t& key);
-    // errstr_t del_hash_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    errstr_t del_hash_key(const key_t& key);
+    errstr_t del_hash_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     // errstr_t del_set_key(const key_t& key);
     // errstr_t del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     // errstr_t del_zset_key(const key_t& key);
     // errstr_t del_zset_key_batch(leveldb::WriteBatch *batch, const key_t& key);
 
+    size_t get_next_seq();
+
     void _lpushx(context_t& con, bool is_lpushx);
     void _lpop(context_t& con, bool is_lpop);
     void _incr(context_t& con, int64_t incr);
+    void _hget(context_t& con, int what);
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;
@@ -175,6 +192,7 @@ private:
 struct builtin_keys_t {
     const char *location = "@"; // 定位主键的起始位置
     const char *size = "$size$"; // 存储的总键数
+    const char *seq = "$seq$";
 };
 
 extern builtin_keys_t builtin_keys;
