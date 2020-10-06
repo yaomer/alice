@@ -321,14 +321,10 @@ void DB::getrange(context_t& con)
 
 errstr_t DB::del_string_key(const key_t& key)
 {
-    std::string value;
-    auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
-    if (s.IsNotFound()) return std::nullopt;
-    if (!s.ok()) return s;
     leveldb::WriteBatch batch;
-    batch.Delete(encode_meta_key(key));
-    batch.Delete(encode_string_key(key));
-    s = db->Write(leveldb::WriteOptions(), &batch);
+    auto err = del_string_key_batch(&batch, key);
+    if (err) return err;
+    auto s = db->Write(leveldb::WriteOptions(), &batch);
     if (s.ok()) return std::nullopt;
     return s;
 }

@@ -482,19 +482,10 @@ void DB::ltrim(context_t& con)
 
 errstr_t DB::del_list_key(const key_t& key)
 {
-    std::string value;
-    auto meta_key = encode_meta_key(key);
-    auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
-    if (s.IsNotFound()) return std::nullopt;
-    if (!s.ok()) return s;
-    int li, ri, size;
-    decode_list_meta_value(value, li, ri, size);
     leveldb::WriteBatch batch;
-    for ( ; li < ri; li++) {
-        batch.Delete(encode_list_key(key, li));
-    }
-    batch.Delete(meta_key);
-    s = db->Write(leveldb::WriteOptions(), &batch);
+    auto err = del_list_key_batch(&batch, key);
+    if (err) return err;
+    auto s = db->Write(leveldb::WriteOptions(), &batch);
     if (s.ok()) return std::nullopt;
     return s;
 }

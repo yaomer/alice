@@ -323,7 +323,6 @@ void DB::hmget(context_t& con)
 #define HGETVALUES   1
 #define HGETALL      2
 
-#include <iostream>
 // HKEYS/HVALS/HGETALL key
 void DB::_hget(context_t& con, int what)
 {
@@ -376,24 +375,10 @@ void DB::hgetall(context_t& con)
 
 errstr_t DB::del_hash_key(const std::string& key)
 {
-    size_t seq, size;
-    std::string value;
-    auto meta_key = encode_meta_key(key);
-    auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
-    if (s.IsNotFound()) return std::nullopt;
-    if (!s.ok()) return s;
-    decode_hash_meta_value(value, &seq, &size);
-    auto anchor = get_hash_anchor(seq);
-    s = db->Get(leveldb::ReadOptions(), anchor, &value);
-    if (!s.ok()) return s;
     leveldb::WriteBatch batch;
-    auto it = db->NewIterator(leveldb::ReadOptions());
-    for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
-        batch.Delete(it->key());
-    }
-    batch.Delete(meta_key);
-    batch.Delete(anchor);
-    s = db->Write(leveldb::WriteOptions(), &batch);
+    auto err = del_hash_key_batch(&batch, key);
+    if (err) return err;
+    auto s = db->Write(leveldb::WriteOptions(), &batch);
     if (!s.ok()) return s;
     return std::nullopt;
 }
