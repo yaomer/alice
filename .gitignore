@@ -9,3 +9,6 @@ alice-cli
 alice-proxy
 libalice-api.a
 configure.h
+.testdb
+master.conf
+slave.conf
