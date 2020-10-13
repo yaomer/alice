@@ -33,6 +33,8 @@ encode_meta_key(const std::string& key)
     return buf;
 }
 
+// list-meta-value: [type][lindex][:][rindex][:][size]
+// range: [lindex, rindex]
 static inline std::string
 encode_list_meta_value(int li, int ri, int size)
 {

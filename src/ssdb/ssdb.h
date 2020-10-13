@@ -3,6 +3,7 @@
 
 #include <leveldb/db.h>
 #include <leveldb/write_batch.h>
+#include <leveldb/comparator.h>
 #include <leveldb/cache.h>
 
 #include <assert.h>
@@ -44,11 +45,11 @@ public:
     {
         set_context(conn);
     }
-    void creat_snapshot() override {  }
-    bool is_creating_snapshot() override { return 0; }
-    bool is_created_snapshot() override { return 0; }
-    std::string get_snapshot_name() override { return ""; }
-    void load_snapshot() override {  }
+    void creat_snapshot() override;
+    bool is_creating_snapshot() override;
+    bool is_created_snapshot() override;
+    std::string get_snapshot_name() override;
+    void load_snapshot() override;
     command_t *find_command(const std::string& name) override
     {
         auto it = cmdtable.find(name);
@@ -67,6 +68,27 @@ private:
     std::unique_ptr<DB> db;
 };
 
+struct keycomp : public leveldb::Comparator {
+    virtual ~keycomp() {  }
+    int Compare(const leveldb::Slice& l, const leveldb::Slice& r) const {
+        if (l[0] == 'l' && r[0] == 'l') { // compare list key
+            auto begin1 = l.data(), begin2 = r.data();
+            auto s1 = strrchr(l.data(), ':');
+            auto s2 = strrchr(r.data(), ':');
+            leveldb::Slice key1(begin1+1, s1-begin1-1), key2(begin2+1, s2-begin2-1);
+            int r = key1.compare(key2);
+            if (r) return r;
+            auto i1 = atoi(s1+1), i2 = atoi(s2+1);
+            return i1 - i2;
+        }
+        return l.compare(r);
+    }
+    const char* Name() const { return "ssdb-keycomp"; }
+    void FindShortestSeparator(std::string* start,
+                               const leveldb::Slice& limit) const {  }
+    void FindShortSuccessor(std::string* key) const {  }
+};
+
 using errstr_t = std::optional<leveldb::Status>;
 
 class DB {
@@ -74,11 +96,7 @@ public:
     using key_t = std::string;
     DB()
     {
-        leveldb::Options ops;
-        ops.create_if_missing = server_conf.ssdb_leveldb_create_if_missing;
-        ops.max_open_files = server_conf.ssdb_leveldb_max_open_files;
-        ops.max_file_size = server_conf.ssdb_leveldb_max_file_size;
-        ops.write_buffer_size = server_conf.ssdb_leveldb_write_buffer_size;
+        leveldb::Options ops = config_leveldb_options();
         auto s = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
         if (!s.ok()) log_fatal("leveldb: %s", s.ToString().c_str());
         set_builtin_keys();
@@ -86,6 +104,24 @@ public:
     ~DB()
     {
         delete db;
+    }
+    void reload()
+    {
+        delete db;
+        leveldb::Options ops = config_leveldb_options();
+        auto s = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
+        if (!s.ok()) log_fatal("leveldb: %s", s.ToString().c_str());
+        set_builtin_keys();
+    }
+    leveldb::Options config_leveldb_options()
+    {
+        leveldb::Options ops;
+        ops.create_if_missing = server_conf.ssdb_leveldb_create_if_missing;
+        ops.max_open_files = server_conf.ssdb_leveldb_max_open_files;
+        ops.max_file_size = server_conf.ssdb_leveldb_max_file_size;
+        ops.write_buffer_size = server_conf.ssdb_leveldb_write_buffer_size;
+        ops.comparator = &comp;
+        return ops;
     }
 
     void add_expire_key(const key_t& key, int64_t expire)
@@ -186,6 +222,7 @@ private:
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;
+    keycomp comp;
     friend engine;
 };
 

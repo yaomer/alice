@@ -67,6 +67,7 @@ struct server_conf_t {
     std::string mmdb_appendonly_file = "appendonly.aof";
     // ssdb-options
     std::string ssdb_leveldb_dbname = ".testdb";
+    std::string ssdb_snapshot_name = "ssdb-dump.tar";
     int ssdb_expire_check_keys = 20;
     bool ssdb_leveldb_create_if_missing = true;
     int ssdb_leveldb_write_buffer_size = 4 * 1024 * 1024;

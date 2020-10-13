@@ -5,13 +5,23 @@
 using namespace alice;
 using namespace alice::ssdb;
 
+static inline int get_list_index(leveldb::Slice&& key)
+{
+    return atoi(strrchr(key.data(), ':')+1);
+}
+
+static inline bool is_no_hole(int li, int ri, int size)
+{
+    return ri - li + 1 == size;
+}
+
 // LPUSH key value [value ...]
 void DB::lpush(context_t& con)
 {
     auto& key = con.argv[1];
     std::string value;
     leveldb::WriteBatch batch;
-    int li = 0, ri = 1, size = 0;
+    int li = 0, ri = 0, size = 0;
     auto meta_key = encode_meta_key(key);
     check_expire(meta_key);
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
@@ -19,7 +29,7 @@ void DB::lpush(context_t& con)
     if (s.ok()) {
         check_type(con, value, ktype::tlist);
         decode_list_meta_value(value, li, ri, size);
-        li--;
+        --li;
     }
 
     for (int i = 2; i < con.argv.size(); i++) {
@@ -47,13 +57,14 @@ void DB::rpush(context_t& con)
     if (s.ok()) {
         check_type(con, value, ktype::tlist);
         decode_list_meta_value(value, li, ri, size);
+        ++ri;
     }
 
     for (int i = 2; i < con.argv.size(); i++) {
         batch.Put(encode_list_key(key, ri++), con.argv[i]);
     }
     size += con.argv.size() - 2;
-    batch.Put(meta_key, encode_list_meta_value(li, ri, size));
+    batch.Put(meta_key, encode_list_meta_value(li, ri-1, size));
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -73,7 +84,7 @@ void DB::_lpushx(context_t& con, bool is_lpushx)
     int li, ri, size;
     leveldb::WriteBatch batch;
     decode_list_meta_value(value, li, ri, size);
-    batch.Put(encode_list_key(key, is_lpushx ? --li : ri++), con.argv[2]);
+    batch.Put(encode_list_key(key, is_lpushx ? --li : ++ri), con.argv[2]);
     batch.Put(meta_key, encode_list_meta_value(li, ri, ++size));
 
     s = db->Write(leveldb::WriteOptions(), &batch);
@@ -107,32 +118,32 @@ void DB::_lpop(context_t& con, bool is_lpop)
     int li, ri, size;
     leveldb::WriteBatch batch;
     decode_list_meta_value(value, li, ri, size);
-    // find poped-key
-    while (true) {
-        value.clear();
-        auto enc_key = encode_list_key(key, is_lpop ? li++ : --ri);
-        s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-        if (s.IsNotFound()) {
-            if (li == ri) {
-                s = db->Delete(leveldb::WriteOptions(), meta_key);
-                check_status(con, s);
-                ret(con, shared.nil);
-            }
-        } else {
-            check_status(con, s);
-            batch.Delete(enc_key);
-            break;
-        }
-    }
-    if (li == ri) { // the last one
+
+    value.clear();
+    auto enc_key = encode_list_key(key, is_lpop ? li : ri);
+    s = db->Get(leveldb::ReadOptions(), enc_key, &value);
+    check_status(con, s);
+    if (size == 1) { // last one
         batch.Delete(meta_key);
     } else {
+        if (is_no_hole(li, ri, size)) {
+            is_lpop ? ++li : --ri;
+        } else {
+            auto it = db->NewIterator(leveldb::ReadOptions());
+            it->Seek(enc_key);
+            assert(it->Valid());
+            is_lpop ? it->Next() : it->Prev();
+            assert(it->Valid());
+            if (is_lpop) li = get_list_index(it->key());
+            else ri = get_list_index(it->key());
+        }
         batch.Put(meta_key, encode_list_meta_value(li, ri, --size));
     }
+    batch.Delete(enc_key);
+
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     con.append_reply_string(value);
-
 }
 
 // LPOP key
@@ -184,22 +195,14 @@ void DB::lrange(context_t& con)
     int lower = -size;
     if (dbserver::check_range(con, start, stop, lower, upper) == C_ERR)
         return;
-    int nums = 0;
     int ranges = stop - start + 1;
-    con.reserve_multi_head();
-    for (li += start; ; li++) {
-        value.clear();
-        s = db->Get(leveldb::ReadOptions(), encode_list_key(key, li), &value);
-        if (s.IsNotFound()) continue;
-        if (s.ok()) {
-            con.append_reply_string(value);
-            nums++;
-        } else
-            adderr(con, s);
+    con.append_reply_multi(ranges);
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(encode_list_key(key, li+start)); it->Valid(); it->Next()) {
+        con.append_reply_string(it->value().ToString());
         if (--ranges == 0)
             break;
     }
-    con.set_multi_head(nums);
 }
 
 // RPOPLPUSH source destination
@@ -221,25 +224,37 @@ void DB::rpoplpush(context_t& con)
     int li, ri, size;
     decode_list_meta_value(src_value, li, ri, size);
     src_value.clear();
-    auto enc_key = encode_list_key(src_key, --ri);
+    auto enc_key = encode_list_key(src_key, ri);
     s = db->Get(leveldb::ReadOptions(), enc_key, &src_value);
     check_status(con, s);
-    if (li == ri) {
-        batch.Delete(src_key);
+    batch.Delete(enc_key);
+    if (size == 1) { // last one
+        batch.Delete(src_meta_key);
     } else {
+        if (is_no_hole(li, ri, size)) {
+            --ri;
+        } else {
+            auto it = db->NewIterator(leveldb::ReadOptions());
+            it->Seek(enc_key);
+            assert(it->Valid());
+            it->Prev();
+            assert(it->Valid());
+            ri = get_list_index(it->key());
+        }
         batch.Put(src_meta_key, encode_list_meta_value(li, ri, --size));
     }
-    batch.Delete(enc_key);
     // put src_value to des_key
-    li = 0;
-    ri = 1;
-    size = 0;
-    s = db->Get(leveldb::ReadOptions(), des_meta_key, &des_value);
-    if (!s.IsNotFound() && !s.ok()) reterr(con, s);
-    if (s.ok()) {
-        check_type(con, des_value, ktype::tlist);
-        decode_list_meta_value(des_value, li, ri, size);
-        li--;
+    if (src_key == des_key) {
+        --li;
+    } else {
+        li = ri = size = 0;
+        s = db->Get(leveldb::ReadOptions(), des_meta_key, &des_value);
+        if (!s.IsNotFound() && !s.ok()) reterr(con, s);
+        if (s.ok()) {
+            check_type(con, des_value, ktype::tlist);
+            decode_list_meta_value(des_value, li, ri, size);
+            --li;
+        }
     }
     batch.Put(encode_list_key(des_key, li), src_value);
     batch.Put(des_meta_key, encode_list_meta_value(li, ri, ++size));
@@ -265,83 +280,69 @@ void DB::lrem(context_t& con)
     int rems = 0, li, ri, size;
     leveldb::WriteBatch batch;
     decode_list_meta_value(value, li, ri, size);
-    // 因为可能会在中间删除元素，所以需要记录边界用以更新索引范围
-    int left; // 最左边的未被删除的元素索引
-    int right; // 最右边的未被删除的元素索引
+    // 因为可能会在中间删除元素，所以需要更新索引范围[li, ri]
     bool update = false;
+    auto it = db->NewIterator(leveldb::ReadOptions());
     if (count > 0) {
-        for ( ; li < ri; li++) {
-            value.clear();
-            auto enc_key = encode_list_key(key, li);
-            s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-            if (s.IsNotFound()) continue;
-            if (!s.ok()) adderr(con, s);
-            if (value == con.argv[3]) {
-                batch.Delete(enc_key);
-                rems++;
+        for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+            if (it->value() == con.argv[3]) {
+                batch.Delete(it->key());
+                ++rems;
                 if (--count == 0) {
-                    if (!update) { // 恰好删除了最左边的几个元素
-                        left = li + 1;
-                        right = ri;
+                    if (!update && rems != size) { // 恰好删除了最左边的几个元素
+                        it->Next();
+                        assert(it->Valid());
+                        li = get_list_index(it->key());
                     }
                     break;
                 }
             } else {
                 if (!update) {
                     update = true;
-                    left = li;
+                    li = get_list_index(it->key());
                 }
-                right = li + 1;
+                ri = get_list_index(it->key());
             }
         }
     } else if (count < 0) {
-        for (ri--; ri >= li; ri--) {
-            value.clear();
-            auto enc_key = encode_list_key(key, ri);
-            s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-            if (s.IsNotFound()) continue;
-            if (!s.ok()) adderr(con, s);
-            if (value == con.argv[3]) {
-                batch.Delete(enc_key);
-                rems++;
+        for (it->Seek(encode_list_key(key, ri)); it->Valid(); it->Prev()) {
+            if (it->value() == con.argv[3]) {
+                batch.Delete(it->key());
+                ++rems;
                 if (++count == 0) {
-                    if (!update) { // 恰好删除了最右边的几个元素
-                        right = ri + 1;
-                        left = li;
+                    if (!update && rems != size) { // 恰好删除了最右边的几个元素
+                        it->Prev();
+                        assert(it->Valid());
+                        ri = get_list_index(it->key());
                     }
                     break;
                 }
             } else {
                 if (!update) {
                     update = true;
-                    right = ri + 1;
+                    ri = get_list_index(it->key());
                 }
-                left = ri;
+                li = get_list_index(it->key());
             }
         }
     } else {
-        for ( ; li < ri; li++) {
-            value.clear();
-            auto enc_key = encode_list_key(key, li);
-            s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-            if (s.IsNotFound()) continue;
-            if (!s.ok()) adderr(con, s);
-            if (value == con.argv[3]) {
-                batch.Delete(enc_key);
-                rems++;
+        for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+            if (it->value() == con.argv[3]) {
+                batch.Delete(it->key());
+                ++rems;
             } else {
                 if (!update) {
                     update = true;
-                    left = li;
+                    li = get_list_index(it->key());
                 }
-                right = li + 1;
+                ri = get_list_index(it->key());
             }
         }
     }
     if (rems == size) {
         batch.Delete(meta_key);
     } else {
-        batch.Put(meta_key, encode_list_meta_value(left, right, size-rems));
+        batch.Put(meta_key, encode_list_meta_value(li, ri, size-rems));
     }
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -367,9 +368,9 @@ void DB::lindex(context_t& con)
     decode_list_meta_value(value, li, ri, size);
     if (index < 0)
         index += size;
-    if (index >= size)
+    if (index < 0 || index >= size)
         ret(con, shared.nil);
-    if (size == li - ri) {
+    if (is_no_hole(li, ri, size)) {
         value.clear();
         auto enc_key = encode_list_key(key, index);
         s = db->Get(leveldb::ReadOptions(), enc_key, &value);
@@ -377,17 +378,14 @@ void DB::lindex(context_t& con)
         con.append_reply_string(value);
         return;
     }
-    for ( ; ; ) {
-        value.clear();
-        auto enc_key = encode_list_key(key, li++);
-        s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-        if (s.IsNotFound()) continue;
-        check_status(con, s);
-        if (--index == 0) { // found
-            con.append_reply_string(value);
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+        if (--index == -1) {
+            con.append_reply_string(it->value().ToString());
             break;
         }
     }
+    assert(index == -1);
 }
 
 // LSET key index value
@@ -405,25 +403,23 @@ void DB::lset(context_t& con)
     check_type(con, value, ktype::tlist);
 
     int li, ri, size;
+    std::string enc_key;
     decode_list_meta_value(value, li, ri, size);
     if (index < 0)
         index += size;
-    if (index >= size)
+    if (index < 0 || index >= size)
         ret(con, shared.index_out_of_range);
-    std::string enc_key;
-    if (size == li - ri) {
+    if (is_no_hole(li, ri, size)) {
         enc_key = encode_list_key(key, index);
     } else {
-        for ( ; ; ) {
-            value.clear();
-            enc_key = encode_list_key(key, li++);
-            s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-            if (s.IsNotFound()) continue;
-            check_status(con, s);
-            if (--index == 0) { // found
+        auto it = db->NewIterator(leveldb::ReadOptions());
+        for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+            if (--index == -1) {
+                enc_key = it->key().ToString();
                 break;
             }
         }
+        assert(index == -1);
     }
     s = db->Put(leveldb::WriteOptions(), enc_key, con.argv[3]);
     check_status(con, s);
@@ -458,22 +454,18 @@ void DB::ltrim(context_t& con)
         ret(con, shared.ok);
     }
     int i = 0;
-    int left, right;
     leveldb::WriteBatch batch;
-    for ( ; li < ri; li++) {
-        value.clear();
-        auto enc_key = encode_list_key(key, li);
-        s = db->Get(leveldb::ReadOptions(), enc_key, &value);
-        if (s.IsNotFound()) continue;
-        check_status(con, s);
-        if (i == start) left = li;
-        if (i == stop) right = li + 1;
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+        check_status(con, it->status());
+        if (i == start) li = get_list_index(it->key());
+        if (i == stop) ri = get_list_index(it->key());
         if (i >= start && i <= stop) continue;
-        batch.Delete(enc_key);
+        batch.Delete(it->key());
         i++;
     }
     size -= stop - start;
-    batch.Put(meta_key, encode_list_meta_value(left, right, size));
+    batch.Put(meta_key, encode_list_meta_value(li, ri, size));
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     // touch_watch_key(key);
@@ -499,9 +491,13 @@ errstr_t DB::del_list_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     if (!s.ok()) return s;
     int li, ri, size;
     decode_list_meta_value(value, li, ri, size);
-    for ( ; li < ri; li++) {
-        batch->Delete(encode_list_key(key, li));
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+        batch->Delete(it->key());
+        if (--size == 0)
+            break;
     }
+    assert(size == 0);
     batch->Delete(meta_key);
     return std::nullopt;
 }

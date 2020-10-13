@@ -17,6 +17,32 @@ void engine::server_cron()
     check_expire_keys();
 }
 
+void engine::creat_snapshot()
+{
+
+}
+
+bool engine::is_creating_snapshot()
+{
+    return false;
+}
+
+bool engine::is_created_snapshot()
+{
+    return true;
+}
+
+std::string engine::get_snapshot_name()
+{
+    return server_conf.ssdb_snapshot_name;
+}
+
+void engine::load_snapshot()
+{
+    // TODO:
+    db->reload();
+}
+
 // 随机删除一定数量的过期键
 void engine::check_expire_keys()
 {

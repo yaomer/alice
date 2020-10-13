@@ -139,6 +139,8 @@ void alice::read_server_conf(const std::string& filename)
             server_conf.mmdb_appendonly_file = it[1];
         } else if (strcasecmp(it[0].c_str(), "ssdb-leveldb-dbname") == 0) {
             server_conf.ssdb_leveldb_dbname = it[1];
+        } else if (strcasecmp(it[0].c_str(), "ssdb-snapshot-name") == 0) {
+            server_conf.ssdb_snapshot_name = it[1];
         } else if (strcasecmp(it[0].c_str(), "ssdb-expire-check-keys") == 0) {
             server_conf.ssdb_expire_check_keys = atoi(it[1].c_str());
             ASSERT(server_conf.ssdb_expire_check_keys > 0, "ssdb-expire-check-keys");
