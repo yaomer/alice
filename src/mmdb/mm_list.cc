@@ -222,7 +222,7 @@ void DB::lindex(context_t& con)
     int size = list.size();
     if (index < 0)
         index += size;
-    if (index >= size) {
+    if (index < 0 || index >= size) {
         ret(con, shared.nil);
     }
     for (auto& it : list)
@@ -247,7 +247,7 @@ void DB::lset(context_t& con)
     int size = list.size();
     if (index < 0)
         index += size;
-    if (index >= size) {
+    if (index < 0 || index >= size) {
         ret(con, shared.index_out_of_range);
     }
     for (auto& it : list)

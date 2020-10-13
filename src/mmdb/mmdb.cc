@@ -75,8 +75,8 @@ bool engine::is_created_snapshot()
         pid_t pid = waitpid(rdb->get_child_pid(), nullptr, WNOHANG);
         if (pid > 0) {
             rdb->done();
+            log_info("DB saved on disk");
             return true;
-            // logInfo("DB saved on disk");
         }
     }
     return false;
@@ -101,7 +101,7 @@ void engine::server_cron()
         if (pid > 0) {
             aof->done();
             aof->fsync_rewrite_buffer();
-            // logInfo("Background AOF rewrite finished successfully");
+            log_info("Background AOF rewrite finished successfully");
         }
     }
 
@@ -118,7 +118,7 @@ void engine::server_cron()
         int changes = std::get<1>(it);
         if (save_interval >= seconds && dirty >= changes) {
             if (!rdb->doing() && !aof->doing()) {
-                // logInfo("%d changes in %d seconds. Saving...", changes, seconds);
+                log_info("%d changes in %d seconds. Saving...", changes, seconds);
                 rdb->save_background();
                 last_save_time = now;
                 dirty = 0;
