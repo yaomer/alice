@@ -31,10 +31,6 @@ namespace alice {
     static unsigned char hash_type = 3;
     static unsigned char zset_type = 4;
     static unsigned char expire_key = 5;
-    static unsigned char rdb_6bit_len = 0;
-    static unsigned char rdb_14bit_len = 1;
-    static unsigned char rdb_32bit_len = 0x80;
-    static unsigned char rdb_64bit_len = 0x81;
     static unsigned char compress_value = 0;
     static unsigned char uncompress_value = 1;
 }
@@ -116,59 +112,9 @@ void Rdb::save_background()
     }
 }
 
-// 借用redis中的两个编解码长度的函数
 int Rdb::save_len(uint64_t len)
 {
-    unsigned char buf[2];
-    size_t write_bytes = 0;
-
-    if (len < (1 << 6)) {
-        buf[0] = (len & 0xff) | (rdb_6bit_len << 6);
-        append(buf, 1);
-        write_bytes = 1;
-    } else if (len < (1 << 14)) {
-        buf[0] = ((len >> 8) & 0xff) | (rdb_14bit_len << 6);
-        buf[1] = len & 0xff;
-        append(buf, 2);
-        write_bytes = 2;
-    } else if (len <= UINT32_MAX) {
-        buf[0] = rdb_32bit_len;
-        append(buf, 1);
-        uint32_t len32 = htonl(len);
-        append(&len32, 4);
-        write_bytes = 1 + 4;
-    } else {
-        buf[0] = rdb_64bit_len;
-        append(buf, 1);
-        append(&len, 8);
-        write_bytes = 1 + 8;
-    }
-    return write_bytes;
-}
-
-int Rdb::load_len(char *ptr, uint64_t *lenptr)
-{
-    unsigned char buf[2] = {
-        static_cast<unsigned char>(ptr[0]), 0 };
-    int type = (buf[0] & 0xc0) >> 6;
-    size_t read_bytes = 0;
-
-    if (type == rdb_6bit_len) {
-        *lenptr = buf[0] & 0x3f;
-        read_bytes = 1;
-    } else if (type == rdb_14bit_len) {
-        buf[1] = static_cast<unsigned char>(ptr[1]);
-        *lenptr = ((buf[0] & 0x3f) << 8) | buf[1];
-        read_bytes = 2;
-    } else if (type == rdb_32bit_len) {
-        uint32_t len32 = *reinterpret_cast<uint32_t*>(&ptr[1]);
-        *lenptr = ntohl(len32);
-        read_bytes = 5;
-    } else {
-        *lenptr = *reinterpret_cast<uint64_t*>(&ptr[1]);
-        read_bytes = 8;
-    }
-    return read_bytes;
+    return alice::save_len(buffer, len);
 }
 
 void Rdb::save_key(const std::string& key)

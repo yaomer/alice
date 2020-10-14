@@ -28,7 +28,6 @@ public:
     void load();
 private:
     int save_len(uint64_t len);
-    int load_len(char *ptr, uint64_t *lenptr);
     void save_key(const std::string& key);
     void save_value(const std::string& value);
     void save_string(const iterator& it);

@@ -99,6 +99,9 @@ unsigned inline round_up_power_of_2(unsigned n)
     return n + 1;
 }
 
+int save_len(std::string& s, uint64_t len);
+int load_len(char *ptr, uint64_t *lenptr);
+
 #define UNUSED(x) ((void)(x))
 
 }

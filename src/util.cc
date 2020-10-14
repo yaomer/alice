@@ -294,4 +294,68 @@ ssize_t get_proc_memory()
 #endif
 }
 
+static unsigned char __6bit_len = 0;
+static unsigned char __14bit_len = 1;
+static unsigned char __32bit_len = 0x80;
+static unsigned char __64bit_len = 0x81;
+
+#define APPEND(data, len) s.append(reinterpret_cast<const char*>(data), len)
+
+// 借用redis中的两个编解码长度的函数
+int save_len(std::string& s, uint64_t len)
+{
+    unsigned char buf[2];
+    size_t write_bytes = 0;
+
+    if (len < (1 << 6)) {
+        buf[0] = (len & 0xff) | (__6bit_len << 6);
+        APPEND(buf, 1);
+        write_bytes = 1;
+    } else if (len < (1 << 14)) {
+        buf[0] = ((len >> 8) & 0xff) | (__14bit_len << 6);
+        buf[1] = len & 0xff;
+        APPEND(buf, 2);
+        write_bytes = 2;
+    } else if (len <= UINT32_MAX) {
+        buf[0] = __32bit_len;
+        APPEND(buf, 1);
+        uint32_t len32 = htonl(len);
+        APPEND(&len32, 4);
+        write_bytes = 1 + 4;
+    } else {
+        buf[0] = __64bit_len;
+        APPEND(buf, 1);
+        APPEND(&len, 8);
+        write_bytes = 1 + 8;
+    }
+    return write_bytes;
+}
+
+#undef APPEND
+
+int load_len(char *ptr, uint64_t *lenptr)
+{
+    unsigned char buf[2] = {
+        static_cast<unsigned char>(ptr[0]), 0 };
+    int type = (buf[0] & 0xc0) >> 6;
+    size_t read_bytes = 0;
+
+    if (type == __6bit_len) {
+        *lenptr = buf[0] & 0x3f;
+        read_bytes = 1;
+    } else if (type == __14bit_len) {
+        buf[1] = static_cast<unsigned char>(ptr[1]);
+        *lenptr = ((buf[0] & 0x3f) << 8) | buf[1];
+        read_bytes = 2;
+    } else if (type == __32bit_len) {
+        uint32_t len32 = *reinterpret_cast<uint32_t*>(&ptr[1]);
+        *lenptr = ntohl(len32);
+        read_bytes = 5;
+    } else {
+        *lenptr = *reinterpret_cast<uint64_t*>(&ptr[1]);
+        read_bytes = 8;
+    }
+    return read_bytes;
+}
+
 }
