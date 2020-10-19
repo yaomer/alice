@@ -5,6 +5,23 @@
 using namespace alice;
 using namespace alice::ssdb;
 
+static inline std::string
+encode_string_meta_value()
+{
+    std::string buf;
+    buf.append(1, ktype::tstring);
+    return buf;
+}
+
+static inline std::string
+encode_string_key(const std::string& key)
+{
+    std::string buf;
+    buf.append(1, ktype::tstring);
+    buf.append(key);
+    return buf;
+}
+
 // SET key value
 void DB::set(context_t& con)
 {

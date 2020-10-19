@@ -5,6 +5,41 @@
 using namespace alice;
 using namespace alice::ssdb;
 
+// list-meta-value: [type][lindex][:][rindex][:][size]
+// range: [lindex, rindex]
+static inline std::string
+encode_list_meta_value(int li, int ri, int size)
+{
+    std::string buf;
+    buf.append(1, ktype::tlist);
+    buf.append(i2s(li));
+    buf.append(1, ':');
+    buf.append(i2s(ri));
+    buf.append(1, ':');
+    buf.append(i2s(size));
+    return buf;
+}
+
+static inline void
+decode_list_meta_value(const std::string& value, int& li, int& ri, int& size)
+{
+    const char *s = value.c_str() + 1;
+    li = atoi(s);
+    ri = atoi(strchr(s, ':') + 1);
+    size = atoi(strrchr(s, ':') + 1);
+}
+
+static inline std::string
+encode_list_key(const std::string& key, int number)
+{
+    std::string buf;
+    buf.append(1, ktype::tlist);
+    buf.append(key);
+    buf.append(1, ':');
+    buf.append(i2s(number));
+    return buf;
+}
+
 static inline int get_list_index(leveldb::Slice&& key)
 {
     return atoi(strrchr(key.data(), ':')+1);

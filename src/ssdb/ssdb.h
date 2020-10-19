@@ -16,8 +16,6 @@
 #include "../db_base.h"
 #include "../config.h"
 
-#include "coder.h"
-
 namespace alice {
 
 namespace ssdb {
@@ -70,16 +68,30 @@ private:
 
 struct keycomp : public leveldb::Comparator {
     virtual ~keycomp() {  }
-    int Compare(const leveldb::Slice& l, const leveldb::Slice& r) const {
+    int Compare(const leveldb::Slice& l, const leveldb::Slice& r) const
+    {
         if (l[0] == 'l' && r[0] == 'l') { // compare list key
-            auto begin1 = l.data(), begin2 = r.data();
-            auto s1 = strrchr(l.data(), ':');
-            auto s2 = strrchr(r.data(), ':');
-            leveldb::Slice key1(begin1+1, s1-begin1-1), key2(begin2+1, s2-begin2-1);
+            auto begin1 = l.data() + 1, begin2 = r.data() + 1;
+            auto s1 = strrchr(begin1, ':');
+            auto s2 = strrchr(begin2, ':');
+            leveldb::Slice key1(begin1, s1-begin1), key2(begin2, s2-begin2);
             int r = key1.compare(key2);
             if (r) return r;
             auto i1 = atoi(s1+1), i2 = atoi(s2+1);
             return i1 - i2;
+        } else if (l[0] == 'z' && r[0] == 'z') {
+            uint64_t seq1, seq2;
+            auto begin1 = l.data() + 1, begin2 = r.data() + 1;
+            auto s1 = begin1 + load_len(begin1, &seq1);
+            auto s2 = begin2 + load_len(begin2, &seq2);
+            if (seq1 != seq2) return seq1 - seq2;
+            auto score1 = atof(s1), score2 = atof(s2);
+            if (score1 < score2) return -1;
+            if (score1 > score2) return 1;
+            s1 = strrchr(s1, ':') + 1;
+            s2 = strrchr(s2, ':') + 1;
+            leveldb::Slice member1(s1, begin1+l.size()-s1), member2(s2, begin2+r.size()-s2);
+            return member1.compare(member2);
         }
         return l.compare(r);
     }
@@ -231,6 +243,30 @@ struct builtin_keys_t {
     const char *size = "$size$"; // 存储的总键数
     const char *seq = "$seq$";
 };
+
+struct ktype {
+    static const char meta     = '@';
+    static const char tstring  = 's';
+    static const char tlist    = 'l';
+    static const char thash    = 'h';
+    static const char tset     = 'S';
+    static const char tzset    = 'z';
+};
+
+static inline const char
+get_type(const std::string& value)
+{
+    return value[0];
+}
+
+static inline std::string
+encode_meta_key(const std::string& key)
+{
+    std::string buf;
+    buf.append(1, ktype::meta);
+    buf.append(key);
+    return buf;
+}
 
 extern builtin_keys_t builtin_keys;
 
