@@ -3,6 +3,8 @@
 using namespace alice;
 using namespace alice::ssdb;
 
+#define HASH_ANCHOR_VAL ""
+
 static inline std::string
 encode_hash_meta_value(size_t seq, size_t size)
 {
@@ -63,7 +65,7 @@ void DB::hset(context_t& con)
         auto seq = get_next_seq();
         batch.Put(meta_key, encode_hash_meta_value(seq, 1));
         batch.Put(encode_hash_key(seq, field), con.argv[3]);
-        batch.Put(get_hash_anchor(seq), "anchor");
+        batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
         ret(con, shared.n1);
@@ -101,7 +103,7 @@ void DB::hsetnx(context_t& con)
         auto seq = get_next_seq();
         batch.Put(meta_key, encode_hash_meta_value(seq, 1));
         batch.Put(encode_hash_key(seq, field), con.argv[3]);
-        batch.Put(get_hash_anchor(seq), "anchor");
+        batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
         // touch_watch_key(key);
@@ -190,6 +192,7 @@ void DB::hdel(context_t& con)
     }
     if (dels == size) {
         batch.Delete(meta_key);
+        batch.Delete(get_hash_anchor(seq));
     } else {
         batch.Put(meta_key, encode_hash_meta_value(seq, size-dels));
     }
@@ -251,7 +254,7 @@ void DB::hincrby(context_t& con)
         size_t seq = get_next_seq();
         batch.Put(meta_key, encode_hash_meta_value(seq, 1));
         batch.Put(encode_hash_key(seq, field), incr_str);
-        batch.Put(get_hash_anchor(seq), "anchor");
+        batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
         // touch_watch_key(key);
@@ -299,7 +302,7 @@ void DB::hmset(context_t& con)
             batch.Put(encode_hash_key(seq, con.argv[i]), con.argv[i+1]);
         }
         batch.Put(meta_key, encode_hash_meta_value(seq, (size-2)/2));
-        batch.Put(get_hash_anchor(seq), "anchor");
+        batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
         ret(con, shared.ok);
@@ -366,11 +369,8 @@ void DB::_hget(context_t& con, int what)
     size_t seq, size;
     decode_hash_meta_value(value, &seq, &size);
     auto anchor = get_hash_anchor(seq);
-    s = db->Get(leveldb::ReadOptions(), anchor, &value);
-    check_status(con, s);
     con.append_reply_multi(what == HGETALL ? size * 2 : size);
     auto it = db->NewIterator(leveldb::ReadOptions());
-    it->Seek(anchor);
     for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
         switch (what) {
         case HGETKEYS:
@@ -423,8 +423,6 @@ errstr_t DB::del_hash_key_batch(leveldb::WriteBatch *batch, const std::string& k
     if (!s.ok()) return s;
     decode_hash_meta_value(value, &seq, &size);
     auto anchor = get_hash_anchor(seq);
-    s = db->Get(leveldb::ReadOptions(), anchor, &value);
-    if (!s.ok()) return s;
     auto it = db->NewIterator(leveldb::ReadOptions());
     for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
         batch->Delete(it->key());
