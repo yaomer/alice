@@ -1,7 +1,5 @@
 #include "internal.h"
 
-#include "../server.h"
-
 using namespace alice;
 using namespace alice::ssdb;
 
@@ -331,7 +329,7 @@ void DB::getrange(context_t& con)
     check_status(con, s);
     int upper = value.size() - 1;
     int lower = -value.size();
-    if (dbserver::check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
     con.append_reply_string(value.substr(start, stop-start+1));
 }

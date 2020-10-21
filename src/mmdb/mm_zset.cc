@@ -1,7 +1,5 @@
 #include "internal.h"
 
-#include "../server.h"
-
 using namespace alice;
 using namespace alice::mmdb;
 
@@ -147,7 +145,7 @@ void DB::_zrange(context_t& con, bool reverse)
     auto& zset = get_zset_value(it);
     int upper = zset.size() - 1;
     int lower = -zset.size();
-    if (dbserver::check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
     if (withscores)
         con.append_reply_multi((stop - start + 1) * 2);
@@ -479,7 +477,7 @@ void DB::zremrangebyrank(context_t& con)
     auto& zset = get_zset_value(it);
     int upper = zset.size() - 1;
     int lower = -zset.size();
-    if (dbserver::check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
     int i = 0, rems = 0;
     for (auto it = zset.zmap.begin(); it != zset.zmap.end(); i++) {

@@ -1,4 +1,3 @@
-#include "db_base.h"
 #include "parser.h"
 
 namespace alice {
@@ -44,6 +43,31 @@ integer_err:
 timeout_err:
     con.append(shared.timeout_err);
     return C_ERR;
+}
+
+int check_range(context_t& con, int& start, int& stop, int lower, int upper)
+{
+    if (start > upper || stop < lower) {
+        con.append(shared.nil);
+        return C_ERR;
+    }
+    if (start < 0 && start >= lower) {
+        start += upper + 1;
+    }
+    if (stop < 0 && stop >= lower) {
+        stop += upper + 1;
+    }
+    if (start < lower) {
+        start = 0;
+    }
+    if (stop > upper) {
+        stop = upper;
+    }
+    if (start > stop) {
+        con.append(shared.nil);
+        return C_ERR;
+    }
+    return C_OK;
 }
 
 }

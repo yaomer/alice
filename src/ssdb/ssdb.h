@@ -81,7 +81,8 @@ struct keycomp : public leveldb::Comparator {
             return i1 - i2;
         } else if (l[0] == 'z' && r[0] == 'z') {
             uint64_t seq1, seq2;
-            auto begin1 = l.data() + 1, begin2 = r.data() + 1;
+            auto begin1 = const_cast<char*>(l.data()) + 1;
+            auto begin2 = const_cast<char*>(r.data()) + 1;
             auto s1 = begin1 + load_len(begin1, &seq1);
             auto s2 = begin2 + load_len(begin2, &seq2);
             if (seq1 != seq2) return seq1 - seq2;

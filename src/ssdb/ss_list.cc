@@ -1,7 +1,5 @@
 #include "internal.h"
 
-#include "../server.h"
-
 using namespace alice;
 using namespace alice::ssdb;
 
@@ -228,7 +226,7 @@ void DB::lrange(context_t& con)
     decode_list_meta_value(value, li, ri, size);
     int upper = size - 1;
     int lower = -size;
-    if (dbserver::check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
     int ranges = stop - start + 1;
     con.append_reply_multi(ranges);

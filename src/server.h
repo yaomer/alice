@@ -163,8 +163,6 @@ public:
     void config(context_t& con);
     // info command
     void info(context_t& con);
-
-    static int check_range(context_t& con, int& start, int& stop, int lower, int upper);
 private:
     size_t pub_message(const std::string& message, const std::string& channel);
     void sub_channel(const std::string& channel, size_t id);
