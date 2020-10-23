@@ -116,6 +116,18 @@ engine::engine()
         { "HKEYS",      { -2, IS_READ,  BIND(hkeys) } },
         { "HVALS",      { -2, IS_READ,  BIND(hvals) } },
         { "HGETALL",    { -2, IS_READ,  BIND(hgetall) } },
+        { "SADD",       {  3, IS_WRITE, BIND(sadd) } },
+        { "SISMEMBER",  { -3, IS_READ,  BIND(sismember) } },
+        { "SPOP",       { -2, IS_WRITE, BIND(spop) } },
+        { "SRANDMEMBER",{  2, IS_READ,  BIND(srandmember) } },
+        { "SREM",       {  3, IS_WRITE, BIND(srem)  } },
+        { "SMOVE",      { -4, IS_WRITE, BIND(smove) } },
+        { "SCARD",      { -2, IS_READ,  BIND(scard) } },
+        { "SMEMBERS",   { -2, IS_READ,  BIND(smembers) } },
+        { "SINTER",     {  2, IS_READ,  BIND(sinter) } },
+        { "SINTERSTORE",{  3, IS_WRITE, BIND(sinterstore) } },
+        { "SUNION",     {  2, IS_READ,  BIND(sunion) } },
+        { "SUNIONSTORE",{  3, IS_WRITE, BIND(sunionstore) } },
     };
 }
 
@@ -150,8 +162,8 @@ void DB::keys(context_t& con)
     assert(it->Valid());
     for (it->Next(); it->Valid(); it->Next()) {
         auto key = it->key();
-        if (key[0] != '@') break;
-        key.remove_prefix(1); // remove prefix '@'
+        if (key[0] != ktype::meta) break;
+        key.remove_prefix(1);
         con.append_reply_string(key.ToString());
         nums++;
     }
@@ -200,7 +212,7 @@ errstr_t DB::del_key(const key_t& key)
     case ktype::tstring: return del_string_key(key);
     case ktype::tlist: return del_list_key(key);
     case ktype::thash: return del_hash_key(key);
-    // case ktype::tset: return del_set_key(key);
+    case ktype::tset: return del_set_key(key);
     // case ktype::tzset: return del_zset_key(key);
     }
     assert(0);
@@ -218,7 +230,7 @@ errstr_t DB::del_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     case ktype::tstring: return del_string_key_batch(batch, key);
     case ktype::tlist: return del_list_key_batch(batch, key);
     case ktype::thash: return del_hash_key_batch(batch, key);
-    // case ktype::tset: return del_set_key_batch(batch, key);
+    case ktype::tset: return del_set_key_batch(batch, key);
     // case ktype::tzset: return del_zset_key_batch(batch, key);
     }
     assert(0);

@@ -208,12 +208,23 @@ public:
     void hkeys(context_t& con);
     void hvals(context_t& con);
     void hgetall(context_t& con);
+
+    void sadd(context_t& con);
+    void sismember(context_t& con);
+    void spop(context_t& con);
+    void srandmember(context_t& con);
+    void srem(context_t& con);
+    void smove(context_t& con);
+    void scard(context_t& con);
+    void smembers(context_t& con);
+    void sinter(context_t& con);
+    void sinterstore(context_t& con);
+    void sunion(context_t& con);
+    void sunionstore(context_t& con);
+    void sdiff(context_t& con);
+    void sdiffstore(context_t& con);
 private:
     void set_builtin_keys();
-    bool is_not_type(const std::string& value, int type)
-    {
-        return atoi(value.c_str()) != type;
-    }
     // return err-str if error else return null
     errstr_t del_list_key(const key_t& key);
     errstr_t del_list_key_batch(leveldb::WriteBatch *batch, const key_t& key);
@@ -221,8 +232,8 @@ private:
     errstr_t del_string_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     errstr_t del_hash_key(const key_t& key);
     errstr_t del_hash_key_batch(leveldb::WriteBatch *batch, const key_t& key);
-    // errstr_t del_set_key(const key_t& key);
-    // errstr_t del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    errstr_t del_set_key(const key_t& key);
+    errstr_t del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     // errstr_t del_zset_key(const key_t& key);
     // errstr_t del_zset_key_batch(leveldb::WriteBatch *batch, const key_t& key);
 
@@ -232,6 +243,9 @@ private:
     void _lpop(context_t& con, bool is_lpop);
     void _incr(context_t& con, int64_t incr);
     void _hget(context_t& con, int what);
+    void _sinter(context_t& con, std::unordered_set<std::string>& rset, int start);
+    void _sunion(context_t& con, std::unordered_set<std::string>& rset, int start);
+    void _sstore(context_t& con, std::unordered_set<std::string>& rset);
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;

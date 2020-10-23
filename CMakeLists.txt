@@ -32,6 +32,7 @@ set (SERVER_SRC
     ${SSDB}/ss_list.cc
     ${SSDB}/ss_string.cc
     ${SSDB}/ss_hash.cc
+    ${SSDB}/ss_set.cc
 )
 
 set (CLIENT_SRC
