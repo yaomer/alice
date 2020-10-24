@@ -2,6 +2,7 @@
 
 #include "../server.h"
 
+using namespace alice;
 using namespace alice::ssdb;
 
 #define BIND(f) std::bind(&DB::f, db.get(), std::placeholders::_1)
@@ -71,8 +72,18 @@ engine::engine()
     : db(new DB())
 {
     cmdtable = {
-        { "KEYS",       { -2, IS_READ,  BIND(keys) } },
+        { "EXISTS",     { -2, IS_READ,  BIND(exists) } },
+        { "TYPE",       { -2, IS_READ,  BIND(type) } },
+        { "TTL",        { -2, IS_READ,  BIND(ttl) } },
+        { "PTTL",       { -2, IS_READ,  BIND(pttl) } },
+        { "EXPIRE",     { -3, IS_WRITE, BIND(expire) } },
+        { "PEXPIRE",    { -3, IS_WRITE, BIND(pexpire) } },
         { "DEL",        {  2, IS_WRITE, BIND(del) } },
+        { "KEYS",       { -2, IS_READ,  BIND(keys) } },
+        { "FLUSHDB",    { -1, IS_WRITE, BIND(flushdb) } },
+        { "FLUSHALL",   { -1, IS_WRITE, BIND(flushall) } },
+        { "RENAME",     { -3, IS_WRITE, BIND(rename) } },
+        { "RENAMENX",   { -3, IS_WRITE, BIND(renamenx) } },
         { "SET",        {  3, IS_WRITE, BIND(set) } },
         { "SETNX",      { -3, IS_WRITE, BIND(setnx) } },
         { "GET",        { -2, IS_READ,  BIND(get) } },
@@ -151,6 +162,162 @@ void DB::set_builtin_keys()
     }
 }
 
+void DB::clear()
+{
+    leveldb::WriteBatch batch;
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+        batch.Delete(it->key());
+    }
+    auto s = db->Write(leveldb::WriteOptions(), &batch);
+    assert(s.ok());
+    set_builtin_keys();
+}
+
+// EXISTS key
+void DB::exists(context_t& con)
+{
+    std::string value;
+    auto& key = con.argv[1];
+    check_expire(key);
+    auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
+    if (s.ok()) con.append(shared.n1);
+    else if (s.IsNotFound()) con.append(shared.n0);
+    else reterr(con, s);
+}
+
+// TYPE key
+void DB::type(context_t& con)
+{
+    std::string value;
+    auto& key = con.argv[1];
+    check_expire(key);
+    auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
+    if (s.IsNotFound()) ret(con, shared.none_type);
+    check_status(con, s);
+    switch (get_type(value)) {
+    case ktype::tstring:
+        con.append(shared.string_type);
+        break;
+    case ktype::tlist:
+        con.append(shared.list_type);
+        break;
+    case ktype::thash:
+        con.append(shared.hash_type);
+        break;
+    case ktype::tset:
+        con.append(shared.set_type);
+        break;
+    case ktype::tzset:
+        con.append(shared.zset_type);
+        break;
+    default:
+        assert(0);
+    }
+}
+
+void DB::_ttl(context_t& con, bool is_ttl)
+{
+    std::string value;
+    auto& key = con.argv[1];
+    auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
+    if (s.IsNotFound()) ret(con, shared.n_2);
+    check_status(con, s);
+    auto it = expire_keys.find(key);
+    if (it == expire_keys.end()) ret(con, shared.n_1);
+    auto ttl_ms = it->second - angel::util::get_cur_time_ms();
+    if (is_ttl) ttl_ms /= 1000;
+    con.append_reply_number(ttl_ms);
+}
+
+// TTL key
+void DB::ttl(context_t& con)
+{
+    _ttl(con, true);
+}
+
+// PTTL key
+void DB::pttl(context_t& con)
+{
+    _ttl(con, false);
+}
+
+void DB::_expire(context_t& con, bool is_expire)
+{
+    std::string value;
+    auto& key = con.argv[1];
+    auto expire = str2ll(con.argv[2]);
+    if (str2numerr()) ret(con, shared.integer_err);
+    if (expire <= 0) ret(con, shared.timeout_err);
+    auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
+    if (s.IsNotFound()) ret(con, shared.n0);
+    check_status(con, s);
+    if (is_expire) expire *= 1000;
+    expire += angel::util::get_cur_time_ms();
+    add_expire_key(key, expire);
+    con.append(shared.n1);
+}
+
+// EXPIRE key seconds
+void DB::expire(context_t& con)
+{
+    _expire(con, true);
+}
+
+// PEXPIRE key milliseconds
+void DB::pexpire(context_t& con)
+{
+    _expire(con, false);
+}
+
+void DB::flushdb(context_t& con)
+{
+    clear();
+    con.append(shared.ok);
+}
+
+void DB::flushall(context_t& con)
+{
+    clear();
+    con.append(shared.ok);
+}
+
+void DB::_rename(context_t& con, bool is_nx)
+{
+    std::string value, newvalue;
+    auto& key = con.argv[1];
+    auto& newkey = con.argv[2];
+    check_expire(key);
+    auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
+    if (s.IsNotFound()) ret(con, shared.no_such_key);
+    if (key == newkey) ret(con, is_nx ? shared.n0 : shared.ok);
+    s = db->Get(leveldb::ReadOptions(), encode_meta_key(newkey), &newvalue);
+    leveldb::WriteBatch batch;
+    if (s.ok()) {
+        if (is_nx) ret(con, shared.n0);
+        auto err = del_key_with_expire_batch(&batch, newkey);
+        if (err) reterr(con, err.value());
+    } else if (!s.IsNotFound()) {
+        reterr(con, s);
+    }
+    rename_key(&batch, key, value, newkey);
+    s = db->Write(leveldb::WriteOptions(), &batch);
+    check_status(con, s);
+    con.append(is_nx ? shared.n1 : shared.ok);
+}
+
+// RENAME key newkey
+void DB::rename(context_t& con)
+{
+    _rename(con, false);
+}
+
+// RENAMENX key newkey
+void DB::renamenx(context_t& con)
+{
+    _rename(con, true);
+}
+
 void DB::keys(context_t& con)
 {
     if (con.argv[1].compare("*"))
@@ -180,7 +347,7 @@ void DB::del(context_t& con)
         auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(con.argv[i]), &value);
         if (s.ok()) {
             auto err = del_key_with_expire_batch(&batch, con.argv[i]);
-            if (err) reterr(con, s);
+            if (err) reterr(con, err.value());
             dels++;
         } else if (!s.IsNotFound())
             reterr(con, s);
@@ -195,7 +362,11 @@ void DB::check_expire(const key_t& key)
     auto it = expire_keys.find(key);
     if (it == expire_keys.end()) return;
     if (it->second > lru_clock) return;
-    del_key_with_expire(key);
+    auto err = del_key_with_expire(key);
+    if (err) {
+        log_error("leveldb: %s", err->ToString().c_str());
+        return;
+    }
     argv_t argv = { "DEL", key };
     __server->append_write_command(argv, nullptr, 0);
 }
@@ -232,8 +403,31 @@ errstr_t DB::del_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     case ktype::thash: return del_hash_key_batch(batch, key);
     case ktype::tset: return del_set_key_batch(batch, key);
     // case ktype::tzset: return del_zset_key_batch(batch, key);
+    default: assert(0);
     }
-    assert(0);
+}
+
+void DB::rename_key(leveldb::WriteBatch *batch, const key_t& key,
+                    const std::string& value, const key_t& newkey)
+{
+    switch (get_type(value)) {
+    case ktype::tstring:
+        rename_string_key(batch, key, value, newkey);
+        break;
+    case ktype::tlist:
+        rename_list_key(batch, key, value, newkey);
+        break;
+    case ktype::thash:
+        rename_hash_key(batch, key, value, newkey);
+        break;
+    case ktype::tset:
+        rename_set_key(batch, key, value, newkey);
+        break;
+    case ktype::tzset:
+        // rename_zset_key(batch, key, value, newkey);
+        break;
+    default: assert(0);
+    }
 }
 
 size_t DB::get_next_seq()

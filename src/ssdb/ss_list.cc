@@ -534,3 +534,20 @@ errstr_t DB::del_list_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     batch->Delete(meta_key);
     return std::nullopt;
 }
+
+void DB::rename_list_key(leveldb::WriteBatch *batch, const key_t& key,
+                         const std::string& meta_value, const key_t& newkey)
+{
+    int li, ri, size, i = 0;
+    decode_list_meta_value(meta_value, li, ri, size);
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
+        batch->Put(encode_list_key(newkey, i++), it->value());
+        batch->Delete(it->key());
+        if (--size == 0)
+            break;
+    }
+    assert(size == 0);
+    batch->Put(encode_meta_key(newkey), encode_list_meta_value(0, i-1, i));
+    batch->Delete(encode_meta_key(key));
+}

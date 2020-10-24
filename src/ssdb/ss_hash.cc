@@ -44,10 +44,10 @@ static inline std::string get_hash_anchor(size_t seq)
     return buf;
 }
 
-static leveldb::Slice remove_field_prefix(leveldb::Slice&& field)
+static inline std::string get_hash_field(leveldb::Slice&& field)
 {
     field.remove_prefix(strchr(field.data(), ':') + 1 - field.data());
-    return field;
+    return field.ToString();
 }
 
 // HSET key field value
@@ -374,13 +374,13 @@ void DB::_hget(context_t& con, int what)
     for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
         switch (what) {
         case HGETKEYS:
-            con.append_reply_string(remove_field_prefix(it->key()).ToString());
+            con.append_reply_string(get_hash_field(it->key()));
             break;
         case HGETVALUES:
             con.append_reply_string(it->value().ToString());
             break;
         case HGETALL:
-            con.append_reply_string(remove_field_prefix(it->key()).ToString());
+            con.append_reply_string(get_hash_field(it->key()));
             con.append_reply_string(it->value().ToString());
             break;
         default: assert(0);
@@ -430,4 +430,26 @@ errstr_t DB::del_hash_key_batch(leveldb::WriteBatch *batch, const std::string& k
     batch->Delete(meta_key);
     batch->Delete(anchor);
     return std::nullopt;
+}
+
+void DB::rename_hash_key(leveldb::WriteBatch *batch, const key_t& key,
+                         const std::string& meta_value, const key_t& newkey)
+{
+    size_t seq, size;
+    decode_hash_meta_value(meta_value, &seq, &size);
+    size_t newseq = get_next_seq();
+    size_t newsize = size;
+    auto anchor = get_hash_anchor(seq);
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
+        batch->Put(encode_hash_key(newseq, get_hash_field(it->key())), it->value());
+        batch->Delete(it->key());
+        if (--size == 0)
+            break;
+    }
+    assert(size == 0);
+    batch->Put(encode_meta_key(newkey), encode_hash_meta_value(newseq, newsize));
+    batch->Put(get_hash_anchor(newseq), HASH_ANCHOR_VAL);
+    batch->Delete(encode_meta_key(key));
+    batch->Delete(anchor);
 }

@@ -354,3 +354,16 @@ errstr_t DB::del_string_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     batch->Delete(encode_string_key(key));
     return std::nullopt;
 }
+
+void DB::rename_string_key(leveldb::WriteBatch *batch, const key_t& key,
+                           const std::string& meta_value, const key_t& newkey)
+{
+    UNUSED(meta_value);
+    std::string value;
+    auto s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
+    assert(s.ok());
+    batch->Put(encode_meta_key(newkey), encode_string_meta_value());
+    batch->Put(encode_string_key(newkey), value);
+    batch->Delete(encode_meta_key(key));
+    batch->Delete(encode_string_key(key));
+}

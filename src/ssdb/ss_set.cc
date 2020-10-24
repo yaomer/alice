@@ -549,3 +549,26 @@ errstr_t DB::del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     batch->Delete(anchor);
     return std::nullopt;
 }
+
+
+void DB::rename_set_key(leveldb::WriteBatch *batch, const key_t& key,
+                        const std::string& meta_value, const key_t& newkey)
+{
+    size_t seq, size;
+    decode_set_meta_value(meta_value, &seq, &size);
+    size_t newseq = get_next_seq();
+    size_t newsize = size;
+    auto anchor = get_set_anchor(seq);
+    auto it = db->NewIterator(leveldb::ReadOptions());
+    for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
+        batch->Put(encode_set_key(newseq, get_set_member(it->key())), it->value());
+        batch->Delete(it->key());
+        if (--size == 0)
+            break;
+    }
+    assert(size == 0);
+    batch->Put(encode_meta_key(newkey), encode_set_meta_value(newseq, newsize));
+    batch->Put(get_set_anchor(newseq), SET_ANCHOR_VAL);
+    batch->Delete(encode_meta_key(key));
+    batch->Delete(anchor);
+}

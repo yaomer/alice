@@ -136,6 +136,7 @@ public:
         ops.comparator = &comp;
         return ops;
     }
+    void clear();
 
     void add_expire_key(const key_t& key, int64_t expire)
     {
@@ -158,10 +159,23 @@ public:
         return del_key_batch(batch, key);
     }
 
+    void rename_key(leveldb::WriteBatch *batch, const key_t& key,
+                    const std::string& value, const key_t& newkey);
+
     void check_expire(const key_t& key);
 
     void keys(context_t& con);
     void del(context_t& con);
+    void exists(context_t& con);
+    void type(context_t& con);
+    void ttl(context_t& con);
+    void pttl(context_t& con);
+    void expire(context_t& con);
+    void pexpire(context_t& con);
+    void flushdb(context_t& con);
+    void flushall(context_t& con);
+    void rename(context_t& con);
+    void renamenx(context_t& con);
 
     void set(context_t& con);
     void setnx(context_t& con);
@@ -237,8 +251,22 @@ private:
     // errstr_t del_zset_key(const key_t& key);
     // errstr_t del_zset_key_batch(leveldb::WriteBatch *batch, const key_t& key);
 
+    void rename_string_key(leveldb::WriteBatch *batch, const key_t& key,
+                           const std::string& meta_value, const key_t& newkey);
+    void rename_list_key(leveldb::WriteBatch *batch, const key_t& key,
+                         const std::string& meta_value, const key_t& newkey);
+    void rename_hash_key(leveldb::WriteBatch *batch, const key_t& key,
+                         const std::string& meta_value, const key_t& newkey);
+    void rename_set_key(leveldb::WriteBatch *batch, const key_t& key,
+                        const std::string& meta_value, const key_t& newkey);
+    // void rename_zset_key(leveldb::WriteBatch *batch, const key_t& key,
+                         // const std::string& meta_value, const key_t& newkey);
+
     size_t get_next_seq();
 
+    void _ttl(context_t& con, bool is_ttl);
+    void _expire(context_t& con, bool is_expire);
+    void _rename(context_t& con, bool is_nx);
     void _lpushx(context_t& con, bool is_lpushx);
     void _lpop(context_t& con, bool is_lpop);
     void _incr(context_t& con, int64_t incr);
