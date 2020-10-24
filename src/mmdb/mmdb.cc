@@ -484,8 +484,7 @@ void DB::rename(context_t& con)
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.no_such_key);
-    if (strcasecmp(key.c_str(), newkey.c_str()) == 0)
-        ret(con, shared.ok);
+    if (key == newkey) ret(con, shared.ok);
     del_key_with_expire(newkey);
     insert(newkey, it->second);
     del_key_with_expire(key);
@@ -500,8 +499,7 @@ void DB::renamenx(context_t& con)
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.no_such_key);
-    if (strcasecmp(key.c_str(), newkey.c_str()) == 0)
-        ret(con, shared.n0);
+    if (key == newkey) ret(con, shared.n0);
     if (!not_found(newkey)) ret(con, shared.n0);
     insert(newkey, it->second);
     del_key_with_expire(key);
