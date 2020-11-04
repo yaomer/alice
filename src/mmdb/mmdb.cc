@@ -92,6 +92,16 @@ void engine::load_snapshot()
     rdb->load();
 }
 
+void engine::watch(context_t& con)
+{
+    db()->watch(con);
+}
+
+void engine::unwatch(context_t& con)
+{
+    db()->unwatch(con);
+}
+
 void engine::server_cron()
 {
     auto now = lru_clock;
@@ -229,11 +239,6 @@ DB::DB(mmdb::engine *e) : engine(e)
         { "RENAMENX",   { -3, IS_WRITE, BIND(renamenx) } },
         { "MOVE",       { -3, IS_WRITE, BIND(move) } },
         { "LRU",        { -2, IS_READ,  BIND(lru) } },
-        { "MULTI",      { -1, IS_READ,  BIND(multi) } },
-        { "EXEC",       { -1, IS_READ,  BIND(exec) } },
-        { "DISCARD",    { -1, IS_READ,  BIND(discard) } },
-        { "WATCH",      {  2, IS_READ,  BIND(watch) } },
-        { "UNWATCH",    { -1, IS_READ,  BIND(unwatch) } },
         { "SORT",       {  2, IS_READ,  BIND(sort) } },
         { "SET",        {  3, IS_WRITE, BIND(set) } },
         { "SETNX",      { -3, IS_WRITE, BIND(setnx) } },
@@ -530,63 +535,9 @@ void DB::watch(context_t& con)
         }
         con.watch_keys.emplace_back(con.argv[i]);
     }
-    con.append(shared.ok);
-}
-
-void DB::multi(context_t& con)
-{
-    con.flags |= context_t::EXEC_MULTI;
-    con.append(shared.ok);
-}
-
-void DB::exec(context_t& con)
-{
-    argv_t cl = { "MULTI" };
-    bool is_write = (con.flags & context_t::EXEC_MULTI_WRITE);
-    if (con.flags & context_t::EXEC_MULTI_ERR) {
-        con.flags &= ~context_t::EXEC_MULTI_ERR;
-        con.append(shared.nil);
-        goto end;
-    }
-    if (is_write) {
-        // _dbServer->freeMemoryIfNeeded();
-        __server->do_write_command(cl, nullptr, 0);
-    }
-    for (auto& argv : con.transaction_list) {
-        auto c = find_command(argv[0]);
-        con.argv.swap(argv);
-        c->command_cb(con);
-        if (is_write)
-            __server->do_write_command(cl, nullptr, 0);
-    }
-    if (is_write) {
-        cl = { "EXEC" };
-        __server->do_write_command(cl, nullptr, 0);
-        con.flags &= ~context_t::EXEC_MULTI_WRITE;
-    }
-    _unwatch(con);
-end:
-    con.transaction_list.clear();
-    con.flags &= ~context_t::EXEC_MULTI;
-}
-
-void DB::discard(context_t& con)
-{
-    con.transaction_list.clear();
-    _unwatch(con);
-    con.flags &= ~context_t::EXEC_MULTI;
-    con.flags &= ~context_t::EXEC_MULTI_ERR;
-    con.flags &= ~context_t::EXEC_MULTI_WRITE;
-    con.append(shared.ok);
 }
 
 void DB::unwatch(context_t& con)
-{
-    _unwatch(con);
-    con.append(shared.ok);
-}
-
-void DB::_unwatch(context_t& con)
 {
     for (auto& key : con.watch_keys) {
         auto cl = watch_keys.find(key);
@@ -610,7 +561,8 @@ void DB::touch_watch_key(const key_t& key)
         auto conn = __server->get_server().get_connection(id);
         if (!conn) continue;
         auto& ctx = std::any_cast<context_t&>(conn->get_context());
-        ctx.flags |= context_t::EXEC_MULTI_ERR;
+        if (ctx.flags & context_t::EXEC_MULTI)
+            ctx.flags |= context_t::EXEC_MULTI_ERR;
     }
 }
 

@@ -188,6 +188,8 @@ struct db_base_t {
     virtual bool is_created_snapshot() = 0;
     virtual std::string get_snapshot_name() = 0;
     virtual void load_snapshot() = 0;
+    virtual void watch(context_t&) = 0;
+    virtual void unwatch(context_t&) = 0;
 };
 
 struct shared_obj {

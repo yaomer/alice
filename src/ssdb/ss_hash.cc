@@ -56,7 +56,7 @@ void DB::hset(context_t& con)
     auto& key = con.argv[1];
     auto& field = con.argv[2];
     check_expire(key);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     std::string value;
     leveldb::WriteBatch batch;
     auto meta_key = encode_meta_key(key);
@@ -106,7 +106,7 @@ void DB::hsetnx(context_t& con)
         batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
-        // touch_watch_key(key);
+        touch_watch_key(key);
         ret(con, shared.n1);
     }
     check_status(con, s);
@@ -122,7 +122,7 @@ void DB::hsetnx(context_t& con)
     batch.Put(enc_key, con.argv[3]);
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     con.append(shared.n1);
 }
 
@@ -198,7 +198,7 @@ void DB::hdel(context_t& con)
     }
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     con.append_reply_number(dels);
 }
 
@@ -257,7 +257,7 @@ void DB::hincrby(context_t& con)
         batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
-        // touch_watch_key(key);
+        touch_watch_key(key);
         ret(con, shared.n0);
     }
     check_status(con, s);
@@ -281,7 +281,7 @@ void DB::hincrby(context_t& con)
         reterr(con, s);
     check_status(con, s);
     con.append_reply_number(incr);
-    // touch_watch_key(key);
+    touch_watch_key(key);
 }
 
 // HMSET key field value [field value ...]
@@ -291,7 +291,7 @@ void DB::hmset(context_t& con)
     check_expire(key);
     size_t size = con.argv.size();
     if (size % 2 != 0) ret(con, shared.argnumber_err);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     std::string value;
     leveldb::WriteBatch batch;
     auto meta_key = encode_meta_key(key);

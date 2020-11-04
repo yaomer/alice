@@ -57,6 +57,8 @@ public:
     void load_snapshot() override;
     command_t *find_command(const std::string& name) override;
     void do_after_exec_write_cmd(const argv_t& argv, const char *query, size_t len) override;
+    void watch(context_t& con) override;
+    void unwatch(context_t& con) override;
     void check_blocked_clients();
     void check_expire_keys();
 
@@ -258,6 +260,9 @@ public:
     void touch_watch_key(const key_t& key);
     void clear_blocking_keys_for_context(context_t& con);
 
+    void watch(context_t& con);
+    void unwatch(context_t& con);
+
     void select(context_t& con);
     void exists(context_t& con);
     void type(context_t& con);
@@ -277,12 +282,6 @@ public:
     void rename(context_t& con);
     void renamenx(context_t& con);
     void lru(context_t& con);
-    // transaction command
-    void multi(context_t& con);
-    void exec(context_t& con);
-    void discard(context_t& con);
-    void watch(context_t& con);
-    void unwatch(context_t& con);
     void move(context_t& con);
     void sort(context_t& con);
     // string operations
@@ -387,7 +386,6 @@ public:
 private:
     void _ttl(context_t& con, bool is_ttl);
     void _expire(context_t& con, bool is_expire);
-    void _unwatch(context_t& con);
     void _incr(context_t& con, int64_t incr);
     void _lpush(context_t& con, bool is_lpush);
     void _lpushx(context_t& con, bool is_lpushx);

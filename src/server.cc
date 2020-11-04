@@ -529,6 +529,79 @@ void dbserver::ping(context_t& con)
     con.append("+PONG\r\n");
 }
 
+void dbserver::multi(context_t& con)
+{
+    if (con.flags & context_t::EXEC_MULTI) {
+        con.append_error("MULTI calls can not be nested");
+    } else {
+        con.flags |= context_t::EXEC_MULTI;
+        con.append(shared.ok);
+    }
+}
+
+void dbserver::exec(context_t& con)
+{
+    argv_t cl = { "MULTI" };
+    bool is_write = (con.flags & context_t::EXEC_MULTI_WRITE);
+    if (!(con.flags & context_t::EXEC_MULTI)) {
+        con.append_error("EXEC without MULTI");
+        return;
+    }
+    if (con.flags & context_t::EXEC_MULTI_ERR) {
+        con.flags &= ~context_t::EXEC_MULTI_ERR;
+        con.append(shared.nil);
+        goto end;
+    }
+    if (con.transaction_list.empty()) {
+        con.append(shared.multi_empty);
+        goto end;
+    }
+    if (is_write) {
+        __server->get_db()->free_memory_if_needed();
+        __server->do_write_command(cl, nullptr, 0);
+    }
+    for (auto& argv : con.transaction_list) {
+        auto c = db->find_command(argv[0]);
+        if (!c) c = find_command(argv[0]);
+        con.argv.swap(argv);
+        c->command_cb(con);
+        if (is_write) {
+            __server->do_write_command(con.argv, nullptr, 0);
+        }
+    }
+    if (is_write) {
+        cl = { "EXEC" };
+        __server->do_write_command(cl, nullptr, 0);
+        con.flags &= ~context_t::EXEC_MULTI_WRITE;
+    }
+    db->unwatch(con);
+end:
+    con.transaction_list.clear();
+    con.flags &= ~context_t::EXEC_MULTI;
+}
+
+void dbserver::discard(context_t& con)
+{
+    con.transaction_list.clear();
+    db->unwatch(con);
+    con.flags &= ~context_t::EXEC_MULTI;
+    con.flags &= ~context_t::EXEC_MULTI_ERR;
+    con.flags &= ~context_t::EXEC_MULTI_WRITE;
+    con.append(shared.ok);
+}
+
+void dbserver::watch(context_t& con)
+{
+    db->watch(con);
+    con.append(shared.ok);
+}
+
+void dbserver::unwatch(context_t& con)
+{
+    db->unwatch(con);
+    con.append(shared.ok);
+}
+
 // PUBLISH channel message
 void dbserver::publish(context_t& con)
 {
@@ -628,7 +701,12 @@ void dbserver::start()
         { "PUBLISH",    { -3, IS_READ, BIND(publish) } },
         { "SUBSCRIBE",   {  2, IS_READ, BIND(subscribe) } },
         { "CONFIG",     {  3, IS_READ, BIND(config) } },
-        { "INFO",       { -1, IS_READ, BIND(info) } }
+        { "INFO",       { -1, IS_READ, BIND(info) } },
+        { "MULTI",      { -1, IS_READ,  BIND(multi) } },
+        { "EXEC",       { -1, IS_READ,  BIND(exec) } },
+        { "DISCARD",    { -1, IS_READ,  BIND(discard) } },
+        { "WATCH",      {  2, IS_READ,  BIND(watch) } },
+        { "UNWATCH",    { -1, IS_READ,  BIND(unwatch) } },
     };
     db->start();
     loop->run_every(100, [this]{ this->server_cron(); });

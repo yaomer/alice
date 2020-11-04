@@ -60,6 +60,8 @@ public:
     {
 
     }
+    void watch(context_t& con) override;
+    void unwatch(context_t& con) override;
     void check_expire_keys();
 private:
     std::unordered_map<std::string, command_t> cmdtable;
@@ -89,9 +91,10 @@ struct keycomp : public leveldb::Comparator {
             auto score1 = atof(s1), score2 = atof(s2);
             if (score1 < score2) return -1;
             if (score1 > score2) return 1;
-            s1 = strrchr(s1, ':') + 1;
-            s2 = strrchr(s2, ':') + 1;
-            leveldb::Slice member1(s1, begin1+l.size()-s1), member2(s2, begin2+r.size()-s2);
+            s1 = strchr(s1, ':') + 1;
+            s2 = strchr(s2, ':') + 1;
+            leveldb::Slice member1(s1, begin1-1+l.size()-s1);
+            leveldb::Slice member2(s2, begin2-1+r.size()-s2);
             return member1.compare(member2);
         }
         return l.compare(r);
@@ -163,6 +166,10 @@ public:
                     const std::string& value, const key_t& newkey);
 
     void check_expire(const key_t& key);
+    void touch_watch_key(const key_t& key);
+
+    void watch(context_t& con);
+    void unwatch(context_t& con);
 
     void keys(context_t& con);
     void del(context_t& con);
@@ -277,6 +284,7 @@ private:
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;
+    std::unordered_map<key_t, std::vector<size_t>> watch_keys;
     keycomp comp;
     friend engine;
 };
@@ -294,6 +302,7 @@ struct ktype {
     static const char thash    = 'h';
     static const char tset     = 'S';
     static const char tzset    = 'z';
+    static const char tzmap    = 'Z';
 };
 
 static inline const char

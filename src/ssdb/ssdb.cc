@@ -44,6 +44,16 @@ void engine::load_snapshot()
     db->reload();
 }
 
+void engine::watch(context_t& con)
+{
+    db->watch(con);
+}
+
+void engine::unwatch(context_t& con)
+{
+    db->unwatch(con);
+}
+
 // 随机删除一定数量的过期键
 void engine::check_expire_keys()
 {
@@ -157,7 +167,7 @@ void DB::set_builtin_keys()
     }
     s = db->Get(leveldb::ReadOptions(), builtin_keys.seq, &value);
     if (s.IsNotFound()) {
-        s = db->Put(leveldb::WriteOptions(), builtin_keys.seq, "0");
+        s = db->Put(leveldb::WriteOptions(), builtin_keys.seq, "1296");
         assert(s.ok());
     }
 }
@@ -371,6 +381,19 @@ void DB::check_expire(const key_t& key)
     __server->append_write_command(argv, nullptr, 0);
 }
 
+void DB::touch_watch_key(const key_t& key)
+{
+    auto cl = watch_keys.find(key);
+    if (cl == watch_keys.end()) return;
+    for (auto& id : cl->second) {
+        auto conn = __server->get_server().get_connection(id);
+        if (!conn) continue;
+        auto& ctx = std::any_cast<context_t&>(conn->get_context());
+        if (ctx.flags & context_t::EXEC_MULTI)
+            ctx.flags |= context_t::EXEC_MULTI_ERR;
+    }
+}
+
 errstr_t DB::del_key(const key_t& key)
 {
     std::string value;
@@ -428,6 +451,42 @@ void DB::rename_key(leveldb::WriteBatch *batch, const key_t& key,
         break;
     default: assert(0);
     }
+}
+
+void DB::watch(context_t& con)
+{
+    std::string value;
+    for (size_t i = 1; i < con.argv.size(); i++) {
+        auto& key = con.argv[i];
+        check_expire(key);
+        auto s = db->Get(leveldb::ReadOptions(), encode_meta_key(key), &value);
+        if (s.IsNotFound()) continue;
+        assert(s.ok());
+        auto it = watch_keys.find(key);
+        if (it == watch_keys.end()) {
+            std::vector<size_t> clist = { con.conn->id() };
+            watch_keys.emplace(key, std::move(clist));
+        } else {
+            it->second.push_back(con.conn->id());
+        }
+        con.watch_keys.emplace_back(con.argv[i]);
+    }
+}
+
+void DB::unwatch(context_t& con)
+{
+    for (auto& key : con.watch_keys) {
+        auto cl = watch_keys.find(key);
+        if (cl != watch_keys.end()) {
+            for (auto c = cl->second.begin(); c != cl->second.end(); ++c) {
+                if (*c == con.conn->id()) {
+                    cl->second.erase(c);
+                    break;
+                }
+            }
+        }
+    }
+    con.watch_keys.clear();
 }
 
 size_t DB::get_next_seq()

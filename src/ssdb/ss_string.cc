@@ -49,7 +49,7 @@ void DB::set(context_t& con)
     batch.Put(encode_string_key(key), con.argv[2]);
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     con.append(shared.ok);
     if (cmdops & (SET_EX | SET_PX)) {
         expire += angel::util::get_cur_time_ms();
@@ -72,6 +72,7 @@ void DB::setnx(context_t& con)
     batch.Put(encode_string_key(key), con.argv[2]);
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
+    touch_watch_key(key);
     con.append(shared.n1);
 }
 
@@ -96,7 +97,7 @@ void DB::getset(context_t& con)
     auto& key = con.argv[1];
     auto& new_value = con.argv[2];
     check_expire(key);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     std::string value;
     auto meta_key = encode_meta_key(key);
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
@@ -139,6 +140,7 @@ void DB::append(context_t& con)
 {
     auto& key = con.argv[1];
     check_expire(key);
+    touch_watch_key(key);
     std::string value;
     auto meta_key = encode_meta_key(key);
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
@@ -182,7 +184,7 @@ void DB::mset(context_t& con)
             reterr(con, s);
         batch.Put(meta_key, encode_string_meta_value());
         batch.Put(encode_string_key(key), con.argv[i+1]);
-        // touch_watch_key(key);
+        touch_watch_key(key);
     }
     auto s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -237,7 +239,7 @@ void DB::_incr(context_t& con, int64_t incr)
     s = db->Put(leveldb::WriteOptions(), encode_string_key(key), i2s(incr));
     check_status(con, s);
     con.append_reply_number(incr);
-    // touch_watch_key(key);
+    touch_watch_key(key);
 }
 
 // INCR key
@@ -278,7 +280,7 @@ void DB::setrange(context_t& con)
         ret(con, shared.integer_err);
     std::string value, new_value;
     check_expire(key);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     auto meta_key = encode_meta_key(key);
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
     if (s.IsNotFound()) {

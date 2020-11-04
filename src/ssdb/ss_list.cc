@@ -73,6 +73,7 @@ void DB::lpush(context_t& con)
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
+    touch_watch_key(key);
     con.append_reply_number(size);
 }
 
@@ -101,6 +102,7 @@ void DB::rpush(context_t& con)
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
+    touch_watch_key(key);
     con.append_reply_number(size);
 }
 
@@ -122,6 +124,7 @@ void DB::_lpushx(context_t& con, bool is_lpushx)
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
+    touch_watch_key(key);
     con.append_reply_number(size);
 }
 
@@ -176,6 +179,7 @@ void DB::_lpop(context_t& con, bool is_lpop)
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
+    touch_watch_key(key);
     con.append_reply_string(value);
 }
 
@@ -279,15 +283,20 @@ void DB::rpoplpush(context_t& con)
     // put src_value to des_key
     if (src_key == des_key) {
         --li;
+        touch_watch_key(src_key);
     } else {
         li = ri = size = 0;
         s = db->Get(leveldb::ReadOptions(), des_meta_key, &des_value);
-        if (!s.IsNotFound() && !s.ok()) reterr(con, s);
         if (s.ok()) {
             check_type(con, des_value, ktype::tlist);
             decode_list_meta_value(des_value, li, ri, size);
             --li;
-        }
+            touch_watch_key(src_key);
+            touch_watch_key(des_key);
+        } else if (s.IsNotFound()) {
+            touch_watch_key(src_key);
+        } else
+            reterr(con, s);
     }
     batch.Put(encode_list_key(des_key, li), src_value);
     batch.Put(des_meta_key, encode_list_meta_value(li, ri, ++size));
@@ -379,7 +388,7 @@ void DB::lrem(context_t& con)
     }
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     con.append_reply_number(rems);
 }
 
@@ -456,6 +465,7 @@ void DB::lset(context_t& con)
     }
     s = db->Put(leveldb::WriteOptions(), enc_key, con.argv[3]);
     check_status(con, s);
+    touch_watch_key(key);
     con.append_reply_string(shared.ok);
 }
 
@@ -501,7 +511,7 @@ void DB::ltrim(context_t& con)
     batch.Put(meta_key, encode_list_meta_value(li, ri, size));
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
-    // touch_watch_key(key);
+    touch_watch_key(key);
     con.append(shared.ok);
 }
 

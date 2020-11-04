@@ -156,6 +156,12 @@ public:
     void psync(context_t& con);
     void replconf(context_t& con);
     void ping(context_t& con);
+    // transaction command
+    void multi(context_t& con);
+    void exec(context_t& con);
+    void discard(context_t& con);
+    void watch(context_t& con);
+    void unwatch(context_t& con);
     // pub-sub command
     void publish(context_t& con);
     void subscribe(context_t& con);

@@ -87,7 +87,7 @@ void DB::sadd(context_t& con)
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     con.append_reply_number(adds);
-    // touch_watch_key(key);
+    touch_watch_key(key);
 }
 
 // SISMEMBER key member
@@ -144,7 +144,7 @@ void DB::spop(context_t& con)
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     con.append_reply_string(get_set_member(std::move(pop_key)));
-    // touch_watch_key(key);
+    touch_watch_key(key);
 }
 
 // 产生count个[0, size)之间的随机数
@@ -275,7 +275,7 @@ void DB::srem(context_t& con)
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     con.append_reply_number(rems);
-    // touch_watch_key(key);
+    touch_watch_key(key);
 }
 
 // SMOVE source destination member
@@ -299,7 +299,7 @@ void DB::smove(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     if (src_key == des_key) {
-        // touch_watch_key(src_key);
+        touch_watch_key(src_key);
         ret(con, shared.n1);
     }
     leveldb::WriteBatch batch;
@@ -334,8 +334,8 @@ void DB::smove(context_t& con)
     }
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
-    // touch_watch_key(src);
-    // touch_watch_key(des);
+    touch_watch_key(src_key);
+    touch_watch_key(des_key);
     con.append(shared.n1);
 }
 
