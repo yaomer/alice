@@ -47,8 +47,7 @@ static bool parse_yes_or_no(const std::string& s, bool& option)
 
 void alice::read_server_conf(const std::string& filename)
 {
-    conf_param_list paramlist;
-    parse_conf(paramlist, filename.c_str());
+    auto paramlist = parse_conf(filename.c_str());
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "port") == 0) {
             server_conf.port = atoi(it[1].c_str());
@@ -162,8 +161,7 @@ void alice::read_server_conf(const std::string& filename)
 
 void alice::read_sentinel_conf(const std::string& filename)
 {
-    conf_param_list paramlist;
-    parse_conf(paramlist, filename.c_str());
+    auto paramlist = parse_conf(filename.c_str());
     for(auto& it : paramlist) {
         if (strcasecmp(it[1].c_str(), "ip") == 0) {
             sentinel_conf.ip = it[2];

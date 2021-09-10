@@ -215,7 +215,7 @@ int fwrite(int fd, const char *buf, size_t nbytes)
     return 0;
 }
 
-void parse_conf(conf_param_list& paramlist, const char *filename)
+conf_param_list parse_conf(const char *filename)
 {
     char buf[1024];
     FILE *fp = fopen(filename, "r");
@@ -223,26 +223,24 @@ void parse_conf(conf_param_list& paramlist, const char *filename)
         fprintf(stderr, "open %s error: %s", filename, angel::util::strerrno());
         abort();
     }
+    conf_param_list paramlist;
     while (fgets(buf, sizeof(buf), fp)) {
         const char *s = buf;
         const char *es = buf + strlen(buf);
-        std::vector<std::string> param;
-        s = std::find_if(s, es, [](char c){ return !isspace(c); });
-        if (s == es || s[0] == '#') continue;
-next:
-        const char *p = std::find(s, es, ':');
-        if (p == es)  {
-            p = std::find_if(s, es, isspace);
-            if (p == es) continue;
+        argv_t param;
+        do {
+            s = std::find_if_not(s, es, isspace);
+            if (s == es || s[0] == '#') break;
+            const char *p = std::find_if(s, es, isspace);
+            assert(p != es);
             param.emplace_back(s, p);
-            paramlist.emplace_back(std::move(param));
-            continue;
-        }
-        param.emplace_back(s, p);
-        s = p + 1;
-        goto next;
+            s = p + 1;
+        } while (true);
+        if (!param.empty())
+            paramlist.emplace_back(param);
     }
     fclose(fp);
+    return paramlist;
 }
 
 off_t get_filesize(int fd)

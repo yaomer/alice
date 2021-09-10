@@ -212,8 +212,7 @@ ssize_t Proxy::parse_response(angel::buffer& buf)
 
 static void read_conf(const std::string& filename)
 {
-    alice::conf_param_list paramlist;
-    alice::parse_conf(paramlist, filename.c_str());
+    auto paramlist = alice::parse_conf(filename.c_str());
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "ip") == 0) {
             proxy_conf.ip = it[1];

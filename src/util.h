@@ -70,7 +70,7 @@ void split_line(std::vector<std::string>& argv,
 int fwrite(int fd, const char *buf, size_t nbytes);
 
 using conf_param_list = std::vector<argv_t>;
-void parse_conf(conf_param_list& paramlist, const char *filename);
+conf_param_list parse_conf(const char *filename);
 
 off_t get_filesize(int fd);
 bool is_file_exists(const std::string& filename);
