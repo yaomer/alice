@@ -153,19 +153,15 @@ void DB::_zrange(context_t& con, bool reverse)
         con.append_reply_multi(stop - start + 1);
     int i = 0;
     if (!reverse) {
-        for (auto it = zset.zmap.cbegin(); it != zset.zmap.cend(); ++it, ++i) {
+        for (auto it = zset.zsl.cbegin(); it != zset.zsl.cend(); ++it, ++i) {
             if (i < start) continue;
             if (i > stop) break;
-            con.append_reply_string(it->first);
+            con.append_reply_string(it->first.key);
             if (withscores)
-                con.append_reply_double(it->second);
+                con.append_reply_double(it->first.score);
         }
     }
     if (reverse) {
-        // auto& zsl = zset.zsl;
-        // for (auto& it : zset.zsl)
-            // std::cout << it.first.score << "," << it.first.key << "\n";
-        // ret(con, shared.n0);
         for (auto it = --zset.zsl.end(); ; --it, ++i) {
             if (i < start) continue;
             if (i > stop) break;
