@@ -70,4 +70,13 @@ int check_range(context_t& con, int& start, int& stop, int lower, int upper)
     return C_OK;
 }
 
+unsigned get_last_cmd(const std::string& lc)
+{
+    unsigned ops = 0;
+    if (lc.compare("BLPOP") == 0) ops = BLOCK_LPOP;
+    else if (lc.compare("BRPOP") == 0) ops = BLOCK_RPOP;
+    else if (lc.compare("BRPOPLPUSH") == 0) ops = BLOCK_RPOPLPUSH;
+    return ops;
+}
+
 }

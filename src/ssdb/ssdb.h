@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <list>
 #include <optional> // for c++2a
 
 #include "../db_base.h"
@@ -63,9 +64,24 @@ public:
     void watch(context_t& con) override;
     void unwatch(context_t& con) override;
     void check_expire_keys();
+    void check_blocked_clients();
+
+    void add_block_client(size_t id)
+    {
+        blocked_clients.push_back(id);
+    }
+    void del_block_client(size_t id)
+    {
+        for (auto it = blocked_clients.begin(); it != blocked_clients.end(); ++it)
+            if (*it == id) {
+                blocked_clients.erase(it);
+                break;
+            }
+    }
 private:
     std::unordered_map<std::string, command_t> cmdtable;
     std::unique_ptr<DB> db;
+    std::list<size_t> blocked_clients;
 };
 
 struct keycomp : public leveldb::Comparator {
@@ -110,7 +126,7 @@ using errstr_t = std::optional<leveldb::Status>;
 class DB {
 public:
     using key_t = std::string;
-    DB()
+    DB(engine *e) : engine(e)
     {
         leveldb::Options ops = config_leveldb_options();
         auto s = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
@@ -212,9 +228,9 @@ public:
     void lset(context_t& con);
     void lrange(context_t& con);
     void ltrim(context_t& con);
-    // void blpop(context_t& con);
-    // void brpop(context_t& con);
-    // void brpoplpush(context_t& con);
+    void blpop(context_t& con);
+    void brpop(context_t& con);
+    void brpoplpush(context_t& con);
 
     void hset(context_t& con);
     void hsetnx(context_t& con);
@@ -271,11 +287,18 @@ private:
 
     size_t get_next_seq();
 
+    void blocking_pop(const key_t& key);
+    void clear_blocking_keys_for_context(context_t& con);
+    void add_blocking_key(context_t& con, const key_t& key);
+    void set_context_to_block(context_t& con, int timeout);
+
     void _ttl(context_t& con, bool is_ttl);
     void _expire(context_t& con, bool is_expire);
     void _rename(context_t& con, bool is_nx);
     void _lpushx(context_t& con, bool is_lpushx);
     void _lpop(context_t& con, bool is_lpop);
+    void _blpop(context_t& con, bool is_blpop);
+    void _rpoplpush(context_t& con, bool is_nonblock);
     void _incr(context_t& con, int64_t incr);
     void _hget(context_t& con, int what);
     void _sinter(context_t& con, std::unordered_set<std::string>& rset, int start);
@@ -285,8 +308,10 @@ private:
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;
     std::unordered_map<key_t, std::vector<size_t>> watch_keys;
+    std::unordered_map<key_t, std::vector<size_t>> blocking_keys;
+    engine *engine;
     keycomp comp;
-    friend engine;
+    friend class engine;
 };
 
 struct builtin_keys_t {

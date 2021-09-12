@@ -1,5 +1,7 @@
 #include "internal.h"
 
+#include "../server.h"
+
 using namespace alice;
 using namespace alice::ssdb;
 
@@ -48,6 +50,26 @@ static inline bool is_no_hole(int li, int ri, int size)
     return ri - li + 1 == size;
 }
 
+static void pop_key(leveldb::DB *db, leveldb::WriteBatch *batch,
+                    const std::string& meta_key, const std::string& enc_key,
+                    int *li, int *ri, int *size, bool is_lpop)
+{
+    if (is_no_hole(*li, *ri, *size)) {
+        is_lpop ? ++*li : --*ri;
+    } else {
+        auto it = db->NewIterator(leveldb::ReadOptions());
+        it->Seek(enc_key);
+        assert(it->Valid());
+        is_lpop ? it->Next() : it->Prev();
+        assert(it->Valid());
+        if (is_lpop) *li = get_list_index(it->key());
+        else *ri = get_list_index(it->key());
+    }
+    batch->Put(meta_key, encode_list_meta_value(*li, *ri, --*size));
+    if (*size == 0) batch->Delete(meta_key);
+    batch->Delete(enc_key);
+}
+
 // LPUSH key value [value ...]
 void DB::lpush(context_t& con)
 {
@@ -75,6 +97,7 @@ void DB::lpush(context_t& con)
     check_status(con, s);
     touch_watch_key(key);
     con.append_reply_number(size);
+    blocking_pop(key);
 }
 
 // LPUSH key value [value ...]
@@ -104,6 +127,7 @@ void DB::rpush(context_t& con)
     check_status(con, s);
     touch_watch_key(key);
     con.append_reply_number(size);
+    blocking_pop(key);
 }
 
 void DB::_lpushx(context_t& con, bool is_lpushx)
@@ -126,6 +150,7 @@ void DB::_lpushx(context_t& con, bool is_lpushx)
     check_status(con, s);
     touch_watch_key(key);
     con.append_reply_number(size);
+    blocking_pop(key);
 }
 
 // LPUSHX key value
@@ -159,23 +184,7 @@ void DB::_lpop(context_t& con, bool is_lpop)
     auto enc_key = encode_list_key(key, is_lpop ? li : ri);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     check_status(con, s);
-    if (size == 1) { // last one
-        batch.Delete(meta_key);
-    } else {
-        if (is_no_hole(li, ri, size)) {
-            is_lpop ? ++li : --ri;
-        } else {
-            auto it = db->NewIterator(leveldb::ReadOptions());
-            it->Seek(enc_key);
-            assert(it->Valid());
-            is_lpop ? it->Next() : it->Prev();
-            assert(it->Valid());
-            if (is_lpop) li = get_list_index(it->key());
-            else ri = get_list_index(it->key());
-        }
-        batch.Put(meta_key, encode_list_meta_value(li, ri, --size));
-    }
-    batch.Delete(enc_key);
+    pop_key(db, &batch, meta_key, enc_key, &li, &ri, &size, is_lpop);
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -243,7 +252,8 @@ void DB::lrange(context_t& con)
 }
 
 // RPOPLPUSH source destination
-void DB::rpoplpush(context_t& con)
+// BRPOPLPUSH source destination timeout
+void DB::_rpoplpush(context_t& con, bool is_nonblock)
 {
     auto& src_key = con.argv[1];
     auto& des_key = con.argv[2];
@@ -251,9 +261,24 @@ void DB::rpoplpush(context_t& con)
     auto des_meta_key = encode_meta_key(des_key);
     check_expire(src_meta_key);
     check_expire(des_meta_key);
+    int timeout = 0;
+    if (!is_nonblock) {
+        timeout = str2l(con.argv[con.argv.size()-1]);
+        if (str2numerr()) ret(con, shared.integer_err);
+        if (timeout < 0) ret(con, shared.timeout_out_of_range);
+    }
     std::string src_value, des_value;
     auto s = db->Get(leveldb::ReadOptions(), src_meta_key, &src_value);
-    if (s.IsNotFound()) ret(con, shared.nil);
+    if (s.IsNotFound()) {
+        if (is_nonblock) ret(con, shared.nil);
+        s = db->Get(leveldb::ReadOptions(), des_meta_key, &des_value);
+        if (!s.ok() && !s.IsNotFound()) reterr(con, s);
+        if (s.ok()) check_type(con, des_value, ktype::tlist);
+        add_blocking_key(con, src_key);
+        con.des = des_key;
+        set_context_to_block(con, timeout);
+        return;
+    }
     check_status(con, s);
     check_type(con, src_value, ktype::tlist);
     leveldb::WriteBatch batch;
@@ -264,22 +289,7 @@ void DB::rpoplpush(context_t& con)
     auto enc_key = encode_list_key(src_key, ri);
     s = db->Get(leveldb::ReadOptions(), enc_key, &src_value);
     check_status(con, s);
-    batch.Delete(enc_key);
-    if (size == 1) { // last one
-        batch.Delete(src_meta_key);
-    } else {
-        if (is_no_hole(li, ri, size)) {
-            --ri;
-        } else {
-            auto it = db->NewIterator(leveldb::ReadOptions());
-            it->Seek(enc_key);
-            assert(it->Valid());
-            it->Prev();
-            assert(it->Valid());
-            ri = get_list_index(it->key());
-        }
-        batch.Put(src_meta_key, encode_list_meta_value(li, ri, --size));
-    }
+    pop_key(db, &batch, src_meta_key, enc_key, &li, &ri, &size, false);
     // put src_value to des_key
     if (src_key == des_key) {
         --li;
@@ -304,6 +314,12 @@ void DB::rpoplpush(context_t& con)
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     con.append_reply_string(src_value);
+    blocking_pop(des_key);
+}
+
+void DB::rpoplpush(context_t& con)
+{
+    _rpoplpush(con, true);
 }
 
 // LREM key count value
@@ -414,7 +430,7 @@ void DB::lindex(context_t& con)
         ret(con, shared.nil);
     if (is_no_hole(li, ri, size)) {
         value.clear();
-        auto enc_key = encode_list_key(key, index);
+        auto enc_key = encode_list_key(key, li + index);
         s = db->Get(leveldb::ReadOptions(), enc_key, &value);
         check_status(con, s);
         con.append_reply_string(value);
@@ -513,6 +529,162 @@ void DB::ltrim(context_t& con)
     check_status(con, s);
     touch_watch_key(key);
     con.append(shared.ok);
+}
+
+// BLPOP key [key ...] timeout
+void DB::_blpop(context_t& con, bool is_blpop)
+{
+    size_t size = con.argv.size();
+    int timeout = str2l(con.argv[size - 1]);
+    if (str2numerr()) ret(con, shared.integer_err);
+    if (timeout < 0) ret(con, shared.timeout_out_of_range);
+    for (size_t i = 1 ; i < size - 1; i++) {
+        std::string value;
+        auto& key = con.argv[i];
+        auto meta_key = encode_meta_key(key);
+        auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
+        if (s.ok()) {
+            int li, ri, size;
+            leveldb::WriteBatch batch;
+            check_type(con, value, ktype::tlist);
+            decode_list_meta_value(value, li, ri, size);
+            value.clear();
+            auto enc_key = encode_list_key(key, is_blpop ? li : ri);
+            s = db->Get(leveldb::ReadOptions(), enc_key, &value);
+            check_status(con, s);
+            pop_key(db, &batch, meta_key, enc_key, &li, &ri, &size, is_blpop);
+            s = db->Write(leveldb::WriteOptions(), &batch);
+            check_status(con, s);
+            con.append_reply_multi(2);
+            con.append_reply_string(key);
+            con.append_reply_string(value);
+            return;
+        }
+    }
+    for (size_t i = 1; i < size - 1; i++) {
+        add_blocking_key(con, con.argv[i]);
+    }
+    set_context_to_block(con, timeout);
+}
+
+void DB::blpop(context_t& con)
+{
+    if (con.flags & context_t::EXEC_MULTI)
+        lpop(con);
+    else
+        _blpop(con, true);
+}
+
+void DB::brpop(context_t& con)
+{
+    if (con.flags & context_t::EXEC_MULTI)
+        rpop(con);
+    else
+        _blpop(con, false);
+}
+
+void DB::brpoplpush(context_t& con)
+{
+    if (con.flags & context_t::EXEC_MULTI)
+        rpoplpush(con);
+    else
+        _rpoplpush(con, false);
+}
+
+// 将一个blocking key添加到DB::blocking_keys和context_t::blocking_keys中
+void DB::add_blocking_key(context_t& con, const key_t& key)
+{
+    con.blocking_keys.emplace_back(key);
+    auto it = blocking_keys.find(key);
+    if (it == blocking_keys.end()) {
+        std::vector<size_t> idlist = { con.conn->id() };
+        blocking_keys.emplace(key, std::move(idlist));
+    } else {
+        it->second.push_back(con.conn->id());
+    }
+}
+
+void DB::set_context_to_block(context_t& con, int timeout)
+{
+    con.flags |= context_t::CON_BLOCK;
+    con.block_start_time = angel::util::get_cur_time_ms();
+    con.blocked_time = timeout * 1000;
+    engine->add_block_client(con.conn->id());
+}
+
+void DB::blocking_pop(const key_t& key)
+{
+    std::string value;
+    auto cl = blocking_keys.find(key);
+    if (cl == blocking_keys.end()) return;
+    auto now = angel::util::get_cur_time_ms();
+    auto meta_key = encode_meta_key(key);
+    auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
+    assert(s.ok());
+    int li, ri, size;
+    decode_list_meta_value(value, li, ri, size);
+
+    context_t context;
+    auto conn = __server->get_server().get_connection(*cl->second.begin());
+    if (!conn) return;
+    auto& con = std::any_cast<context_t&>(conn->get_context());
+    auto bops = get_last_cmd(con.last_cmd);
+    auto enc_key = encode_list_key(key, bops == BLOCK_LPOP ? li : ri);
+    value.clear();
+    s = db->Get(leveldb::ReadOptions(), enc_key, &value);
+    assert(s.ok());
+    context.append_reply_multi(3);
+    context.append_reply_string(key);
+    context.append_reply_string(value);
+    double seconds = 1.0 * (now - con.block_start_time) / 1000;
+    context.append("+(").append(d2s(seconds)).append("s)\r\n");
+    conn->send(context.buf);
+
+    clear_blocking_keys_for_context(con);
+    engine->del_block_client(conn->id());
+
+    leveldb::WriteBatch batch;
+    pop_key(db, &batch, meta_key, enc_key, &li, &ri, &size, bops == BLOCK_LPOP);
+    if (bops == BLOCK_RPOPLPUSH) {
+        auto src_value = value;
+        value.clear();
+        auto meta_key = encode_meta_key(con.des);
+        s = db->Get(leveldb::ReadOptions(), meta_key, &value);
+        assert(s.ok() || s.IsNotFound());
+        if (s.IsNotFound()) {
+            batch.Put(encode_list_key(con.des, 0), src_value);
+            batch.Put(meta_key, encode_list_meta_value(0, 0, 1));
+        } else if (s.ok()) {
+            int li, ri, size;
+            decode_list_meta_value(value, li, ri, size);
+            if (key != con.des) ++size;
+            batch.Put(encode_list_key(con.des, --li), src_value);
+            batch.Put(meta_key, encode_list_meta_value(li, ri, size));
+        }
+    }
+    s = db->Write(leveldb::WriteOptions(), &batch);
+    assert(s.ok());
+    touch_watch_key(key);
+}
+
+// 清空con.blocking_keys，并从DB::blocking_keys中移除所有con
+void DB::clear_blocking_keys_for_context(context_t& con)
+{
+    for (auto& it : con.blocking_keys) {
+        auto cl = blocking_keys.find(it);
+        if (cl != blocking_keys.end()) {
+            for (auto c = cl->second.begin(); c != cl->second.end(); ++c) {
+                if (*c == con.conn->id()) {
+                    cl->second.erase(c);
+                    break;
+                }
+            }
+            if (cl->second.empty())
+                blocking_keys.erase(it);
+        }
+    }
+    con.flags &= ~context_t::CON_BLOCK;
+    con.blocking_keys.clear();
 }
 
 errstr_t DB::del_list_key(const key_t& key)

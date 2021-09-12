@@ -374,19 +374,6 @@ void DB::brpoplpush(context_t& con)
         _rpoplpush(con, false);
 }
 
-#define BLOCK_LPOP 1
-#define BLOCK_RPOP 2
-#define BLOCK_RPOPLPUSH 3
-
-static unsigned getLastcmd(const std::string& lc)
-{
-    unsigned ops = 0;
-    if (lc.compare("BLPOP") == 0) ops = BLOCK_LPOP;
-    else if (lc.compare("BRPOP") == 0) ops = BLOCK_RPOP;
-    else if (lc.compare("BRPOPLPUSH") == 0) ops = BLOCK_RPOPLPUSH;
-    return ops;
-}
-
 // 正常弹出解除阻塞的键
 void DB::blocking_pop(const key_t& key)
 {
@@ -401,7 +388,7 @@ void DB::blocking_pop(const key_t& key)
     auto conn = __server->get_server().get_connection(*cl->second.begin());
     if (!conn) return;
     auto& con = std::any_cast<context_t&>(conn->get_context());
-    auto bops = getLastcmd(con.last_cmd);
+    auto bops = get_last_cmd(con.last_cmd);
     other.append_reply_multi(2);
     other.append_reply_string(key);
     other.append_reply_string((bops == BLOCK_LPOP) ? list.front() : list.back());

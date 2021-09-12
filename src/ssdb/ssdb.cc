@@ -16,6 +16,7 @@ namespace alice {
 void engine::server_cron()
 {
     check_expire_keys();
+    check_blocked_clients();
 }
 
 void engine::creat_snapshot()
@@ -78,8 +79,28 @@ void engine::check_expire_keys()
     }
 }
 
+// 检查是否有阻塞的客户端超时
+void engine::check_blocked_clients()
+{
+    auto now = lru_clock;
+    for (auto it = blocked_clients.begin(); it != blocked_clients.end(); ) {
+        auto e = it++;
+        auto conn = __server->get_server().get_connection(*e);
+        if (!conn) continue;
+        auto& context = std::any_cast<context_t&>(conn->get_context());
+        if (context.block_start_time + context.blocked_time <= now) {
+            std::string message;
+            double seconds = 1.0 * (now - context.block_start_time) / 1000;
+            message.append("*-1\r\n+(").append(d2s(seconds)).append("s)\r\n");
+            conn->send(message);
+            blocked_clients.erase(e);
+            db->clear_blocking_keys_for_context(context);
+        }
+    }
+}
+
 engine::engine()
-    : db(new DB())
+    : db(new DB(this))
 {
     cmdtable = {
         { "EXISTS",     { -2, IS_READ,  BIND(exists) } },
@@ -121,9 +142,9 @@ engine::engine()
         { "LSET",       { -4, IS_WRITE, BIND(lset) } },
         { "LRANGE",     { -4, IS_READ,  BIND(lrange) } },
         { "LTRIM",      { -4, IS_WRITE, BIND(ltrim) } },
-        // { "BLPOP",      {  3, IS_READ,  BIND(blpop) } },
-        // { "BRPOP",      {  3, IS_READ,  BIND(brpop) } },
-        // { "BRPOPLPUSH", { -4, IS_READ,  BIND(brpoplpush) } },
+        { "BLPOP",      {  3, IS_READ,  BIND(blpop) } },
+        { "BRPOP",      {  3, IS_READ,  BIND(brpop) } },
+        { "BRPOPLPUSH", { -4, IS_READ,  BIND(brpoplpush) } },
         { "HSET",       { -4, IS_WRITE, BIND(hset) } },
         { "HSETNX",     { -4, IS_WRITE, BIND(hsetnx) } },
         { "HGET",       { -3, IS_READ,  BIND(hget) } },
