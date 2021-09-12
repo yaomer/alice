@@ -24,18 +24,15 @@ enum ReturnCode {
 };
 
 struct context_t {
-    enum Flag{
+    enum Flag {
         // 主服务器中设置该标志的连接表示与从服务器相连
-        // SLAVE = 0x001, // for master
         CONNECT_WITH_SLAVE = 0x001, // for master
         // 从服务器中设置该标志的连接表示与主服务器相连
-        // MASTER = 0x400, // for slave
         CONNECT_WITH_MASTER = 0x002, // for slave
-        // SYNC_RECV_PING = 0x200,
-        SYNC_PING = 0x004,
-        // 主服务器向设置SYNC_RDB_FILE标志的连接发送rdb文件
-        // 从服务器设置该标志表示该连接处于接收同步文件的状态
-        // SYNC_RDB_FILE = 0x002, // for master and slave
+        // 从服务器向主服务器发送了PING，正在等待接收PONG
+        SYNC_PING = 0x004, // for slave
+        // 主服务器向设置SYNC_SNAPSHOT标志的连接发送快照
+        // 从服务器设置该标志表示该连接处于接收快照的状态
         SYNC_SNAPSHOT = 0x008, // for master and slave
         // 主服务器向设置SYNC_COMMAND标志的连接传播同步命令
         // 从服务器设置该标志表示该连接处于接收同步命令的状态
@@ -50,6 +47,7 @@ struct context_t {
         EXEC_MULTI_ERR = 0x100,
         // 事务中有写操作
         EXEC_MULTI_WRITE = 0x200,
+        // 客户端处于阻塞状态
         CON_BLOCK = 0x400,
     };
     context_t()

@@ -510,9 +510,9 @@ void DB::unwatch(context_t& con)
     con.watch_keys.clear();
 }
 
-size_t DB::get_next_seq()
+uint64_t DB::get_next_seq()
 {
-    size_t seq;
+    uint64_t seq;
     std::string value;
     auto s = db->Get(leveldb::ReadOptions(), builtin_keys.seq, &value);
     assert(s.ok());

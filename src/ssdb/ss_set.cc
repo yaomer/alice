@@ -7,7 +7,7 @@ using namespace alice::ssdb;
 #define SET_ANCHOR_VAL ""
 
 static inline std::string
-encode_set_meta_value(size_t seq, size_t size)
+encode_set_meta_value(uint64_t seq, uint64_t size)
 {
     std::string buf;
     buf.append(1, ktype::tset);
@@ -18,7 +18,7 @@ encode_set_meta_value(size_t seq, size_t size)
 }
 
 static inline void
-decode_set_meta_value(const std::string& value, size_t *seq, size_t *size)
+decode_set_meta_value(const std::string& value, uint64_t *seq, uint64_t *size)
 {
     const char *s = value.c_str() + 1;
     if (seq) *seq = atoll(s);
@@ -26,7 +26,7 @@ decode_set_meta_value(const std::string& value, size_t *seq, size_t *size)
 }
 
 static inline std::string
-encode_set_key(size_t seq, const std::string& member)
+encode_set_key(uint64_t seq, const std::string& member)
 {
     std::string buf;
     buf.append(1, ktype::tset);
@@ -42,7 +42,7 @@ static inline std::string get_set_member(leveldb::Slice&& key)
     return key.ToString();
 }
 
-static inline std::string get_set_anchor(size_t seq)
+static inline std::string get_set_anchor(uint64_t seq)
 {
     std::string buf;
     buf.append(1, ktype::tset);
@@ -62,14 +62,14 @@ void DB::sadd(context_t& con)
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
     leveldb::WriteBatch batch;
     if (s.IsNotFound()) {
-        size_t seq = get_next_seq();
+        uint64_t seq = get_next_seq();
         for (size_t i = 2; i < con.argv.size(); i++)
             batch.Put(encode_set_key(seq, con.argv[i]), SET_VAL);
         adds = con.argv.size() - 2;
         batch.Put(meta_key, encode_set_meta_value(seq, adds));
         batch.Put(get_set_anchor(seq), SET_ANCHOR_VAL);
     } else if (s.ok()) {
-        size_t seq, size;
+        uint64_t seq, size;
         check_type(con, value, ktype::tset);
         decode_set_meta_value(value, &seq, &size);
         for (size_t i = 2; i < con.argv.size(); i++) {
@@ -100,7 +100,7 @@ void DB::sismember(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::tset);
-    size_t seq;
+    uint64_t seq;
     decode_set_meta_value(value, &seq, nullptr);
     s = db->Get(leveldb::ReadOptions(), encode_set_key(seq, member), &value);
     if (s.ok()) con.append(shared.n1);
@@ -119,11 +119,11 @@ void DB::spop(context_t& con)
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
     check_type(con, value, ktype::tset);
-    size_t seq, size;
+    uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     std::default_random_engine e(time(nullptr));
-    std::uniform_int_distribution<size_t> u(0, size - 1);
-    size_t where = u(e);
+    std::uniform_int_distribution<uint64_t> u(0, size - 1);
+    uint64_t where = u(e);
     auto anchor = get_set_anchor(seq);
     auto it = db->NewIterator(leveldb::ReadOptions());
     leveldb::Slice pop_key;
@@ -148,25 +148,25 @@ void DB::spop(context_t& con)
 }
 
 // 产生count个[0, size)之间的随机数
-static std::vector<size_t> get_rands(ssize_t count, size_t size)
+static std::vector<uint64_t> get_rands(ssize_t count, uint64_t size)
 {
-    std::vector<size_t> rands;
+    std::vector<uint64_t> rands;
     std::default_random_engine e(time(nullptr));
-    std::uniform_int_distribution<size_t> u(0, size - 1);
+    std::uniform_int_distribution<uint64_t> u(0, size - 1);
     for (int i = 0; i < count; i++) {
         rands.emplace_back(u(e));
     }
     return rands;
 }
 
-static std::vector<size_t> get_rands_unrepeatable(ssize_t count, size_t size)
+static std::vector<uint64_t> get_rands_unrepeatable(ssize_t count, uint64_t size)
 {
-    size_t nr;
-    std::vector<size_t> rands;
-    std::unordered_set<size_t> randset;
+    uint64_t nr;
+    std::vector<uint64_t> rands;
+    std::unordered_set<uint64_t> randset;
     assert(count <= size);
     std::default_random_engine e(time(nullptr));
-    std::uniform_int_distribution<size_t> u(0, size - 1);
+    std::uniform_int_distribution<uint64_t> u(0, size - 1);
     for (int i = 0; i < count; i++) {
         do {
             nr = u(e);
@@ -193,7 +193,7 @@ void DB::srandmember(context_t& con)
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
     check_type(con, value, ktype::tset);
-    size_t seq, size;
+    uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     if (count >= static_cast<ssize_t>(size)) {
         con.append_reply_multi(size);
@@ -207,8 +207,8 @@ void DB::srandmember(context_t& con)
         assert(size == 0);
         return;
     }
-    std::vector<size_t> rands;
-    std::unordered_map<size_t, std::string> randmap;
+    std::vector<uint64_t> rands;
+    std::unordered_map<uint64_t, std::string> randmap;
     if (count == 0) count = -1;
     if (count < 0) {
         count = -count;
@@ -217,7 +217,7 @@ void DB::srandmember(context_t& con)
         rands = get_rands_unrepeatable(count, size);
     }
     auto origin_rands = rands;
-    std::sort(rands.begin(), rands.end(), std::less<size_t>());
+    std::sort(rands.begin(), rands.end(), std::less<uint64_t>());
     auto anchor = get_set_anchor(seq);
     auto it = db->NewIterator(leveldb::ReadOptions());
     size_t i = 0;
@@ -254,7 +254,7 @@ void DB::srem(context_t& con)
     check_status(con, s);
     check_type(con, value, ktype::tset);
     int rems = 0;
-    size_t seq, size;
+    uint64_t seq, size;
     leveldb::WriteBatch batch;
     decode_set_meta_value(value, &seq, &size);
     for (size_t i = 2; i < con.argv.size(); i++) {
@@ -292,7 +292,7 @@ void DB::smove(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::tset);
-    size_t seq, size;
+    uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     auto rem_key = encode_set_key(seq, member);
     s = db->Get(leveldb::ReadOptions(), rem_key, &value);
@@ -325,7 +325,7 @@ void DB::smove(context_t& con)
             reterr(con, s);
         }
     } else if (s.IsNotFound()) {
-        size_t seq = get_next_seq();
+        uint64_t seq = get_next_seq();
         batch.Put(encode_set_key(seq, member), SET_VAL);
         batch.Put(des_meta_key, encode_set_meta_value(seq, 1));
         batch.Put(get_set_anchor(seq), SET_ANCHOR_VAL);
@@ -349,7 +349,7 @@ void DB::scard(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::tset);
-    size_t size;
+    uint64_t size;
     decode_set_meta_value(value, nullptr, &size);
     con.append_reply_number(size);
 }
@@ -364,7 +364,7 @@ void DB::smembers(context_t& con)
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
     check_type(con, value, ktype::tset);
-    size_t seq, size;
+    uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     auto anchor = get_set_anchor(seq);
     auto it = db->NewIterator(leveldb::ReadOptions());
@@ -380,8 +380,8 @@ void DB::smembers(context_t& con)
 void DB::_sinter(context_t& con, std::unordered_set<std::string>& rset, int start)
 {
     std::string value;
-    size_t min = 0, j = 0, seq, size, i;
-    std::unordered_map<size_t, size_t> seqmap;
+    uint64_t min = 0, j = 0, seq, size, i;
+    std::unordered_map<uint64_t, uint64_t> seqmap;
     // 挑选出元素最少的集合
     for (size_t i = start; i < con.argv.size(); i++) {
         value.clear();
@@ -417,7 +417,7 @@ void DB::_sinter(context_t& con, std::unordered_set<std::string>& rset, int star
 
 void DB::_sunion(context_t& con, std::unordered_set<std::string>& rset, int start)
 {
-    size_t seq, size;
+    uint64_t seq, size;
     std::string value;
     for (size_t i = start; i < con.argv.size(); i++) {
         value.clear();
@@ -457,7 +457,7 @@ void DB::_sstore(context_t& con, std::unordered_set<std::string>& rset)
         del_set_key_batch(&batch, key);
     } else if (!s.IsNotFound())
         reterr(con, s);
-    size_t seq = get_next_seq();
+    uint64_t seq = get_next_seq();
     for (auto& member : rset) {
         batch.Put(encode_set_key(seq, member), SET_VAL);
     }
@@ -535,7 +535,7 @@ errstr_t DB::del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
     if (s.IsNotFound()) return std::nullopt;
     if (!s.ok()) return s;
-    size_t seq, size;
+    uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     auto anchor = get_set_anchor(seq);
     auto it = db->NewIterator(leveldb::ReadOptions());
@@ -554,10 +554,10 @@ errstr_t DB::del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key)
 void DB::rename_set_key(leveldb::WriteBatch *batch, const key_t& key,
                         const std::string& meta_value, const key_t& newkey)
 {
-    size_t seq, size;
+    uint64_t seq, size;
     decode_set_meta_value(meta_value, &seq, &size);
-    size_t newseq = get_next_seq();
-    size_t newsize = size;
+    uint64_t newseq = get_next_seq();
+    uint64_t newsize = size;
     auto anchor = get_set_anchor(seq);
     auto it = db->NewIterator(leveldb::ReadOptions());
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {

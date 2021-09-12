@@ -97,7 +97,7 @@ struct keycomp : public leveldb::Comparator {
             if (r) return r;
             auto i1 = atoi(s1+1), i2 = atoi(s2+1);
             return i1 - i2;
-        } else if (l[0] == 'z' && r[0] == 'z') {
+        } else if (l[0] == 'Z' && r[0] == 'Z') {
             uint64_t seq1, seq2;
             auto begin1 = const_cast<char*>(l.data()) + 1;
             auto begin2 = const_cast<char*>(r.data()) + 1;
@@ -285,7 +285,7 @@ private:
     // void rename_zset_key(leveldb::WriteBatch *batch, const key_t& key,
                          // const std::string& meta_value, const key_t& newkey);
 
-    size_t get_next_seq();
+    uint64_t get_next_seq();
 
     void blocking_pop(const key_t& key);
     void clear_blocking_keys_for_context(context_t& con);
@@ -327,7 +327,7 @@ struct ktype {
     static const char thash    = 'h';
     static const char tset     = 'S';
     static const char tzset    = 'z';
-    static const char tzmap    = 'Z';
+    static const char tscore   = 'Z';
 };
 
 static inline const char
