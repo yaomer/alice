@@ -213,6 +213,7 @@ struct shared_obj {
     const char *type_err = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
     const char *integer_err = "-ERR value is not an integer or out of range\r\n";
     const char *float_err = "-ERR value is not a valid float\r\n";
+    const char *min_or_max_err = "-ERR min or max is not a valid float\r\n";
     const char *syntax_err = "-ERR syntax error\r\n";
     const char *no_such_key = "-ERR no such key\r\n";
     const char *subcommand_err = "-ERR Unknown subcommand or wrong argument\r\n";

@@ -92,13 +92,13 @@ int parse_interval(context_t& con, unsigned& cmdops, int& lower, int& upper,
     // get min and max
     if (!lower) {
         double fval = str2f(mins);
-        if (str2numerr()) retval(con, shared.float_err, C_ERR);
+        if (str2numerr()) retval(con, shared.min_or_max_err, C_ERR);
         if (!is_reverse) min = fval;
         else max = fval;
     }
     if (!upper) {
         double fval = str2f(maxs);
-        if (str2numerr()) retval(con, shared.float_err, C_ERR);
+        if (str2numerr()) retval(con, shared.min_or_max_err, C_ERR);
         if (!is_reverse) max = fval;
         else min = fval;
     }

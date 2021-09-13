@@ -193,6 +193,8 @@ struct Zset {
     {
         return zsl.upper_bound(zslkey(score, key));
     }
+    double min_score() { return (*zsl.begin()).first.score; }
+    double max_score() { return (*--zsl.end()).first.score; }
     // value(bool)不作使用
     skiplist<zslkey, bool, zslkeycmp> zsl;
     // 根据一个member可以在常数时间找到其score

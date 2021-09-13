@@ -126,23 +126,59 @@ void DB::zcount(context_t& con)
 
 size_t DB::zcount_range(Zset& zset, unsigned cmdops, int lower, int upper, double min, double max)
 {
-    if (lower && upper) { // (-inf, +inf)
-        return zset.size();
-    } else if (lower) {
+    if (zset.empty()) return 0;
+    double min_score = zset.min_score();
+    double max_score = zset.max_score();
+    if (lower) min = std::min(min_score, max) - 1;
+    if (upper) max = std::max(max_score, min) + 1;
+    if (min > max_score || max < min_score) return 0;
+    if (min < min_score) {
+        if (max > max_score) return zset.size();
         auto order = zset.order_of_key(max, "");
-        // (-inf, max) or (-inf, max]
-        return (cmdops & ROI) ? order - 1 : order;
-    } else if (upper) {
-        auto order = zset.order_of_key(min, "");
-        // (min, +inf) or [min, +inf)
-        return (cmdops & LOI) ? order - 1 : order;
-    } else {
-        auto lower = zset.order_of_key(min, "");
-        auto upper = zset.order_of_key(max, "");
-        auto count = upper - lower;
+        if (order > 0) {
+            return (cmdops & ROI) ? order - 1 : order;
+        }
+        auto it = zset.lower_bound(max, "");
+        order = zset.order_of_key(it->first.score, "");
+        return order - 1;
+    }
+    // min is [min_score, max_score]
+    auto lr = zset.order_of_key(min, "");
+    auto rr = zset.order_of_key(max, "");
+    if (max > max_score) {
+        if (lr > 0) {
+            auto order = zset.size() - lr;
+            return (cmdops & LOI) ? order : order + 1;
+        }
+        auto it = zset.lower_bound(min, "");
+        auto order = zset.order_of_key(it->first.score, "");
+        order = zset.size() - order + 1;
+        return order;
+    }
+    // min, max are both [min_score, max_score]
+    if (lr > 0 && rr > 0) {
+        auto count = rr - lr + 1;
         if (cmdops & LOI) count--;
         if (cmdops & ROI) count--;
         return count;
+    } else if (lr > 0) {
+        auto it = zset.lower_bound(max, "");
+        rr = zset.order_of_key(it->first.score, "");
+        auto count = rr - lr;
+        if (cmdops & LOI) count--;
+        return count;
+    } else if (rr > 0) {
+        auto it = zset.lower_bound(min, "");
+        lr = zset.order_of_key(it->first.score, "");
+        auto count = rr - lr + 1;
+        if (cmdops & ROI) count--;
+        return count;
+    } else {
+        auto it = zset.lower_bound(min, "");
+        lr = zset.order_of_key(it->first.score, "");
+        it = zset.lower_bound(max, "");
+        rr = zset.order_of_key(it->first.score, "");
+        return rr - lr;
     }
 }
 
