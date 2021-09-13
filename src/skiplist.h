@@ -2,14 +2,26 @@
 #define _ALICE_SRC_SKIPLIST_H
 
 #include <stdlib.h>
+#include <iostream>
 
 #include <utility>
+#include <vector>
 
 #define SKIPLIST_MAX_LEVEL 32 /* 1 ~ 32 */
 
 #define SKIPLIST_P 0.25
 
 namespace alice {
+
+template <typename T>
+struct skiplist_node {
+    T *value;
+    skiplist_node<T> *prev;
+    struct level {
+        skiplist_node<T> *next;
+        unsigned span; /* 从当前索引节点到下一索引节点的跨度 */
+    } level[];
+};
 
 template <typename Key,
           typename T,
@@ -22,21 +34,15 @@ public:
     using const_reference = const value_type&;
     using pointer = value_type*;
     using const_pointer = const value_type*;
-    struct skiplist_node {
-        value_type *value;
-        skiplist_node *prev;
-        struct level {
-            skiplist_node *next;
-            int span; /* 从当前索引节点到下一索引节点的跨度 */
-        } level[];
-    };
+    using node_type = skiplist_node<value_type>;
+    using key_compare = Compare;
     class iterator {
     public:
         iterator() : node(nullptr), prev(nullptr) {  }
-        iterator(skiplist_node *node) : node(node), prev(nullptr)
+        iterator(node_type *node) : node(node), prev(nullptr)
         {
         }
-        iterator(skiplist_node *node, skiplist_node *prev) : node(node), prev(prev)
+        iterator(node_type *node, node_type *prev) : node(node), prev(prev)
         {
         }
         bool operator==(const iterator& iter)
@@ -79,48 +85,46 @@ public:
             return *node->value;
         }
     private:
-        skiplist_node *node;
-        skiplist_node *prev;
+        node_type *node;
+        node_type *prev;
         friend skiplist;
     };
-    using node_type = skiplist_node;
     using const_iterator = const iterator;
-    using key_compare = Compare;
     skiplist()
     {
-        __level = 1;
-        __size = 0;
-        __head = alloc_node(SKIPLIST_MAX_LEVEL);
-        __tail = nullptr;
+        max_level = 1;
+        length = 0;
+        head = alloc_head();
+        tail = nullptr;
         __srandom();
     }
-    ~skiplist() { __clear(); free(__head); }
+    ~skiplist() { __clear(); free_node(head); }
     skiplist(const skiplist& sl)
     {
-        __level = 1;
-        __size = 0;
-        __head = alloc_node(SKIPLIST_MAX_LEVEL);
-        __tail = nullptr;
-        __comp = sl.__comp;
+        max_level = 1;
+        length = 0;
+        head = alloc_head();
+        tail = nullptr;
+        comp = sl.comp;
         __srandom();
         for (auto it = sl.cbegin(); it != sl.cend(); ++it)
             __insert(it->first, it->second);
     }
-    skiplist(skiplist&& sl) : __level(sl.__level), __size(sl.__size),
-        __head(sl.__head), __tail(sl.__tail), __comp(sl.__comp)
+    skiplist(skiplist&& sl) : max_level(sl.max_level), length(sl.length),
+        head(sl.head), tail(sl.tail), comp(sl.comp)
     {
     }
     skiplist& operator=(skiplist&& sl)
     {
-        __level = sl.__level;
-        __size = sl.__size;
-        __head = sl.__head;
-        __tail = sl.__tail;
-        __comp = sl.__comp;
+        max_level = sl.max_level;
+        length = sl.length;
+        head = sl.head;
+        tail = sl.tail;
+        comp = sl.comp;
         return *this;
     }
-    iterator begin() const { return __head->level[0].next; }
-    iterator end() const { return iterator(nullptr, __tail); }
+    iterator begin() const { return head->level[0].next; }
+    iterator end() const { return iterator(nullptr, tail); }
     const_iterator cbegin() const { return begin(); }
     const_iterator cend() const { return end(); }
     iterator lower_bound(const key_type& key)
@@ -134,7 +138,7 @@ public:
         node_type *p = __find(key);
         if (!p) return end();
         if (equal(key, p->value->first)) {
-            return p == __tail ? end() : p;
+            return p == tail ? end() : p;
         }
         if (p->prev) return p->prev;
         else return end();
@@ -144,6 +148,7 @@ public:
         node_type *p = __find(key);
         return (p && equal(key, p->value->first)) ? p : end();
     }
+    // return 0 if not found
     size_t order_of_key(const key_type& key)
     {
         return __order_of_key(key);
@@ -154,8 +159,8 @@ public:
         node_type *p = __find_by_order(order);
         return p ? p : end();
     }
-    bool empty() { return __size == 0; }
-    size_t size() { return __size; }
+    bool empty() { return length == 0; }
+    size_t size() { return length; }
     void insert(const key_type& key, const T& value)
     {
         __insert(key, value);
@@ -164,21 +169,27 @@ public:
     void clear() { __clear(); }
 private:
     skiplist& operator=(const skiplist&);
-    node_type *alloc_node(int level)
+    node_type *alloc_node(int level, value_type *value)
     {
-        size_t varlen = level * sizeof(struct skiplist_node::level);
-        return static_cast<node_type*>(calloc(1, sizeof(node_type) + varlen));
-    }
-    node_type *alloc_node(const key_type& key, const T& value, int level)
-    {
-        node_type *node = alloc_node(level);
-        node->value = new value_type(key, value);
+        node_type *node = reinterpret_cast<node_type*>(
+                malloc(sizeof(node_type) + level * sizeof(struct skiplist_node<value_type>::level)));
+        node->value = value;
         return node;
     }
     void free_node(node_type *node)
     {
         delete node->value;
         free(node);
+    }
+    node_type *alloc_head()
+    {
+        node_type *x = alloc_node(SKIPLIST_MAX_LEVEL, nullptr);
+        for (int i = 0; i < SKIPLIST_MAX_LEVEL; i++) {
+            x->level[i].next = nullptr;
+            x->level[i].span = 0;
+        }
+        x->prev = nullptr;
+        return x;
     }
     int rand_level()
     {
@@ -190,10 +201,10 @@ private:
     // 返回键大于等于key的最小节点
     node_type *__find(const key_type& key)
     {
-        node_type *p = __head;
+        node_type *p = head;
         node_type *pre = p;
 
-        for (int i = __level - 1; i >= 0; i--) {
+        for (int i = max_level - 1; i >= 0; i--) {
             while ((p = pre->level[i].next) && greater(key, p->value->first))
                 pre = p;
             if (p && equal(key, p->value->first))
@@ -204,27 +215,27 @@ private:
     size_t __order_of_key(const key_type& key)
     {
         size_t order = 0;
-        node_type *pre = __head;
+        node_type *pre = head;
         node_type *p = nullptr;
 
-        for (int i = __level - 1; i >= 0; i--) {
+        for (int i = max_level - 1; i >= 0; i--) {
             while ((p = pre->level[i].next) && greater(key, p->value->first)) {
                 order += pre->level[i].span;
                 pre = p;
             }
             if (p && equal(key, p->value->first)) {
                 order += pre->level[i].span;
-                break;
+                return order;
             }
         }
-        return order;
+        return 0;
     }
     node_type *__find_by_order(size_t order)
     {
-        node_type *pre = __head;
+        node_type *pre = head;
         node_type *p = nullptr;
 
-        for (int i = __level - 1; i >= 0; i--) {
+        for (int i = max_level - 1; i >= 0; i--) {
             while ((p = pre->level[i].next) && order > pre->level[i].span) {
                 order -= pre->level[i].span;
                 pre = p;
@@ -236,111 +247,108 @@ private:
     }
     void __insert(const key_type& key, const T& value)
     {
-        int level = rand_level();
-        if (level > __level) __level = level;
-        // 寻找插入位置
-        int span[SKIPLIST_MAX_LEVEL] = { 0 }; // level(i)层走过的步数
-        node_type *update[__level]; // 指向需要更新的节点
-        node_type *pre = __head;
-        node_type *p = nullptr;
-        for (int i = __level - 1; i >= 0; i--) {
-            while ((p = pre->level[i].next) && greater(key, p->value->first)) {
-                span[i] += p->level[i].span;
-                pre = p;
+        // 每一层插入位置的前驱
+        node_type *update[SKIPLIST_MAX_LEVEL];
+        unsigned rank[SKIPLIST_MAX_LEVEL];
+        node_type *x = head;
+
+        // 寻找每一层的插入位置
+        for (int i = max_level - 1; i >= 0; i--) {
+            rank[i] = i == max_level - 1 ? 0 : rank[i + 1];
+            while (x->level[i].next && greater(key, x->level[i].next->value->first)) {
+                rank[i] += x->level[i].span;
+                x = x->level[i].next;
             }
-            update[i] = pre;
-        }
-        for (int i = __level - 1; i >= 0; i--) {
-            for (int j = i - 1; j >= 0; j--)
-                span[i] += span[j];
-        }
-        // 已存在键为key的节点，更新它的值
-        if (p && equal(key, p->value->first)) {
-            p->value->second = value;
-            return;
+            update[i] = x;
         }
 
-        p = alloc_node(key, value, level);
+        int level = rand_level();
+        if (level > max_level) {
+            for (int i = max_level; i < level; i++) {
+                rank[i] = 0;
+                update[i] = head;
+                update[i]->level[i].span = length;
+            }
+            max_level = level;
+        }
+        x = alloc_node(level, new value_type(key, value));
+        // 逐层插入x，并更新对应的span
+        for (int i = 0; i < level; i++) {
+            x->level[i].next = update[i]->level[i].next;
+            update[i]->level[i].next = x;
 
-        if (!__tail || greater(p->value->first, __tail->value->first))
-            __tail = p;
+            x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
+            update[i]->level[i].span = (rank[0] - rank[i]) + 1;
+        }
 
-        // 逐层插入
-        for (int i = __level - 1; i >= level; i--)
+        for (int i = level; i < max_level; i++) {
             update[i]->level[i].span++;
-        for (int i = level - 1; i > 0; i--) {
-            p->level[i].span = update[i]->level[i].span - span[i];
-            update[i]->level[i].span = span[i] + 1;
-            p->level[i].next = update[i]->level[i].next;
-            update[i]->level[i].next = p;
         }
-        p->level[0].span = update[0]->level[0].span = 1;
-        p->level[0].next = update[0]->level[0].next;
-        update[0]->level[0].next = p;
-        // update prev
-        if (p->level[0].next) p->level[0].next->prev = p;
-        p->prev = (update[0] == __head) ? NULL : update[0];
-        __size++;
+
+        x->prev = (update[0] == head) ? nullptr : update[0];
+        if (x->level[0].next) x->level[0].next->prev = x;
+        else tail = x;
+        length++;
     }
     void __erase(const key_type& key)
     {
-        node_type *update[__level];
-        node_type *pre = __head;
-        node_type *p = nullptr;
-
-        for (int i = __level - 1; i >= 0; i--) {
-            while ((p = pre->level[i].next) && greater(key, p->value->first))
-                pre = p;
-            update[i] = pre;
+        node_type *update[SKIPLIST_MAX_LEVEL];
+        node_type *x = head;
+        // 寻找待删除节点
+        for (int i = max_level - 1; i >= 0; i--) {
+            while (x->level[i].next && greater(key, x->level[i].next->value->first)) {
+                x = x->level[i].next;
+            }
+            update[i] = x;
         }
-        if (!p || !equal(key, p->value->first)) return;
-        for (int i = __level - 1; i >= 0; i--) {
-            if (update[i]->level[i].next == p) {
-                update[i]->level[i].span = p->level[i].span;
-                update[i]->level[i].next = p->level[i].next;
-                if (!__head->level[i].next) __level--;
-            } else if (update[i]->level[i].next) {
+        x = x->level[0].next;
+        // 逐层删除x
+        for (int i = 0; i < max_level; i++) {
+            if (update[i]->level[i].next == x) {
+                update[i]->level[i].span += x->level[i].span - 1;
+                update[i]->level[i].next = x->level[i].next;
+            } else {
                 update[i]->level[i].span--;
             }
         }
-        if (p == __tail) __tail = p->prev;
-        if (p->level[0].next) p->level[0].next->prev = p->prev;
-        free_node(p);
-        __size--;
-        return;
+        if (x->level[0].next) {
+            x->level[0].next->prev = x->prev;
+        } else {
+            tail = x->prev;
+        }
+        free_node(x);
+        while (max_level > 1 && head->level[max_level - 1].next == nullptr)
+            max_level--;
+        length--;
     }
     void __clear()
     {
-        node_type *p = __head->level[0].next;
-        while (p) {
+        for (auto *p = head->level[0].next; p; ) {
             node_type *np = p->level[0].next;
             free_node(p);
             p = np;
         }
-        size_t len = SKIPLIST_MAX_LEVEL * sizeof(struct skiplist_node::level);
-        memset(__head->level, 0, len);
-        __level = 1;
-        __size = 0;
-        __tail = nullptr;
-    }
-    bool less(const key_type &lhs, const key_type &rhs)
-    {
-        return __comp(lhs, rhs);
+        free_node(head);
+        head = alloc_head();
+        tail = nullptr;
+        max_level = 1;
+        length = 0;
     }
     bool greater(const key_type &lhs, const key_type &rhs)
     {
-        return __comp(rhs, lhs);
+        return comp(rhs, lhs);
     }
     bool equal(const key_type &lhs, const key_type &rhs)
-    { // l >= r && r >= l ==> l == r
-        return !__comp(lhs, rhs) && !__comp(rhs, lhs);
+    {
+        // (l >= r && r >= l) ==> l == r
+        return !comp(lhs, rhs) && !comp(rhs, lhs);
     }
     void __srandom() { srandom(time(nullptr)); }
 
-    int __level;
-    size_t __size;
-    node_type *__head, *__tail;
-    key_compare __comp;
+    int max_level;
+    size_t length;
+    node_type *head, *tail;
+    key_compare comp;
 };
 }
 
