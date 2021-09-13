@@ -196,7 +196,7 @@ void DB::set_builtin_keys()
 void DB::clear()
 {
     leveldb::WriteBatch batch;
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->SeekToFirst(); it->Valid(); it->Next()) {
         batch.Delete(it->key());
     }
@@ -355,7 +355,7 @@ void DB::keys(context_t& con)
         ret(con, shared.unknown_option);
     int nums = 0;
     con.reserve_multi_head();
-    auto *it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     it->Seek(builtin_keys.location);
     assert(it->Valid());
     for (it->Next(); it->Valid(); it->Next()) {

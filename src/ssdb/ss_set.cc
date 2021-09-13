@@ -125,7 +125,7 @@ void DB::spop(context_t& con)
     std::uniform_int_distribution<uint64_t> u(0, size - 1);
     uint64_t where = u(e);
     auto anchor = get_set_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     leveldb::Slice pop_key;
     leveldb::WriteBatch batch;
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
@@ -198,7 +198,7 @@ void DB::srandmember(context_t& con)
     if (count >= static_cast<ssize_t>(size)) {
         con.append_reply_multi(size);
         auto anchor = get_set_anchor(seq);
-        auto it = db->NewIterator(leveldb::ReadOptions());
+        auto it = newIterator();
         for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
             con.append_reply_string(get_set_member(it->key()));
             if (--size == 0)
@@ -219,7 +219,7 @@ void DB::srandmember(context_t& con)
     auto origin_rands = rands;
     std::sort(rands.begin(), rands.end(), std::less<uint64_t>());
     auto anchor = get_set_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     size_t i = 0;
     auto where = rands[i];
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
@@ -367,7 +367,7 @@ void DB::smembers(context_t& con)
     uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     auto anchor = get_set_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     con.append_reply_multi(size);
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
         con.append_reply_string(get_set_member(it->key()));
@@ -398,7 +398,7 @@ void DB::_sinter(context_t& con, std::unordered_set<std::string>& rset, int star
         }
     }
     auto anchor = get_set_anchor(seqmap[j]);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
         auto member = get_set_member(it->key());
         for (i = start; i < con.argv.size(); i++) {
@@ -428,7 +428,7 @@ void DB::_sunion(context_t& con, std::unordered_set<std::string>& rset, int star
         check_type(con, value, ktype::tset);
         decode_set_meta_value(value, &seq, &size);
         auto anchor = get_set_anchor(seq);
-        auto it = db->NewIterator(leveldb::ReadOptions());
+        auto it = newIterator();
         for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
             rset.emplace(get_set_member(it->key()));
             if (--size == 0)
@@ -538,7 +538,7 @@ errstr_t DB::del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     uint64_t seq, size;
     decode_set_meta_value(value, &seq, &size);
     auto anchor = get_set_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
         batch->Delete(it->key());
         if (--size == 0)
@@ -559,7 +559,7 @@ void DB::rename_set_key(leveldb::WriteBatch *batch, const key_t& key,
     uint64_t newseq = get_next_seq();
     uint64_t newsize = size;
     auto anchor = get_set_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
         batch->Put(encode_set_key(newseq, get_set_member(it->key())), it->value());
         batch->Delete(it->key());

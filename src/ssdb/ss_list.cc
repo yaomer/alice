@@ -50,14 +50,14 @@ static inline bool is_no_hole(int li, int ri, int size)
     return ri - li + 1 == size;
 }
 
-static void pop_key(leveldb::DB *db, leveldb::WriteBatch *batch,
-                    const std::string& meta_key, const std::string& enc_key,
-                    int *li, int *ri, int *size, bool is_lpop)
+void DB::pop_key(leveldb::WriteBatch *batch,
+                 const std::string& meta_key, const std::string& enc_key,
+                 int *li, int *ri, int *size, bool is_lpop)
 {
     if (is_no_hole(*li, *ri, *size)) {
         is_lpop ? ++*li : --*ri;
     } else {
-        auto it = db->NewIterator(leveldb::ReadOptions());
+        auto it = newIterator();
         it->Seek(enc_key);
         assert(it->Valid());
         is_lpop ? it->Next() : it->Prev();
@@ -184,7 +184,7 @@ void DB::_lpop(context_t& con, bool is_lpop)
     auto enc_key = encode_list_key(key, is_lpop ? li : ri);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     check_status(con, s);
-    pop_key(db, &batch, meta_key, enc_key, &li, &ri, &size, is_lpop);
+    pop_key(&batch, meta_key, enc_key, &li, &ri, &size, is_lpop);
 
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -243,7 +243,7 @@ void DB::lrange(context_t& con)
         return;
     int ranges = stop - start + 1;
     con.append_reply_multi(ranges);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(encode_list_key(key, li+start)); it->Valid(); it->Next()) {
         con.append_reply_string(it->value().ToString());
         if (--ranges == 0)
@@ -289,7 +289,7 @@ void DB::_rpoplpush(context_t& con, bool is_nonblock)
     auto enc_key = encode_list_key(src_key, ri);
     s = db->Get(leveldb::ReadOptions(), enc_key, &src_value);
     check_status(con, s);
-    pop_key(db, &batch, src_meta_key, enc_key, &li, &ri, &size, false);
+    pop_key(&batch, src_meta_key, enc_key, &li, &ri, &size, false);
     // put src_value to des_key
     if (src_key == des_key) {
         --li;
@@ -340,7 +340,7 @@ void DB::lrem(context_t& con)
     decode_list_meta_value(value, li, ri, size);
     // 因为可能会在中间删除元素，所以需要更新索引范围[li, ri]
     bool update = false;
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     if (count > 0) {
         for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
             if (it->value() == con.argv[3]) {
@@ -436,7 +436,7 @@ void DB::lindex(context_t& con)
         con.append_reply_string(value);
         return;
     }
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
         if (--index == -1) {
             con.append_reply_string(it->value().ToString());
@@ -470,7 +470,7 @@ void DB::lset(context_t& con)
     if (is_no_hole(li, ri, size)) {
         enc_key = encode_list_key(key, index);
     } else {
-        auto it = db->NewIterator(leveldb::ReadOptions());
+        auto it = newIterator();
         for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
             if (--index == -1) {
                 enc_key = it->key().ToString();
@@ -514,7 +514,7 @@ void DB::ltrim(context_t& con)
     }
     int i = 0;
     leveldb::WriteBatch batch;
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
         check_status(con, it->status());
         if (i == start) li = get_list_index(it->key());
@@ -552,7 +552,7 @@ void DB::_blpop(context_t& con, bool is_blpop)
             auto enc_key = encode_list_key(key, is_blpop ? li : ri);
             s = db->Get(leveldb::ReadOptions(), enc_key, &value);
             check_status(con, s);
-            pop_key(db, &batch, meta_key, enc_key, &li, &ri, &size, is_blpop);
+            pop_key(&batch, meta_key, enc_key, &li, &ri, &size, is_blpop);
             s = db->Write(leveldb::WriteOptions(), &batch);
             check_status(con, s);
             con.append_reply_multi(2);
@@ -644,7 +644,7 @@ void DB::blocking_pop(const key_t& key)
     engine->del_block_client(conn->id());
 
     leveldb::WriteBatch batch;
-    pop_key(db, &batch, meta_key, enc_key, &li, &ri, &size, bops == BLOCK_LPOP);
+    pop_key(&batch, meta_key, enc_key, &li, &ri, &size, bops == BLOCK_LPOP);
     if (bops == BLOCK_RPOPLPUSH) {
         auto src_value = value;
         value.clear();
@@ -706,7 +706,7 @@ errstr_t DB::del_list_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     if (!s.ok()) return s;
     int li, ri, size;
     decode_list_meta_value(value, li, ri, size);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
         batch->Delete(it->key());
         if (--size == 0)
@@ -722,7 +722,7 @@ void DB::rename_list_key(leveldb::WriteBatch *batch, const key_t& key,
 {
     int li, ri, size, i = 0;
     decode_list_meta_value(meta_value, li, ri, size);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(encode_list_key(key, li)); it->Valid(); it->Next()) {
         batch->Put(encode_list_key(newkey, i++), it->value());
         batch->Delete(it->key());
@@ -732,4 +732,16 @@ void DB::rename_list_key(leveldb::WriteBatch *batch, const key_t& key,
     assert(size == 0);
     batch->Put(encode_meta_key(newkey), encode_list_meta_value(0, i-1, i));
     batch->Delete(encode_meta_key(key));
+}
+
+int keycomp::list_compare(const leveldb::Slice& l, const leveldb::Slice& r) const
+{
+    auto begin1 = l.data() + 1, begin2 = r.data() + 1;
+    auto s1 = strrchr(begin1, ':');
+    auto s2 = strrchr(begin2, ':');
+    leveldb::Slice key1(begin1, s1 - begin1), key2(begin2, s2 - begin2);
+    int res = key1.compare(key2);
+    if (res) return res;
+    auto i1 = atoi(s1 + 1), i2 = atoi(s2 + 1);
+    return i1 - i2;
 }

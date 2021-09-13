@@ -370,7 +370,7 @@ void DB::_hget(context_t& con, int what)
     decode_hash_meta_value(value, &seq, &size);
     auto anchor = get_hash_anchor(seq);
     con.append_reply_multi(what == HGETALL ? size * 2 : size);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
         switch (what) {
         case HGETKEYS:
@@ -423,7 +423,7 @@ errstr_t DB::del_hash_key_batch(leveldb::WriteBatch *batch, const std::string& k
     if (!s.ok()) return s;
     decode_hash_meta_value(value, &seq, &size);
     auto anchor = get_hash_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
         batch->Delete(it->key());
     }
@@ -440,7 +440,7 @@ void DB::rename_hash_key(leveldb::WriteBatch *batch, const key_t& key,
     uint64_t newseq = get_next_seq();
     uint64_t newsize = size;
     auto anchor = get_hash_anchor(seq);
-    auto it = db->NewIterator(leveldb::ReadOptions());
+    auto it = newIterator();
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
         batch->Put(encode_hash_key(newseq, get_hash_field(it->key())), it->value());
         batch->Delete(it->key());

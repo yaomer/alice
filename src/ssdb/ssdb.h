@@ -89,29 +89,9 @@ struct keycomp : public leveldb::Comparator {
     int Compare(const leveldb::Slice& l, const leveldb::Slice& r) const
     {
         if (l[0] == 'l' && r[0] == 'l') { // compare list key
-            auto begin1 = l.data() + 1, begin2 = r.data() + 1;
-            auto s1 = strrchr(begin1, ':');
-            auto s2 = strrchr(begin2, ':');
-            leveldb::Slice key1(begin1, s1-begin1), key2(begin2, s2-begin2);
-            int r = key1.compare(key2);
-            if (r) return r;
-            auto i1 = atoi(s1+1), i2 = atoi(s2+1);
-            return i1 - i2;
+            return list_compare(l, r);
         } else if (l[0] == 'Z' && r[0] == 'Z') {
-            uint64_t seq1, seq2;
-            auto begin1 = const_cast<char*>(l.data()) + 1;
-            auto begin2 = const_cast<char*>(r.data()) + 1;
-            auto s1 = begin1 + load_len(begin1, &seq1);
-            auto s2 = begin2 + load_len(begin2, &seq2);
-            if (seq1 != seq2) return seq1 - seq2;
-            auto score1 = atof(s1), score2 = atof(s2);
-            if (score1 < score2) return -1;
-            if (score1 > score2) return 1;
-            s1 = strchr(s1, ':') + 1;
-            s2 = strchr(s2, ':') + 1;
-            leveldb::Slice member1(s1, begin1-1+l.size()-s1);
-            leveldb::Slice member2(s2, begin2-1+r.size()-s2);
-            return member1.compare(member2);
+            // return zset_compare(l, r);
         }
         return l.compare(r);
     }
@@ -119,9 +99,14 @@ struct keycomp : public leveldb::Comparator {
     void FindShortestSeparator(std::string* start,
                                const leveldb::Slice& limit) const {  }
     void FindShortSuccessor(std::string* key) const {  }
+
+    int list_compare(const leveldb::Slice& l, const leveldb::Slice& r) const;
+    int zset_compare(const leveldb::Slice& l, const leveldb::Slice& r) const;
 };
 
 using errstr_t = std::optional<leveldb::Status>;
+// 避免手动释放leveldb::Iterator
+using ldbIterator = std::unique_ptr<leveldb::Iterator>;
 
 class DB {
 public:
@@ -287,6 +272,11 @@ private:
 
     uint64_t get_next_seq();
 
+    ldbIterator newIterator()
+    {
+        return ldbIterator(db->NewIterator(leveldb::ReadOptions()));
+    }
+
     void blocking_pop(const key_t& key);
     void clear_blocking_keys_for_context(context_t& con);
     void add_blocking_key(context_t& con, const key_t& key);
@@ -295,10 +285,15 @@ private:
     void _ttl(context_t& con, bool is_ttl);
     void _expire(context_t& con, bool is_expire);
     void _rename(context_t& con, bool is_nx);
+
+    void pop_key(leveldb::WriteBatch *batch,
+                 const std::string& meta_key, const std::string& enc_key,
+                 int *li, int *ri, int *size, bool is_lpop);
     void _lpushx(context_t& con, bool is_lpushx);
     void _lpop(context_t& con, bool is_lpop);
     void _blpop(context_t& con, bool is_blpop);
     void _rpoplpush(context_t& con, bool is_nonblock);
+
     void _incr(context_t& con, int64_t incr);
     void _hget(context_t& con, int what);
     void _sinter(context_t& con, std::unordered_set<std::string>& rset, int start);
