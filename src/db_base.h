@@ -86,6 +86,10 @@ struct context_t {
     {
         return buf.append(s, len);
     }
+    std::string& append(std::string&& s)
+    {
+        return buf.append(std::move(s));
+    }
     template <typename T>
     void append_reply_multi(T count)
     {
@@ -99,6 +103,14 @@ struct context_t {
         append(i2s(s.size()));
         append("\r\n");
         append(s);
+        append("\r\n");
+    }
+    void append_reply_string(std::string&& s)
+    {
+        append("$");
+        append(i2s(s.size()));
+        append("\r\n");
+        append(std::move(s));
         append("\r\n");
     }
     template <typename T>
@@ -223,7 +235,10 @@ extern shared_obj shared;
 extern int64_t lru_clock;
 
 #define ret(con, str) \
-    do { (con).append(str); return; } while(0)
+    do { (con).append(str); return; } while (0)
+
+#define retval(con, str, val) \
+    do { (con).append(str); return (val); } while (0)
 
 }
 

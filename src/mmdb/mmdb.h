@@ -397,9 +397,11 @@ private:
     void _sunion(context_t& con, Set& rset, int start);
     void sreply(context_t& con, Set& rset);
     void sstore(context_t& con, Set& rset);
-    void _zrange(context_t& con, bool reverse);
-    void _zrank(context_t& con, bool reverse);
-    void _zrangebyscore(context_t& con, bool reverse);
+    void _zrange(context_t& con, bool is_reverse);
+    void _zrank(context_t& con, bool is_reverse);
+    void _zrangebyscore(context_t& con, bool is_reverse);
+
+    size_t zcount_range(Zset& zset, unsigned cmdops, int lower, int upper, double min, double max);
 
     void add_blocking_key(context_t& con, const key_t& key);
     void set_context_to_block(context_t& con, int timeout);
