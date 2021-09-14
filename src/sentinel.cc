@@ -67,7 +67,7 @@ Sentinel::Sentinel(angel::evloop *loop, angel::inet_addr listen_addr)
         { "INFO",       { -3, 0, BIND(info) } },
         { "SENTINEL",   {  2, 0, BIND(sentinel) } },
     };
-    set_run_id(run_id);
+    run_id = generate_run_id();
     // server.daemon();
 }
 
@@ -316,7 +316,7 @@ void SentinelInstance::parse_info_reply_from_master(const char *s, const char *e
         const char *p = std::find(s, es, '\n');
         if (p[-1] == '\r') p -= 1;
         if (strncasecmp(s, "run_id:", 7) == 0) {
-            std::copy(s + 7, p, run_id);
+            run_id = std::string(s + 7, p);
         } else if (strncasecmp(s, "role:", 5) == 0) {
 
         } else if (strncasecmp(s, "connected_slaves:", 17) == 0) {
@@ -337,7 +337,7 @@ void SentinelInstance::parse_info_reply_from_slave(const char *s, const char *es
         const char *p = std::find(s, es, '\n');
         if (p[-1] == '\r') p -= 1;
         if (strncasecmp(s, "run_id:", 7) == 0) {
-            std::copy(s + 7, p, run_id);
+            run_id = std::string(s + 7, p);
         } else if (strncasecmp(s, "role:", 5) == 0) {
             std::string role;
             role.assign(s + 5, p);
@@ -541,7 +541,7 @@ void Sentinel::update_sentinels(const char *s, const char *es)
         sentinel->master = m_name;
         sentinel->name = s_name;
         sentinel->inet_addr = angel::inet_addr(s_ip, atoi(s_port.c_str()));
-        strncpy(sentinel->run_id, s_runid.c_str(), RUNID_LEN);
+        sentinel->run_id = s_runid;
         sentinel->config_epoch = atoll(s_epoch.c_str());
         sentinel->down_after_period = master->second->down_after_period;
         sentinel->creat_cmd_connection();
@@ -715,7 +715,7 @@ void SentinelInstance::convert_slave_to_master(SentinelInstance *slave)
     master->sentinel = sentinel;
     master->flags |= MASTER;
     master->name = slave->name;
-    strcpy(master->run_id, slave->run_id);
+    master->run_id = slave->run_id;
     master->config_epoch = slave->config_epoch;
     master->inet_addr = slave->inet_addr;
     master->creat_cmd_connection();

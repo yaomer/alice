@@ -32,6 +32,7 @@ struct SentinelInstance {
     };
     SentinelInstance()
         : flags(0),
+        run_id(generate_run_id()),
         offset(0),
         config_epoch(0),
         down_after_period(0),
@@ -42,7 +43,6 @@ struct SentinelInstance {
         elect_timeout_timer_id(0),
         last_heartbeat_time(angel::util::get_cur_time_ms())
     {
-        set_run_id(run_id);
     }
     using SentinelInstanceMap = std::unordered_map<std::string,
           std::unique_ptr<SentinelInstance>>;
@@ -69,7 +69,7 @@ struct SentinelInstance {
 
     int flags;
     std::string master; // for sentinel or slave
-    char run_id[RUNID_LEN];
+    std::string run_id;
     angel::inet_addr inet_addr;
     // one command connection, one pubsub connection
     std::unique_ptr<angel::client> client[2];
@@ -92,7 +92,7 @@ struct SentinelInstance {
 class Sentinel {
 public:
     explicit Sentinel(angel::evloop *loop, angel::inet_addr listen_addr);
-    const char *get_run_id() { return run_id; }
+    const char *get_run_id() { return run_id.c_str(); }
     SentinelInstance::SentinelInstanceMap& get_masters() { return masters; }
     void connection_handler(const angel::connection_ptr& conn)
     {
@@ -136,7 +136,7 @@ private:
     angel::evloop *loop;
     angel::server server;
     SentinelInstance::SentinelInstanceMap masters;
-    char run_id[RUNID_LEN];
+    std::string run_id;
     CommandTable cmdtable;
     // 相当于一个逻辑时间计数器，保证每次选举只会选出一个领头sentinel
     uint64_t current_epoch;

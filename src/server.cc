@@ -273,7 +273,7 @@ void dbserver::recv_sync_from_master(const angel::connection_ptr& conn, angel::b
                 s += 13;
                 int crlf = buf.find(s, "\r\n");
                 if (crlf < 0) return;
-                set_run_id(master_run_id);
+                master_run_id = generate_run_id();
                 s += crlf + 2;
                 crlf = buf.find(s, "\r\n");
                 if (crlf < 0) return;
@@ -759,6 +759,7 @@ int main(int argc, char *argv[])
     angel::evloop loop;
     alice::read_server_conf(server_conf_file);
     if (startup_sentinel) {
+        angel::set_log_name("sentinel");
         alice::read_sentinel_conf(sentinel_conf_file);
         angel::inet_addr listen_addr(sentinel_conf.ip, sentinel_conf.port);
         Sentinel sentinel(&loop, listen_addr);
@@ -767,6 +768,7 @@ int main(int argc, char *argv[])
         loop.run();
         return 0;
     }
+    angel::set_log_name("server");
     angel::inet_addr listen_addr(server_conf.ip, server_conf.port);
     dbserver server(&loop, listen_addr);
     log_info("server %s runid is %s", listen_addr.to_host(), server.get_run_id());

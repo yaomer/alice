@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <uuid/uuid.h>
 
 #include <vector>
 #include <string>
@@ -19,15 +20,13 @@
 
 namespace alice {
 
-// buflen >= 33
-void set_run_id(char *buf)
+std::string generate_run_id()
 {
-    struct timespec tsp;
-    clock_gettime(_CLOCK_REALTIME, &tsp);
-    std::uniform_int_distribution<size_t> u;
-    std::mt19937_64 e(tsp.tv_sec * 1000000000 + tsp.tv_nsec);
-    snprintf(buf, 17, "%lx", u(e));
-    snprintf(buf + 16, 17, "%lx", u(e));
+    uuid_t uu;
+    uuid_string_t out;
+    uuid_generate(uu);
+    uuid_unparse_lower(uu, out);
+    return out;
 }
 
 // if ok, return parsed-bytes

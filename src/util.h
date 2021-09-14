@@ -11,11 +11,9 @@
 
 namespace alice {
 
-#define RUNID_LEN 33
-
 using argv_t = std::vector<std::string>;
 
-void set_run_id(char *buf);
+std::string generate_run_id();
 
 ssize_t parse_request(argv_t& argv, angel::buffer& buf);
 

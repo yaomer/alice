@@ -47,7 +47,7 @@ public:
                 this->close_handler(conn);
                 });
         server.set_task_thread_nums(1);
-        set_run_id(run_id);
+        run_id = generate_run_id();
     }
     void connection_handler(const angel::connection_ptr& conn)
     {
@@ -119,7 +119,7 @@ public:
     angel::evloop *get_loop() { return loop; }
     angel::server& get_server() { return server; }
     const std::unique_ptr<db_base_t>& get_db() { return db; }
-    const char *get_run_id() { return run_id; }
+    const char *get_run_id() { return run_id.c_str(); }
     context_t& get_context(const angel::connection_ptr& conn)
     {
         return std::any_cast<context_t&>(conn->get_context());
@@ -177,7 +177,7 @@ private:
     angel::server server;
     std::unique_ptr<db_base_t> db;
     int flags = MASTER;
-    char run_id[RUNID_LEN];
+    std::string run_id;
     size_t sync_file_size = 0;
     char sync_tmp_file[16];
     int sync_fd = -1;
@@ -192,7 +192,7 @@ private:
     angel::inet_addr master_addr;
     std::unique_ptr<angel::client> master_cli;
     size_t slave_offset = 0;
-    char master_run_id[RUNID_LEN];
+    std::string master_run_id;
     std::string sync_buffer;
     ring_buffer copy_backlog_buffer;
     std::unordered_map<std::string, std::vector<size_t>> pubsub_channels;
