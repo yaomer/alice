@@ -225,9 +225,9 @@ void DB::lrange(context_t& con)
 {
     std::string value;
     auto& key = con.argv[1];
-    int start = str2l(con.argv[2]);
+    long start = str2l(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    int stop = str2l(con.argv[3]);
+    long stop = str2l(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     auto meta_key = encode_meta_key(key);
     check_expire(meta_key);
@@ -237,11 +237,11 @@ void DB::lrange(context_t& con)
     check_type(con, value, ktype::tlist);
     int li, ri, size;
     decode_list_meta_value(value, li, ri, size);
-    int upper = size - 1;
-    int lower = -size;
+    long upper = size - 1;
+    long lower = -size;
     if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
-    int ranges = stop - start + 1;
+    long ranges = stop - start + 1;
     con.append_reply_multi(ranges);
     auto it = newIterator();
     for (it->Seek(encode_list_key(key, li+start)); it->Valid(); it->Next()) {

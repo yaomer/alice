@@ -45,7 +45,10 @@ timeout_err:
     return C_ERR;
 }
 
-int check_range(context_t& con, int& start, int& stop, int lower, int upper)
+// 检查索引范围访问
+// 类似于lrange key start stop
+// 我们还会将负索引访问映射到正常的范围访问
+int check_range(context_t& con, long& start, long& stop, long lower, long upper)
 {
     if (start > upper || stop < lower) {
         con.append(shared.nil);
@@ -73,8 +76,9 @@ int check_range(context_t& con, int& start, int& stop, int lower, int upper)
 #define MIN_INF 1 // -inf
 #define POS_INF 2 // +inf
 
-// if lower is true, min is `-inf`
-// if upper is true, max is `+inf`
+// 用于解析zset命令中出现的min和max参数
+// `min_str`和`max_str`为传入的以上两个参数，我们会将解析后的结果写入到`min`和`max`中
+// 特别地，如果`lower`为真，则表示`min`为inf；`upper`为真，则表示`max`为inf
 int parse_interval(context_t& con, unsigned& cmdops, int& lower, int& upper,
                    double& min, double& max, const std::string& min_str,
                    const std::string& max_str, bool is_reverse)
@@ -119,7 +123,7 @@ thread_local std::unordered_map<std::string, int> zrbsops = {
 };
 
 int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
-                             int& offset, int& count)
+                             long& offset, long& limit)
 {
     size_t len = con.argv.size();
     for (size_t i = 4; i < len; i++) {
@@ -133,8 +137,12 @@ int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
             if (i + 2 >= len) goto syntax_err;
             offset = str2l(con.argv[++i]);
             if (str2numerr()) goto integer_err;
-            count = str2l(con.argv[++i]);
+            limit = str2l(con.argv[++i]);
             if (str2numerr()) goto integer_err;
+            if (offset < 0 || limit <= 0) {
+                con.append(shared.multi_empty);
+                return C_ERR;
+            }
             break;
         }
         }

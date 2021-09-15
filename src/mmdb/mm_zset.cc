@@ -191,24 +191,24 @@ void DB::_zrange(context_t& con, bool is_reverse)
         if (!con.isequal(4, "WITHSCORES")) ret(con, shared.syntax_err);
         withscores = true;
     }
-    int start = str2l(con.argv[2]);
+    long start = str2l(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    int stop = str2l(con.argv[3]);
+    long stop = str2l(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.nil);
     check_type(con, it, Zset);
     auto& zset = get_zset_value(it);
-    int upper = zset.size() - 1;
-    int lower = -zset.size();
+    long upper = zset.size() - 1;
+    long lower = -zset.size();
     if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
     if (withscores)
         con.append_reply_multi((stop - start + 1) * 2);
     else
         con.append_reply_multi(stop - start + 1);
-    int i = 0;
+    long i = 0;
     if (!is_reverse) {
         for (auto it = zset.zsl.cbegin(); it != zset.zsl.cend(); ++it, ++i) {
             if (i < start) continue;
@@ -270,16 +270,16 @@ void DB::zrevrank(context_t& con)
 }
 
 static void zrangefor(context_t& con, Zset::iterator first, Zset::iterator last,
-                      int count, bool withscores, bool is_reverse)
+                      long limit, bool withscores, bool is_reverse)
 {
-    bool is_count = (count > 0);
+    bool is_limit = (limit > 0);
     if (!is_reverse) {
         while (first != last) {
             con.append_reply_string(first->first.key);
             if (withscores)
                 con.append_reply_double(first->first.score);
             ++first;
-            if (is_count && --count == 0)
+            if (is_limit && --limit == 0)
                 break;
         }
     } else {
@@ -287,20 +287,16 @@ static void zrangefor(context_t& con, Zset::iterator first, Zset::iterator last,
             con.append_reply_string(last->first.key);
             if (withscores)
                 con.append_reply_double(last->first.score);
-            if (last == first || (is_count && --count == 0))
+            if (last == first || (is_limit && --limit == 0))
                 break;
         }
     }
 }
 
 static int zrangebyscore_with_limit(context_t& con, Zset::iterator first,
-                                    Zset::iterator last, int distance, int offset,
-                                    int count, bool withscores, bool is_reverse)
+                                    Zset::iterator last, long distance, long offset,
+                                    long limit, bool withscores, bool is_reverse)
 {
-    if (offset < 0 || count <= 0) {
-        con.append(shared.nil);
-        return C_ERR;
-    }
     while (first != last && offset > 0) {
         is_reverse ? --last : ++first;
         --offset;
@@ -309,12 +305,12 @@ static int zrangebyscore_with_limit(context_t& con, Zset::iterator first,
         con.append(shared.nil);
         return C_ERR;
     }
-    if (count > distance) count = distance;
+    if (limit > distance) limit = distance;
     if (withscores)
-        con.append_reply_multi(count * 2);
+        con.append_reply_multi(limit * 2);
     else
-        con.append_reply_multi(count);
-    zrangefor(con, first, last, count, withscores, is_reverse);
+        con.append_reply_multi(limit);
+    zrangefor(con, first, last, limit, withscores, is_reverse);
     return C_OK;
 }
 
@@ -322,8 +318,8 @@ static int zrangebyscore_with_limit(context_t& con, Zset::iterator first,
 void DB::_zrangebyscore(context_t& con, bool is_reverse)
 {
     unsigned cmdops = 0;
-    int offset = 0, count = 0;
-    if (parse_zrangebyscore_args(con, cmdops, offset, count) == C_ERR)
+    long offset = 0, limit = 0;
+    if (parse_zrangebyscore_args(con, cmdops, offset, limit) == C_ERR)
         return;
     auto& key = con.argv[1];
     auto& min_str = con.argv[2];
@@ -371,12 +367,12 @@ void DB::_zrangebyscore(context_t& con, bool is_reverse)
     if (first == last) ret(con, shared.nil);
     auto distance = zcount_range(zset, cmdops, lower, upper, min, max);
     if ((cmdops & WITHSCORES) && (cmdops & LIMIT)) {
-        zrangebyscore_with_limit(con, first, last, distance, offset, count, true, is_reverse);
+        zrangebyscore_with_limit(con, first, last, distance, offset, limit, true, is_reverse);
     } else if (cmdops & WITHSCORES) {
         con.append_reply_multi(distance * 2);
         zrangefor(con, first, last, 0, true, is_reverse);
     } else if (cmdops & LIMIT) {
-        zrangebyscore_with_limit(con, first, last, distance, offset, count, false, is_reverse);
+        zrangebyscore_with_limit(con, first, last, distance, offset, limit, false, is_reverse);
     } else {
         con.append_reply_multi(distance);
         zrangefor(con, first, last, 0, false, is_reverse);
@@ -420,20 +416,20 @@ void DB::zrem(context_t& con)
 void DB::zremrangebyrank(context_t& con)
 {
     auto& key = con.argv[1];
-    int start = str2l(con.argv[2]);
+    long start = str2l(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    int stop = str2l(con.argv[3]);
+    long stop = str2l(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.n0);
     check_type(con, it, Zset);
     auto& zset = get_zset_value(it);
-    int upper = zset.size() - 1;
-    int lower = -zset.size();
+    long upper = zset.size() - 1;
+    long lower = -zset.size();
     if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
-    int i = 0, rems = 0;
+    long i = 0, rems = 0;
     for (auto it = zset.zmap.begin(); it != zset.zmap.end(); i++) {
         if (i < start) continue;
         if (i > stop) break;

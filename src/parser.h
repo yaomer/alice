@@ -21,14 +21,14 @@ namespace alice {
 
 int parse_set_args(context_t& con, unsigned& cmdops, int64_t& expire);
 
-int check_range(context_t& con, int& start, int& stop, int lower, int upper);
+int check_range(context_t& con, long& start, long& stop, long lower, long upper);
 
 int parse_interval(context_t& con, unsigned& cmdops, int& lower, int& upper,
                    double& min, double& max, const std::string& min_str,
                    const std::string& max_str, bool is_reverse);
 
 int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
-                             int& offset, int& count);
+                             long& offset, long& limit);
 
 unsigned get_last_cmd(const std::string& lc);
 

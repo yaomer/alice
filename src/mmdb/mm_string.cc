@@ -216,17 +216,17 @@ void DB::setrange(context_t& con)
 void DB::getrange(context_t& con)
 {
     auto& key = con.argv[1];
-    int start = str2l(con.argv[2]);
+    long start = str2l(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    int stop = str2l(con.argv[3]);
+    long stop = str2l(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.nil);
     check_type(con, it, String);
     auto& value = get_string_value(it);
-    int upper = value.size() - 1;
-    int lower = -value.size();
+    long upper = value.size() - 1;
+    long lower = -value.size();
     if (check_range(con, start, stop, lower, upper) == C_ERR)
         return;
     auto result = value.substr(start, stop - start + 1);
