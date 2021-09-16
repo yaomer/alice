@@ -16,6 +16,7 @@
 
 #include "../db_base.h"
 #include "../config.h"
+#include "../parser.h"
 
 namespace alice {
 
@@ -91,7 +92,7 @@ struct keycomp : public leveldb::Comparator {
         if (l[0] == 'l' && r[0] == 'l') { // compare list key
             return list_compare(l, r);
         } else if (l[0] == 'Z' && r[0] == 'Z') {
-            // return zset_compare(l, r);
+            return zset_compare(l, r);
         }
         return l.compare(r);
     }
@@ -107,6 +108,31 @@ struct keycomp : public leveldb::Comparator {
 using errstr_t = std::optional<leveldb::Status>;
 // 避免手动释放leveldb::Iterator
 using ldbIterator = std::unique_ptr<leveldb::Iterator>;
+
+struct zsk_info {
+    zsk_info() = default;
+    uint64_t seq, size;
+};
+
+struct zsk_iterator {
+    zsk_iterator(ldbIterator&& it, size_t order) : it(std::move(it)), order(order) {  }
+    zsk_iterator(zsk_iterator&& zit) : it(std::move(zit.it)), order(zit.order) {  }
+    zsk_iterator& operator=(zsk_iterator&& zit)
+    {
+        it = std::move(zit.it);
+        order = zit.order;
+        return *this;
+    }
+    bool Valid() { return it->Valid(); }
+    void Next() { it->Next(); order++; }
+    void Prev() { it->Prev(); order--; }
+    leveldb::Slice key() const { return it->key(); }
+    leveldb::Slice value() const { return it->value(); }
+    ldbIterator it;
+    size_t order;
+};
+// <it, last>表示一个闭区间[it, last]
+using zsk_range = std::pair<zsk_iterator, zsk_iterator>;
 
 class DB {
 public:
@@ -245,6 +271,21 @@ public:
     void sunionstore(context_t& con);
     void sdiff(context_t& con);
     void sdiffstore(context_t& con);
+
+    void zadd(context_t& con);
+    void zscore(context_t& con);
+    void zincrby(context_t& con);
+    void zcard(context_t& con);
+    void zcount(context_t& con);
+    void zrange(context_t& con);
+    void zrevrange(context_t& con);
+    void zrank(context_t& con);
+    void zrevrank(context_t& con);
+    void zrangebyscore(context_t& con);
+    void zrevrangebyscore(context_t& con);
+    void zrem(context_t& con);
+    void zremrangebyrank(context_t& con);
+    void zremrangebyscore(context_t& con);
 private:
     void set_builtin_keys();
     // return err-str if error else return null
@@ -256,8 +297,8 @@ private:
     errstr_t del_hash_key_batch(leveldb::WriteBatch *batch, const key_t& key);
     errstr_t del_set_key(const key_t& key);
     errstr_t del_set_key_batch(leveldb::WriteBatch *batch, const key_t& key);
-    // errstr_t del_zset_key(const key_t& key);
-    // errstr_t del_zset_key_batch(leveldb::WriteBatch *batch, const key_t& key);
+    errstr_t del_zset_key(const key_t& key);
+    errstr_t del_zset_key_batch(leveldb::WriteBatch *batch, const key_t& key);
 
     void rename_string_key(leveldb::WriteBatch *batch, const key_t& key,
                            const std::string& meta_value, const key_t& newkey);
@@ -267,14 +308,18 @@ private:
                          const std::string& meta_value, const key_t& newkey);
     void rename_set_key(leveldb::WriteBatch *batch, const key_t& key,
                         const std::string& meta_value, const key_t& newkey);
-    // void rename_zset_key(leveldb::WriteBatch *batch, const key_t& key,
-                         // const std::string& meta_value, const key_t& newkey);
+    void rename_zset_key(leveldb::WriteBatch *batch, const key_t& key,
+                         const std::string& meta_value, const key_t& newkey);
 
     uint64_t get_next_seq();
 
     ldbIterator newIterator()
     {
         return ldbIterator(db->NewIterator(leveldb::ReadOptions()));
+    }
+    ldbIterator newErrorIterator()
+    {
+        return ldbIterator(leveldb::NewErrorIterator(leveldb::Status::InvalidArgument("")));
     }
 
     void blocking_pop(const key_t& key);
@@ -299,6 +344,17 @@ private:
     void _sinter(context_t& con, std::unordered_set<std::string>& rset, int start);
     void _sunion(context_t& con, std::unordered_set<std::string>& rset, int start);
     void _sstore(context_t& con, std::unordered_set<std::string>& rset);
+
+    zsk_iterator zset_lower_bound(zsk_info& zk, double score);
+    zsk_iterator zset_upper_bound(zsk_info& zk, double score);
+    zsk_iterator zset_get_min(zsk_info& zk);
+    zsk_iterator zset_get_max(zsk_info& zk);
+    zsk_range zset_range(context_t& con, zsk_info& zk, unsigned cmdops, score_range& r);
+    void _zrange(context_t& con, bool is_reverse);
+    void _zrank(context_t& con, bool is_reverse);
+    void _zrangebyscore(context_t& con, bool is_reverse);
+    void _zrangefor(context_t& con, unsigned cmdops, zsk_iterator& it,
+                    long dis, long offset, long limit, bool is_reverse);
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;

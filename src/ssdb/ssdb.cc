@@ -170,6 +170,20 @@ engine::engine()
         { "SINTERSTORE",{  3, IS_WRITE, BIND(sinterstore) } },
         { "SUNION",     {  2, IS_READ,  BIND(sunion) } },
         { "SUNIONSTORE",{  3, IS_WRITE, BIND(sunionstore) } },
+        { "ZADD",       {  4, IS_WRITE, BIND(zadd) } },
+        { "ZSCORE",     { -3, IS_READ,  BIND(zscore) } },
+        { "ZINCRBY",    { -4, IS_WRITE, BIND(zincrby) } },
+        { "ZCARD",      { -2, IS_READ,  BIND(zcard) } },
+        { "ZCOUNT",     { -4, IS_READ,  BIND(zcount) } },
+        { "ZRANGE",     {  4, IS_READ,  BIND(zrange) } },
+        { "ZREVRANGE",  {  4, IS_READ,  BIND(zrevrange) } },
+        { "ZRANK",      { -3, IS_READ,  BIND(zrank) } },
+        { "ZREVRANK",   { -3, IS_READ,  BIND(zrevrank) } },
+        { "ZREM",       {  3, IS_WRITE, BIND(zrem) } },
+        { "ZRANGEBYSCORE",      {  4, IS_READ,  BIND(zrangebyscore) } },
+        { "ZREVRANGEBYSCORE",   {  4, IS_READ,  BIND(zrevrangebyscore) } },
+        { "ZREMRANGEBYRANK",    { -4, IS_WRITE, BIND(zremrangebyrank) } },
+        { "ZREMRANGEBYSCORE",   { -4, IS_WRITE, BIND(zremrangebyscore) } },
     };
 }
 
@@ -428,7 +442,7 @@ errstr_t DB::del_key(const key_t& key)
     case ktype::tlist: return del_list_key(key);
     case ktype::thash: return del_hash_key(key);
     case ktype::tset: return del_set_key(key);
-    // case ktype::tzset: return del_zset_key(key);
+    case ktype::tzset: return del_zset_key(key);
     }
     assert(0);
 }
@@ -446,7 +460,7 @@ errstr_t DB::del_key_batch(leveldb::WriteBatch *batch, const key_t& key)
     case ktype::tlist: return del_list_key_batch(batch, key);
     case ktype::thash: return del_hash_key_batch(batch, key);
     case ktype::tset: return del_set_key_batch(batch, key);
-    // case ktype::tzset: return del_zset_key_batch(batch, key);
+    case ktype::tzset: return del_zset_key_batch(batch, key);
     default: assert(0);
     }
 }
@@ -468,7 +482,7 @@ void DB::rename_key(leveldb::WriteBatch *batch, const key_t& key,
         rename_set_key(batch, key, value, newkey);
         break;
     case ktype::tzset:
-        // rename_zset_key(batch, key, value, newkey);
+        rename_zset_key(batch, key, value, newkey);
         break;
     default: assert(0);
     }
