@@ -132,16 +132,14 @@ public:
         node_type *p = __find(key);
         return p ? p : end();
     }
-    // if not found or result is maximal, reutrn end()
     iterator upper_bound(const key_type& key)
     {
         node_type *p = __find(key);
         if (!p) return end();
-        if (equal(key, p->value->first)) {
-            return p == tail ? end() : p;
-        }
-        if (p->prev) return p->prev;
-        else return end();
+        node_type *q = p->level[0].next;
+        while (q && equal(q->value->first, p->value->first))
+            q = q->level[0].next;
+        return q ? q : end();
     }
     iterator find(const key_type& key)
     {
