@@ -16,6 +16,7 @@
 
 #include "../db_base.h"
 #include "../skiplist.h"
+#include "../parser.h"
 
 namespace alice {
 
@@ -143,15 +144,15 @@ struct sortobj {
 
 struct zslkey {
     zslkey() {  }
-    zslkey(double score, const std::string& key)
-        : score(score), key(key) {  }
+    zslkey(double score, const std::string& member)
+        : score(score), member(member) {  }
     double score;
-    std::string key;
+    std::string member;
 };
 
 // 对于对象l和r，如果l.score < r.score，就认为l < r
-// 否则如果l.score == r.score，就继续比较键值，如果l.key < r.key，
-// 就认为l < r，否则就认为l > r
+// 否则如果l.score == r.score，就继续比较键值，如果l.member < r.member，
+// 就认为l < r，否则就认为l >= r
 class zslkeycmp {
 public:
     bool operator()(const zslkey& lhs, const zslkey& rhs) const
@@ -159,7 +160,7 @@ public:
         if (lhs.score < rhs.score) {
             return true;
         } else if (lhs.score == rhs.score) {
-            if (lhs.key.size() > 0 && lhs.key.compare(rhs.key) < 0)
+            if (lhs.member.compare(rhs.member) < 0)
                 return true;
         }
         return false;
@@ -185,13 +186,19 @@ struct Zset {
     {
         return zsl.order_of_key(zslkey(score, key));
     }
-    iterator lower_bound(double score, const std::string& key)
+    size_t diff_range(iterator it, iterator last)
     {
-        return zsl.lower_bound(zslkey(score, key));
+        auto l = order_of_key(it->first.score, it->first.member);
+        if (last == zsl.end()) return zsl.size() - l + 1;
+        return order_of_key(last->first.score, last->first.member) - l;
     }
-    iterator upper_bound(double score, const std::string& key)
+    iterator lower_bound(double score)
     {
-        return zsl.upper_bound(zslkey(score, key));
+        return zsl.lower_bound(zslkey(score, ""));
+    }
+    iterator upper_bound(double score)
+    {
+        return zsl.upper_bound(zslkey(score, ""));
     }
     double min_score() { return (*zsl.begin()).first.score; }
     double max_score() { return (*--zsl.end()).first.score; }
@@ -200,6 +207,8 @@ struct Zset {
     // 根据一个member可以在常数时间找到其score
     std::unordered_map<std::string, double> zmap;
 };
+
+using zsk_range = std::pair<Zset::iterator, Zset::iterator>;
 
 class DB {
 public:
@@ -403,7 +412,7 @@ private:
     void _zrank(context_t& con, bool is_reverse);
     void _zrangebyscore(context_t& con, bool is_reverse);
 
-    size_t zcount_range(Zset& zset, unsigned cmdops, int lower, int upper, double min, double max);
+    zsk_range zset_range(Zset& zset, unsigned cmdops, score_range& r);
 
     void add_blocking_key(context_t& con, const key_t& key);
     void set_context_to_block(context_t& con, int timeout);

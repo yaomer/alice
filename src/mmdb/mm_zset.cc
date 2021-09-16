@@ -84,7 +84,7 @@ void DB::zincrby(context_t& con)
     if (e != zset.zmap.end()) {
         zslkey zk;
         zk.score = e->second;
-        zk.key = member;
+        zk.member = member;
         zset.zsl.erase(zk);
         score += e->second;
     }
@@ -111,75 +111,17 @@ void DB::zcount(context_t& con)
     auto& min_str = con.argv[2];
     auto& max_str = con.argv[3];
     unsigned cmdops = 0;
-    int lower = 0, upper = 0;
-    double min = 0, max = 0;
-    auto r = parse_interval(con, cmdops, lower, upper, min, max, min_str, max_str, false);
-    if (r == C_ERR) return;
+    score_range r;
+    if (parse_range_score(con, cmdops, r, min_str, max_str) == C_ERR)
+        return;
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.n0);
     check_type(con, it, Zset);
     auto& zset = get_zset_value(it);
-    auto count = zcount_range(zset, cmdops, lower, upper, min, max);
-    con.append_reply_number(count);
-}
-
-size_t DB::zcount_range(Zset& zset, unsigned cmdops, int lower, int upper, double min, double max)
-{
-    if (zset.empty()) return 0;
-    double min_score = zset.min_score();
-    double max_score = zset.max_score();
-    if (lower) min = std::min(min_score, max) - 1;
-    if (upper) max = std::max(max_score, min) + 1;
-    if (min > max_score || max < min_score) return 0;
-    if (min < min_score) {
-        if (max > max_score) return zset.size();
-        auto order = zset.order_of_key(max, "");
-        if (order > 0) {
-            return (cmdops & ROI) ? order - 1 : order;
-        }
-        auto it = zset.lower_bound(max, "");
-        order = zset.order_of_key(it->first.score, "");
-        return order - 1;
-    }
-    // min is [min_score, max_score]
-    auto lr = zset.order_of_key(min, "");
-    auto rr = zset.order_of_key(max, "");
-    if (max > max_score) {
-        if (lr > 0) {
-            auto order = zset.size() - lr;
-            return (cmdops & LOI) ? order : order + 1;
-        }
-        auto it = zset.lower_bound(min, "");
-        auto order = zset.order_of_key(it->first.score, "");
-        order = zset.size() - order + 1;
-        return order;
-    }
-    // min, max are both [min_score, max_score]
-    if (lr > 0 && rr > 0) {
-        auto count = rr - lr + 1;
-        if (cmdops & LOI) count--;
-        if (cmdops & ROI) count--;
-        return count;
-    } else if (lr > 0) {
-        auto it = zset.lower_bound(max, "");
-        rr = zset.order_of_key(it->first.score, "");
-        auto count = rr - lr;
-        if (cmdops & LOI) count--;
-        return count;
-    } else if (rr > 0) {
-        auto it = zset.lower_bound(min, "");
-        lr = zset.order_of_key(it->first.score, "");
-        auto count = rr - lr + 1;
-        if (cmdops & ROI) count--;
-        return count;
-    } else {
-        auto it = zset.lower_bound(min, "");
-        lr = zset.order_of_key(it->first.score, "");
-        it = zset.lower_bound(max, "");
-        rr = zset.order_of_key(it->first.score, "");
-        return rr - lr;
-    }
+    auto [first, last] = zset_range(zset, cmdops, r);
+    if (first == last) con.append_reply_number(0);
+    con.append_reply_number(zset.diff_range(first, last));
 }
 
 // Z(REV)RANGE key start stop [WITHSCORES]
@@ -202,7 +144,7 @@ void DB::_zrange(context_t& con, bool is_reverse)
     auto& zset = get_zset_value(it);
     long upper = zset.size() - 1;
     long lower = -zset.size();
-    if (check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     if (withscores)
         con.append_reply_multi((stop - start + 1) * 2);
@@ -213,7 +155,7 @@ void DB::_zrange(context_t& con, bool is_reverse)
         for (auto it = zset.zsl.cbegin(); it != zset.zsl.cend(); ++it, ++i) {
             if (i < start) continue;
             if (i > stop) break;
-            con.append_reply_string(it->first.key);
+            con.append_reply_string(it->first.member);
             if (withscores)
                 con.append_reply_double(it->first.score);
         }
@@ -222,7 +164,7 @@ void DB::_zrange(context_t& con, bool is_reverse)
         for (auto it = --zset.zsl.end(); ; --it, ++i) {
             if (i < start) continue;
             if (i > stop) break;
-            con.append_reply_string(it->first.key);
+            con.append_reply_string(it->first.member);
             if (withscores)
                 con.append_reply_double(it->first.score);
             if (it == zset.zsl.begin())
@@ -269,49 +211,41 @@ void DB::zrevrank(context_t& con)
     _zrank(con, true);
 }
 
-static void zrangefor(context_t& con, Zset::iterator first, Zset::iterator last,
-                      long limit, bool withscores, bool is_reverse)
+static void zrangefor(context_t& con, unsigned cmdops, Zset::iterator it, Zset::iterator last,
+                      long offset, long limit, long dis, bool is_reverse)
 {
+    if (cmdops & LIMIT) {
+        if (offset >= dis) ret(con, shared.multi_empty);
+        limit = std::min(limit, dis - offset);
+    } else {
+        limit = dis;
+    }
+    while (it != last && offset > 0) {
+        is_reverse ? --last : ++it;
+        --offset;
+    }
+    if (it == last) ret(con, shared.nil);
     bool is_limit = (limit > 0);
+    bool withscores = (cmdops & WITHSCORES);
+    con.append_reply_multi(withscores ? limit * 2 : limit);
     if (!is_reverse) {
-        while (first != last) {
-            con.append_reply_string(first->first.key);
+        while (it != last) {
+            con.append_reply_string(it->first.member);
             if (withscores)
-                con.append_reply_double(first->first.score);
-            ++first;
+                con.append_reply_double(it->first.score);
+            ++it;
             if (is_limit && --limit == 0)
                 break;
         }
     } else {
         for (--last; ; --last) {
-            con.append_reply_string(last->first.key);
+            con.append_reply_string(last->first.member);
             if (withscores)
                 con.append_reply_double(last->first.score);
-            if (last == first || (is_limit && --limit == 0))
+            if (last == it || (is_limit && --limit == 0))
                 break;
         }
     }
-}
-
-static int zrangebyscore_with_limit(context_t& con, Zset::iterator first,
-                                    Zset::iterator last, long distance, long offset,
-                                    long limit, bool withscores, bool is_reverse)
-{
-    while (first != last && offset > 0) {
-        is_reverse ? --last : ++first;
-        --offset;
-    }
-    if (first == last) {
-        con.append(shared.nil);
-        return C_ERR;
-    }
-    if (limit > distance) limit = distance;
-    if (withscores)
-        con.append_reply_multi(limit * 2);
-    else
-        con.append_reply_multi(limit);
-    zrangefor(con, first, last, limit, withscores, is_reverse);
-    return C_OK;
 }
 
 // Z(REV)RANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]
@@ -324,59 +258,18 @@ void DB::_zrangebyscore(context_t& con, bool is_reverse)
     auto& key = con.argv[1];
     auto& min_str = con.argv[2];
     auto& max_str = con.argv[3];
-    int lower = 0, upper = 0;
-    double min = 0, max = 0;
-    auto r = parse_interval(con, cmdops, lower, upper, min, max, min_str, max_str, is_reverse);
-    if (r == C_ERR) return;
+    score_range r;
+    if (parse_range_score(con, cmdops, r, min_str, max_str) == C_ERR)
+        return;
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.nil);
     check_type(con, it, Zset);
     auto& zset = get_zset_value(it);
-    Zset::iterator first, last;
-    if (lower) first = zset.zsl.begin();
-    else first = zset.lower_bound(min, "");
-    if (upper) last = zset.zsl.end();
-    else last = zset.upper_bound(max, "");
-    if (first == zset.zsl.end()) ret(con, shared.nil);
-    if (!lower && (cmdops & LOI)) { // 左开区间
-        if (!is_reverse) {
-            while (first != last && first->first.score == min)
-                ++first;
-        } else {
-            --last;
-            while (first != last && last->first.score == max)
-                --last;
-            ++last;
-        }
-    }
-    if (!upper && (cmdops & ROI)) { // 右开区间
-        if (!is_reverse) {
-            --last;
-            while (first != last && last->first.score == max)
-                --last;
-            if (first == last && last->first.score == max) {
-                ret(con, shared.nil);
-            }
-            ++last;
-        } else {
-            while (first != last && first->first.score == min)
-                ++first;
-        }
-    }
+    auto [first, last] = zset_range(zset, cmdops, r);
     if (first == last) ret(con, shared.nil);
-    auto distance = zcount_range(zset, cmdops, lower, upper, min, max);
-    if ((cmdops & WITHSCORES) && (cmdops & LIMIT)) {
-        zrangebyscore_with_limit(con, first, last, distance, offset, limit, true, is_reverse);
-    } else if (cmdops & WITHSCORES) {
-        con.append_reply_multi(distance * 2);
-        zrangefor(con, first, last, 0, true, is_reverse);
-    } else if (cmdops & LIMIT) {
-        zrangebyscore_with_limit(con, first, last, distance, offset, limit, false, is_reverse);
-    } else {
-        con.append_reply_multi(distance);
-        zrangefor(con, first, last, 0, false, is_reverse);
-    }
+    long dis = zset.diff_range(first, last);
+    zrangefor(con, cmdops, first, last, offset, limit, dis, is_reverse);
 }
 
 void DB::zrangebyscore(context_t& con)
@@ -427,7 +320,7 @@ void DB::zremrangebyrank(context_t& con)
     auto& zset = get_zset_value(it);
     long upper = zset.size() - 1;
     long lower = -zset.size();
-    if (check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     long i = 0, rems = 0;
     for (auto it = zset.zmap.begin(); it != zset.zmap.end(); i++) {
@@ -449,38 +342,50 @@ void DB::zremrangebyscore(context_t& con)
     auto& key = con.argv[1];
     auto& min_str = con.argv[2];
     auto& max_str = con.argv[3];
-    int lower = 0, upper = 0;
-    double min = 0, max = 0;
-    auto r = parse_interval(con, cmdops, lower, upper, min, max, min_str, max_str, false);
-    if (r == C_ERR) return;
+    score_range r;
+    if (parse_range_score(con, cmdops, r, min_str, max_str) == C_ERR)
+        return;
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.n0);
     check_type(con, it, Zset);
     auto& zset = get_zset_value(it);
-    Zset::iterator first, last;
-    if (lower) first = zset.zsl.begin();
-    else first = zset.lower_bound(min, "");
-    if (upper) last = zset.zsl.end();
-    else last = zset.upper_bound(max, "");
-    if (first == zset.zsl.end()) ret(con, shared.n0);
-    if (cmdops & LOI) {
-        while (first != last && first->first.score == min)
-            ++first;
-    }
-    if (cmdops & ROI) {
-        --last;
-        while (first != last && last->first.score == max)
-            --last;
-        ++last;
-    }
+    auto [first, last] = zset_range(zset, cmdops, r);
     if (first == last) ret(con, shared.n0);
     int rems = 0;
     while (first != last) {
         auto e = first++;
-        zset.erase(e->first.score, e->first.key);
+        zset.erase(e->first.score, e->first.member);
         rems++;
     }
     del_key_if_empty(zset, key);
     con.append_reply_number(rems);
+}
+
+zsk_range DB::zset_range(Zset& zset, unsigned cmdops, score_range& r)
+{
+    double min_score = zset.min_score();
+    double max_score = zset.max_score();
+    auto it = zset.zsl.begin();
+    auto last = zset.zsl.end();
+    if ((!r.lower && r.min > max_score) || (!r.upper && r.max < min_score)) {
+        return { last, last };
+    }
+    if (!r.lower && r.min > min_score) it = zset.lower_bound(r.min);
+    if (!r.upper && r.max < max_score) last = zset.upper_bound(r.max);
+    double score = (--last)->first.score;
+    for (++last; last != zset.zsl.end() && last->first.score == score; ++last)
+        ;
+    if (!r.lower && (cmdops & LOI)) {
+        while (it != last && it->first.score == r.min)
+            ++it;
+    }
+    if (it == last) return { it, last };
+    if (!r.upper && (cmdops & ROI)) {
+        for (--last; it != last && last->first.score == r.max; --last)
+            ;
+        if (last->first.score != r.max)
+            ++last;
+    }
+    return { it, last };
 }

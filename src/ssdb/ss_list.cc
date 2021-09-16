@@ -239,7 +239,7 @@ void DB::lrange(context_t& con)
     decode_list_meta_value(value, li, ri, size);
     long upper = size - 1;
     long lower = -size;
-    if (check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     long ranges = stop - start + 1;
     con.append_reply_multi(ranges);

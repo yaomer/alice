@@ -227,7 +227,7 @@ void DB::getrange(context_t& con)
     auto& value = get_string_value(it);
     long upper = value.size() - 1;
     long lower = -value.size();
-    if (check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     auto result = value.substr(start, stop - start + 1);
     con.append_reply_string(result);

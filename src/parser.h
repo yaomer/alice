@@ -21,11 +21,15 @@ namespace alice {
 
 int parse_set_args(context_t& con, unsigned& cmdops, int64_t& expire);
 
-int check_range(context_t& con, long& start, long& stop, long lower, long upper);
+int check_range_index(context_t& con, long& start, long& stop, long lower, long upper);
 
-int parse_interval(context_t& con, unsigned& cmdops, int& lower, int& upper,
-                   double& min, double& max, const std::string& min_str,
-                   const std::string& max_str, bool is_reverse);
+struct score_range {
+    int lower = 0, upper = 0;
+    double min = 0, max = 0;
+};
+
+int parse_range_score(context_t& con, unsigned& cmdops, score_range& r,
+                      const std::string& min_str, const std::string& max_str);
 
 int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
                              long& offset, long& limit);

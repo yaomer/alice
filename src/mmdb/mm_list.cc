@@ -274,7 +274,7 @@ void DB::lrange(context_t& con)
     auto& list = get_list_value(it);
     long upper = list.size() - 1;
     long lower = -list.size();
-    if (check_range(con, start, stop, lower, upper) == C_ERR)
+    if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     con.append_reply_multi(stop - start + 1);
     long i = 0;

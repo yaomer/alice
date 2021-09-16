@@ -48,7 +48,7 @@ timeout_err:
 // 检查索引范围访问
 // 类似于lrange key start stop
 // 我们还会将负索引访问映射到正常的范围访问
-int check_range(context_t& con, long& start, long& stop, long lower, long upper)
+int check_range_index(context_t& con, long& start, long& stop, long lower, long upper)
 {
     if (start > upper || stop < lower) {
         con.append(shared.nil);
@@ -79,9 +79,8 @@ int check_range(context_t& con, long& start, long& stop, long lower, long upper)
 // 用于解析zset命令中出现的min和max参数
 // `min_str`和`max_str`为传入的以上两个参数，我们会将解析后的结果写入到`min`和`max`中
 // 特别地，如果`lower`为真，则表示`min`为inf；`upper`为真，则表示`max`为inf
-int parse_interval(context_t& con, unsigned& cmdops, int& lower, int& upper,
-                   double& min, double& max, const std::string& min_str,
-                   const std::string& max_str, bool is_reverse)
+int parse_range_score(context_t& con, unsigned& cmdops, score_range& r,
+                      const std::string& min_str, const std::string& max_str)
 {
     const char *mins = min_str.c_str();
     const char *maxs = max_str.c_str();
@@ -89,29 +88,26 @@ int parse_interval(context_t& con, unsigned& cmdops, int& lower, int& upper,
     if (max_str[0] == '(') cmdops |= ROI;
     if (cmdops & LOI) mins += 1;
     if (cmdops & ROI) maxs += 1;
-    if (strcasecmp(mins, "-inf") == 0) lower = MIN_INF;
-    else if (strcasecmp(mins, "+inf") == 0) lower = POS_INF;
-    if (strcasecmp(maxs, "-inf") == 0) upper = MIN_INF;
-    else if (strcasecmp(maxs, "+inf") == 0) upper = POS_INF;
+    if (strcasecmp(mins, "-inf") == 0) r.lower = MIN_INF;
+    else if (strcasecmp(mins, "+inf") == 0) r.lower = POS_INF;
+    if (strcasecmp(maxs, "-inf") == 0) r.upper = MIN_INF;
+    else if (strcasecmp(maxs, "+inf") == 0) r.upper = POS_INF;
     // get min and max
-    if (!lower) {
+    if (!r.lower) {
         double fval = str2f(mins);
         if (str2numerr()) retval(con, shared.min_or_max_err, C_ERR);
-        if (!is_reverse) min = fval;
-        else max = fval;
+        r.min = fval;
     }
-    if (!upper) {
+    if (!r.upper) {
         double fval = str2f(maxs);
         if (str2numerr()) retval(con, shared.min_or_max_err, C_ERR);
-        if (!is_reverse) max = fval;
-        else min = fval;
+        r.max = fval;
     }
     // [+-]inf[other chars]中前缀可以被合法转换，但整个字符串是无效的
-    if (isinf(min) || isinf(max)) retval(con, shared.syntax_err, C_ERR);
+    if (isinf(r.min) || isinf(r.max)) retval(con, shared.syntax_err, C_ERR);
     // min不能大于max
-    if (!lower && !upper && min > max) retval(con, shared.nil, C_ERR);
-    if ((is_reverse && (lower == MIN_INF || upper == POS_INF))
-    || (!is_reverse && (lower == POS_INF || upper == MIN_INF))) {
+    if (!r.lower && !r.upper && r.min > r.max) retval(con, shared.nil, C_ERR);
+    if (r.lower == POS_INF || r.upper == MIN_INF) {
         retval(con, shared.nil, C_ERR);
     }
     return C_OK;
