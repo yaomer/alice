@@ -12,12 +12,12 @@ static const char zset_anchor = '-'; // ascii('-') = 45, ascii('.') = 46
 static const char zset_end_anchor = ':'; // ascii(':') = 58, ascii('9') = 57
 
 static inline std::string
-encode_zset_meta_value(uint64_t seq, uint64_t size)
+encode_zset_meta_value(uint64_t seq, long long size)
 {
     std::string buf;
     buf.append(1, ktype::tzset);
     save_len(buf, seq);
-    save_len(buf, size);
+    save_len(buf, (uint64_t)size);
     return buf;
 }
 
@@ -27,7 +27,7 @@ decode_zset_meta_value(const std::string& value)
     zsk_info zk;
     char *ptr = const_cast<char*>(value.c_str()) + 1;
     ptr += load_len(ptr, &zk.seq);
-    load_len(ptr, &zk.size);
+    load_len(ptr, (uint64_t*)&zk.size);
     return zk;
 }
 
@@ -87,7 +87,7 @@ encode_zset_member(uint64_t seq, const std::string& member)
 }
 
 static void add_zset_meta_info(leveldb::WriteBatch *batch, const std::string& meta_key,
-                               uint64_t seq, uint64_t size)
+                               uint64_t seq, long long size)
 {
     batch->Put(meta_key, encode_zset_meta_value(seq, size));
     batch->Put(get_zset_anchor(seq), ZSET_ANCHOR_VAL);
@@ -206,7 +206,6 @@ void DB::zadd(context_t& con)
     for (size_t i = 2; i < size; i += 2) {
         auto& score = con.argv[i];
         auto& member = con.argv[i + 1];
-        value.clear();
         auto member_key = encode_zset_member(zk.seq, member);
         s = db->Get(leveldb::ReadOptions(), member_key, &value);
         if (!s.ok() && !s.IsNotFound()) reterr(con, s);
@@ -238,7 +237,6 @@ void DB::zscore(context_t& con)
     check_status(con, s);
     check_type(con, value, ktype::tzset);
     auto zk = decode_zset_meta_value(value);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_zset_member(zk.seq, member), &value);
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
@@ -272,7 +270,6 @@ void DB::zincrby(context_t& con)
     check_status(con, s);
     check_type(con, value, ktype::tzset);
     auto zk = decode_zset_meta_value(value);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_zset_member(zk.seq, member), &value);
     if (!s.ok() && !s.IsNotFound()) reterr(con, s);
     if (s.ok()) {
@@ -330,9 +327,9 @@ void DB::_zrange(context_t& con, bool is_reverse)
         if (!con.isequal(4, "WITHSCORES")) ret(con, shared.syntax_err);
         withscores = true;
     }
-    long start = str2l(con.argv[2]);
+    long long start = str2ll(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    long stop = str2l(con.argv[3]);
+    long long stop = str2ll(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     std::string value;
@@ -342,8 +339,8 @@ void DB::_zrange(context_t& con, bool is_reverse)
     check_status(con, s);
     check_type(con, value, ktype::tzset);
     auto zk = decode_zset_meta_value(value);
-    long upper = zk.size - 1;
-    long lower = -zk.size;
+    long long upper = zk.size - 1;
+    long long lower = -zk.size;
     if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     if (withscores)
@@ -400,7 +397,6 @@ void DB::_zrank(context_t& con, bool is_reverse)
     check_status(con, s);
     check_type(con, value, ktype::tzset);
     auto zk = decode_zset_meta_value(value);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_zset_member(zk.seq, member), &value);
     if (s.IsNotFound()) ret(con, shared.nil);
     // find score(value)'s rank(O(n))
@@ -438,7 +434,7 @@ void DB::zrevrank(context_t& con)
 void DB::_zrangebyscore(context_t& con, bool is_reverse)
 {
     unsigned cmdops = 0;
-    long offset = 0, limit = 0;
+    long long offset = 0, limit = 0;
     if (parse_zrangebyscore_args(con, cmdops, offset, limit) == C_ERR)
         return;
     auto& key = con.argv[1];
@@ -458,7 +454,7 @@ void DB::_zrangebyscore(context_t& con, bool is_reverse)
     auto zk = decode_zset_meta_value(value);
     auto [it, last] = zset_range(con, zk, cmdops, r);
     if (!it.Valid()) return;
-    long dis = last.order - it.order + 1;
+    long long dis = last.order - it.order + 1;
     if (!is_reverse) {
         _zrangefor(con, cmdops, it, dis, offset, limit, is_reverse);
     } else {
@@ -467,7 +463,7 @@ void DB::_zrangebyscore(context_t& con, bool is_reverse)
 }
 
 void DB::_zrangefor(context_t& con, unsigned cmdops, zsk_iterator& it,
-                    long dis, long offset, long limit, bool is_reverse)
+                    long long dis, long long offset, long long limit, bool is_reverse)
 {
     if (cmdops & LIMIT) {
         if (offset >= dis) ret(con, shared.multi_empty);
@@ -526,7 +522,6 @@ void DB::zrem(context_t& con)
     size_t size = con.argv.size();
     leveldb::WriteBatch batch;
     for (size_t i = 2; i < size; i++) {
-        value.clear();
         auto& member = con.argv[i];
         auto member_key = encode_zset_member(zk.seq, member);
         s = db->Get(leveldb::ReadOptions(), member_key, &value);
@@ -552,9 +547,9 @@ void DB::zrem(context_t& con)
 void DB::zremrangebyrank(context_t& con)
 {
     auto& key = con.argv[1];
-    long start = str2l(con.argv[2]);
+    long long start = str2ll(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    long stop = str2l(con.argv[3]);
+    long long stop = str2ll(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     auto meta_key = encode_meta_key(key);
@@ -564,11 +559,11 @@ void DB::zremrangebyrank(context_t& con)
     check_status(con, s);
     check_type(con, value, ktype::tzset);
     auto zk = decode_zset_meta_value(value);
-    long upper = zk.size - 1;
-    long lower = -zk.size;
+    long long upper = zk.size - 1;
+    long long lower = -zk.size;
     if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
-    long i = 0, rems = 0;
+    long long i = 0, rems = 0;
     leveldb::WriteBatch batch;
     auto anchor = get_zset_anchor(zk.seq);
     auto it = newIterator();
@@ -611,7 +606,7 @@ void DB::zremrangebyscore(context_t& con)
     auto zk = decode_zset_meta_value(value);
     auto [it, last] = zset_range(con, zk, cmdops, r);
     if (!it.Valid()) return;
-    long rems = 0;
+    long long rems = 0;
     leveldb::WriteBatch batch;
     while (it.Valid() && it.order <= last.order) {
         batch.Delete(it.key());
@@ -666,7 +661,7 @@ void DB::rename_zset_key(leveldb::WriteBatch *batch, const key_t& key,
 {
     auto zk = decode_zset_meta_value(meta_value);
     uint64_t newseq = get_next_seq();
-    uint64_t newsize = zk.size;
+    long long newsize = zk.size;
     auto anchor = get_zset_anchor(zk.seq);
     auto it = newIterator();
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {

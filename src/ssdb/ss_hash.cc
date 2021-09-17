@@ -6,7 +6,7 @@ using namespace alice::ssdb;
 #define HASH_ANCHOR_VAL ""
 
 static inline std::string
-encode_hash_meta_value(uint64_t seq, uint64_t size)
+encode_hash_meta_value(uint64_t seq, long long size)
 {
     std::string buf;
     buf.append(1, ktype::thash);
@@ -16,12 +16,19 @@ encode_hash_meta_value(uint64_t seq, uint64_t size)
     return buf;
 }
 
-static inline void
-decode_hash_meta_value(const std::string& value, uint64_t *seq, uint64_t *size)
+struct hash_key_info {
+    uint64_t seq = 0;
+    long long size = 0;
+};
+
+static inline hash_key_info
+decode_hash_meta_value(const std::string& value)
 {
+    hash_key_info hk;
     const char *s = value.c_str() + 1;
-    if (seq) *seq = atoll(s);
-    if (size) *size = atoi(strchr(s, ':') + 1);
+    hk.seq = atoll(s);
+    hk.size = atoll(strchr(s, ':') + 1);
+    return hk;
 }
 
 static inline std::string
@@ -72,16 +79,14 @@ void DB::hset(context_t& con)
     }
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq, size;
     bool found = false;
-    decode_hash_meta_value(value, &seq, &size);
-    auto enc_key = encode_hash_key(seq, field);
-    value.clear();
+    auto hk = decode_hash_meta_value(value);
+    auto enc_key = encode_hash_key(hk.seq, field);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     if (s.ok()) found = true;
     else if (!s.IsNotFound()) reterr(con, s);
     if (!found) {
-        batch.Put(meta_key, encode_hash_meta_value(seq, ++size));
+        batch.Put(meta_key, encode_hash_meta_value(hk.seq, ++hk.size));
     }
     batch.Put(enc_key, con.argv[3]);
     s = db->Write(leveldb::WriteOptions(), &batch);
@@ -111,14 +116,12 @@ void DB::hsetnx(context_t& con)
     }
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq, size;
-    decode_hash_meta_value(value, &seq, &size);
-    auto enc_key = encode_hash_key(seq, field);
-    value.clear();
+    auto hk = decode_hash_meta_value(value);
+    auto enc_key = encode_hash_key(hk.seq, field);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     if (s.ok()) ret(con, shared.n0);
     if (!s.IsNotFound()) reterr(con, s);
-    batch.Put(meta_key, encode_hash_meta_value(seq, ++size));
+    batch.Put(meta_key, encode_hash_meta_value(hk.seq, ++hk.size));
     batch.Put(enc_key, con.argv[3]);
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -137,10 +140,8 @@ void DB::hget(context_t& con)
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq;
-    decode_hash_meta_value(value, &seq, nullptr);
-    value.clear();
-    s = db->Get(leveldb::ReadOptions(), encode_hash_key(seq, field), &value);
+    auto hk = decode_hash_meta_value(value);
+    s = db->Get(leveldb::ReadOptions(), encode_hash_key(hk.seq, field), &value);
     if (s.IsNotFound()) ret(con, shared.nil);
     if (!s.ok()) reterr(con, s);
     con.append_reply_string(value);
@@ -157,10 +158,8 @@ void DB::hexists(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq;
-    decode_hash_meta_value(value, &seq, nullptr);
-    value.clear();
-    s = db->Get(leveldb::ReadOptions(), encode_hash_key(seq, field), &value);
+    auto hk = decode_hash_meta_value(value);
+    s = db->Get(leveldb::ReadOptions(), encode_hash_key(hk.seq, field), &value);
     if (s.ok()) ret(con, shared.n1);
     if (s.IsNotFound()) ret(con, shared.n0);
     reterr(con, s);
@@ -177,12 +176,11 @@ void DB::hdel(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    int dels = 0;
-    uint64_t seq, size;
+    long long dels = 0;
     leveldb::WriteBatch batch;
-    decode_hash_meta_value(value, &seq, &size);
+    auto hk = decode_hash_meta_value(value);
     for (size_t i = 2; i < con.argv.size(); i++) {
-        auto enc_key = encode_hash_key(seq, con.argv[i]);
+        auto enc_key = encode_hash_key(hk.seq, con.argv[i]);
         s = db->Get(leveldb::ReadOptions(), enc_key, &value);
         if (s.ok()) {
             batch.Delete(enc_key);
@@ -190,11 +188,12 @@ void DB::hdel(context_t& con)
         } else if (!s.IsNotFound())
             reterr(con, s);
     }
-    if (dels == size) {
+    if (dels == hk.size) {
         batch.Delete(meta_key);
-        batch.Delete(get_hash_anchor(seq));
+        batch.Delete(get_hash_anchor(hk.seq));
     } else {
-        batch.Put(meta_key, encode_hash_meta_value(seq, size-dels));
+        assert(hk.size > dels);
+        batch.Put(meta_key, encode_hash_meta_value(hk.seq, hk.size - dels));
     }
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
@@ -212,9 +211,8 @@ void DB::hlen(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t size;
-    decode_hash_meta_value(value, nullptr, &size);
-    con.append_reply_number(size);
+    auto hk = decode_hash_meta_value(value);
+    con.append_reply_number(hk.size);
 }
 
 // HSTRLEN key field
@@ -228,10 +226,8 @@ void DB::hstrlen(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq;
-    decode_hash_meta_value(value, &seq, nullptr);
-    value.clear();
-    s = db->Get(leveldb::ReadOptions(), encode_hash_key(seq, field), &value);
+    auto hk = decode_hash_meta_value(value);
+    s = db->Get(leveldb::ReadOptions(), encode_hash_key(hk.seq, field), &value);
     if (s.IsNotFound()) ret(con, shared.n0);
     if (!s.ok()) reterr(con, s);
     con.append_reply_number(value.size());
@@ -262,10 +258,8 @@ void DB::hincrby(context_t& con)
     }
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq, size;
-    decode_hash_meta_value(value, &seq, &size);
-    value.clear();
-    auto enc_key = encode_hash_key(seq, field);
+    auto hk = decode_hash_meta_value(value);
+    auto enc_key = encode_hash_key(hk.seq, field);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     if (s.ok()) {
         auto number = str2ll(value);
@@ -274,7 +268,7 @@ void DB::hincrby(context_t& con)
         s = db->Put(leveldb::WriteOptions(), enc_key, i2s(incr));
     } else if (s.IsNotFound()) {
         leveldb::WriteBatch batch;
-        batch.Put(meta_key, encode_hash_meta_value(seq, ++size));
+        batch.Put(meta_key, encode_hash_meta_value(hk.seq, ++hk.size));
         batch.Put(enc_key, incr_str);
         s = db->Write(leveldb::WriteOptions(), &batch);
     } else
@@ -301,24 +295,24 @@ void DB::hmset(context_t& con)
         for (size_t i = 2; i < size; i += 2) {
             batch.Put(encode_hash_key(seq, con.argv[i]), con.argv[i+1]);
         }
-        batch.Put(meta_key, encode_hash_meta_value(seq, (size-2)/2));
+        batch.Put(meta_key, encode_hash_meta_value(seq, (size - 2) / 2));
         batch.Put(get_hash_anchor(seq), HASH_ANCHOR_VAL);
         s = db->Write(leveldb::WriteOptions(), &batch);
         check_status(con, s);
         ret(con, shared.ok);
     }
-    uint64_t seq, nums;
+    long long nums = 0;
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    decode_hash_meta_value(value, &seq, &nums);
+    auto hk = decode_hash_meta_value(value);
     for (size_t i = 2; i < size; i += 2) {
-        auto enc_key = encode_hash_key(seq, con.argv[i]);
+        auto enc_key = encode_hash_key(hk.seq, con.argv[i]);
         s = db->Get(leveldb::ReadOptions(), enc_key, &value);
         if (s.IsNotFound()) nums++;
         else if (!s.ok()) reterr(con, s);
         batch.Put(enc_key, con.argv[i+1]);
     }
-    batch.Put(meta_key, encode_hash_meta_value(seq, nums));
+    batch.Put(meta_key, encode_hash_meta_value(hk.seq, hk.size + nums));
     s = db->Write(leveldb::WriteOptions(), &batch);
     check_status(con, s);
     con.append(shared.ok);
@@ -340,12 +334,10 @@ void DB::hmget(context_t& con)
     }
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq;
-    decode_hash_meta_value(value, &seq, nullptr);
-    con.append_reply_multi(size-2);
+    auto hk = decode_hash_meta_value(value);
+    con.append_reply_multi(size - 2);
     for (size_t i = 2; i < size; i++) {
-        value.clear();
-        s = db->Get(leveldb::ReadOptions(), encode_hash_key(seq, con.argv[i]), &value);
+        s = db->Get(leveldb::ReadOptions(), encode_hash_key(hk.seq, con.argv[i]), &value);
         if (s.ok()) con.append_reply_string(value);
         else if (s.IsNotFound()) con.append(shared.nil);
         else adderr(con, s);
@@ -366,12 +358,11 @@ void DB::_hget(context_t& con, int what)
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
     check_type(con, value, ktype::thash);
-    uint64_t seq, size;
-    decode_hash_meta_value(value, &seq, &size);
-    auto anchor = get_hash_anchor(seq);
-    con.append_reply_multi(what == HGETALL ? size * 2 : size);
+    auto hk = decode_hash_meta_value(value);
+    auto anchor = get_hash_anchor(hk.seq);
+    con.append_reply_multi(what == HGETALL ? hk.size * 2 : hk.size);
     auto it = newIterator();
-    for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
+    for (it->Seek(anchor), it->Next(); hk.size-- > 0 && it->Valid(); it->Next()) {
         switch (what) {
         case HGETKEYS:
             con.append_reply_string(get_hash_field(it->key()));
@@ -386,6 +377,7 @@ void DB::_hget(context_t& con, int what)
         default: assert(0);
         }
     }
+    assert(hk.size == 0);
 }
 
 void DB::hkeys(context_t& con)
@@ -415,18 +407,18 @@ errstr_t DB::del_hash_key(const std::string& key)
 
 errstr_t DB::del_hash_key_batch(leveldb::WriteBatch *batch, const std::string& key)
 {
-    uint64_t seq, size;
     std::string value;
     auto meta_key = encode_meta_key(key);
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
     if (s.IsNotFound()) return std::nullopt;
     if (!s.ok()) return s;
-    decode_hash_meta_value(value, &seq, &size);
-    auto anchor = get_hash_anchor(seq);
+    auto hk = decode_hash_meta_value(value);
+    auto anchor = get_hash_anchor(hk.seq);
     auto it = newIterator();
-    for (it->Seek(anchor), it->Next(); size-- > 0; it->Next()) {
+    for (it->Seek(anchor), it->Next(); hk.size-- > 0 && it->Valid(); it->Next()) {
         batch->Delete(it->key());
     }
+    assert(hk.size == 0);
     batch->Delete(meta_key);
     batch->Delete(anchor);
     return std::nullopt;
@@ -435,19 +427,18 @@ errstr_t DB::del_hash_key_batch(leveldb::WriteBatch *batch, const std::string& k
 void DB::rename_hash_key(leveldb::WriteBatch *batch, const key_t& key,
                          const std::string& meta_value, const key_t& newkey)
 {
-    uint64_t seq, size;
-    decode_hash_meta_value(meta_value, &seq, &size);
+    auto hk = decode_hash_meta_value(meta_value);
     uint64_t newseq = get_next_seq();
-    uint64_t newsize = size;
-    auto anchor = get_hash_anchor(seq);
+    long long newsize = hk.size;
+    auto anchor = get_hash_anchor(hk.seq);
     auto it = newIterator();
     for (it->Seek(anchor), it->Next(); it->Valid(); it->Next()) {
         batch->Put(encode_hash_key(newseq, get_hash_field(it->key())), it->value());
         batch->Delete(it->key());
-        if (--size == 0)
+        if (--hk.size == 0)
             break;
     }
-    assert(size == 0);
+    assert(hk.size == 0);
     batch->Put(encode_meta_key(newkey), encode_hash_meta_value(newseq, newsize));
     batch->Put(get_hash_anchor(newseq), HASH_ANCHOR_VAL);
     batch->Delete(encode_meta_key(key));

@@ -9,7 +9,7 @@ void DB::sadd(context_t& con)
     auto& key = con.argv[1];
     size_t size = con.argv.size();
     check_expire(key);
-    int adds = 0;
+    size_t adds = 0;
     auto it = find(key);
     if (not_found(it)) {
         Set set;
@@ -73,9 +73,9 @@ void DB::srandmember(context_t& con)
 {
     auto& key = con.argv[1];
     check_expire(key);
-    int count = 0;
+    ssize_t count = 0;
     if (con.argv.size() > 2) {
-        count = str2l(con.argv[2]);
+        count = str2ll(con.argv[2]);
         if (str2numerr()) ret(con, shared.integer_err);
         if (count == 0) ret(con, shared.nil);
     }
@@ -138,7 +138,7 @@ void DB::srem(context_t& con)
     if (not_found(it)) ret(con, shared.n0);
     check_type(con, it, Set);
     auto& set = get_set_value(it);
-    int rems = 0;
+    size_t rems = 0;
     for (size_t i = 2; i < size; i++) {
         auto it = set.find(con.argv[i]);
         if (it != set.end()) {

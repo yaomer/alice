@@ -85,7 +85,6 @@ void DB::get(context_t& con)
     if (s.IsNotFound()) ret(con, shared.nil);
     check_status(con, s);
     check_type(con, value, ktype::tstring);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
     check_status(con, s);
     con.append_reply_string(value);
@@ -111,7 +110,6 @@ void DB::getset(context_t& con)
     }
     check_status(con, s);
     check_type(con, value, ktype::tstring);
-    value.clear();
     auto enc_key = encode_string_key(key);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     check_status(con, s);
@@ -129,7 +127,6 @@ void DB::strlen(context_t& con)
     if (s.IsNotFound()) ret(con, shared.n0);
     check_status(con, s);
     check_type(con, value, ktype::tstring);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
     check_status(con, s);
     con.append_reply_number(value.size());
@@ -155,7 +152,6 @@ void DB::append(context_t& con)
     }
     check_type(con, value, ktype::tstring);
     check_status(con, s);
-    value.clear();
     auto enc_key = encode_string_key(key);
     s = db->Get(leveldb::ReadOptions(), enc_key, &value);
     check_status(con, s);
@@ -204,7 +200,6 @@ void DB::mget(context_t& con)
         auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
         if (s.ok()) {
             if (get_type(value) == ktype::tstring) {
-                value.clear();
                 s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
                 if (s.ok())
                     con.append_reply_string(value);
@@ -228,7 +223,6 @@ void DB::_incr(context_t& con, int64_t incr)
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
     if (s.ok()) {
         check_type(con, value, ktype::tstring);
-        value.clear();
         s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
         check_status(con, s);
         auto number = str2ll(value);
@@ -297,7 +291,6 @@ void DB::setrange(context_t& con)
     }
     check_status(con, s);
     check_type(con, value, ktype::tstring);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
     check_status(con, s);
     new_value.swap(value);
@@ -316,9 +309,9 @@ void DB::setrange(context_t& con)
 void DB::getrange(context_t& con)
 {
     auto& key = con.argv[1];
-    long start = str2l(con.argv[2]);
+    long long start = str2ll(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    long stop = str2l(con.argv[3]);
+    long long stop = str2ll(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     std::string value;
@@ -326,11 +319,10 @@ void DB::getrange(context_t& con)
     auto s = db->Get(leveldb::ReadOptions(), meta_key, &value);
     if (s.IsNotFound()) ret(con, shared.nil);
     check_type(con, value, ktype::tstring);
-    value.clear();
     s = db->Get(leveldb::ReadOptions(), encode_string_key(key), &value);
     check_status(con, s);
-    long upper = value.size() - 1;
-    long lower = -value.size();
+    long long upper = value.size() - 1;
+    long long lower = -value.size();
     if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     con.append_reply_string(value.substr(start, stop-start+1));

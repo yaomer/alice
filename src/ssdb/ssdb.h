@@ -110,8 +110,8 @@ using errstr_t = std::optional<leveldb::Status>;
 using ldbIterator = std::unique_ptr<leveldb::Iterator>;
 
 struct zsk_info {
-    zsk_info() = default;
-    uint64_t seq, size;
+    uint64_t seq = 0;
+    long long size = 0;
 };
 
 struct zsk_iterator {
@@ -187,6 +187,15 @@ public:
     {
         del_expire_key(key);
         return del_key_batch(batch, key);
+    }
+
+    ldbIterator newIterator()
+    {
+        return ldbIterator(db->NewIterator(leveldb::ReadOptions()));
+    }
+    ldbIterator newErrorIterator()
+    {
+        return ldbIterator(leveldb::NewErrorIterator(leveldb::Status::InvalidArgument("")));
     }
 
     void rename_key(leveldb::WriteBatch *batch, const key_t& key,
@@ -313,15 +322,6 @@ private:
 
     uint64_t get_next_seq();
 
-    ldbIterator newIterator()
-    {
-        return ldbIterator(db->NewIterator(leveldb::ReadOptions()));
-    }
-    ldbIterator newErrorIterator()
-    {
-        return ldbIterator(leveldb::NewErrorIterator(leveldb::Status::InvalidArgument("")));
-    }
-
     void blocking_pop(const key_t& key);
     void clear_blocking_keys_for_context(context_t& con);
     void add_blocking_key(context_t& con, const key_t& key);
@@ -331,9 +331,6 @@ private:
     void _expire(context_t& con, bool is_expire);
     void _rename(context_t& con, bool is_nx);
 
-    void pop_key(leveldb::WriteBatch *batch,
-                 const std::string& meta_key, const std::string& enc_key,
-                 int *li, int *ri, int *size, bool is_lpop);
     void _lpushx(context_t& con, bool is_lpushx);
     void _lpop(context_t& con, bool is_lpop);
     void _blpop(context_t& con, bool is_blpop);
@@ -354,7 +351,7 @@ private:
     void _zrank(context_t& con, bool is_reverse);
     void _zrangebyscore(context_t& con, bool is_reverse);
     void _zrangefor(context_t& con, unsigned cmdops, zsk_iterator& it,
-                    long dis, long offset, long limit, bool is_reverse);
+                    long long dis, long long offset, long long limit, bool is_reverse);
 
     leveldb::DB *db;
     std::unordered_map<key_t, int64_t> expire_keys;

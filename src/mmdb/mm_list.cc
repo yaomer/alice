@@ -263,21 +263,21 @@ void DB::lset(context_t& con)
 void DB::lrange(context_t& con)
 {
     auto& key = con.argv[1];
-    long start = str2l(con.argv[2]);
+    long long start = str2ll(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    long stop = str2l(con.argv[3]);
+    long long stop = str2ll(con.argv[3]);
     if (str2numerr()) ret(con, shared.integer_err);
     check_expire(key);
     auto it = find(key);
     if (not_found(it)) ret(con, shared.nil);
     check_type(con, it, List);
     auto& list = get_list_value(it);
-    long upper = list.size() - 1;
-    long lower = -list.size();
+    long long upper = list.size() - 1;
+    long long lower = -list.size();
     if (check_range_index(con, start, stop, lower, upper) == C_ERR)
         return;
     con.append_reply_multi(stop - start + 1);
-    long i = 0;
+    long long i = 0;
     for (auto& it : list) {
         if (i < start) {
             i++;

@@ -21,7 +21,7 @@ namespace alice {
 
 int parse_set_args(context_t& con, unsigned& cmdops, int64_t& expire);
 
-int check_range_index(context_t& con, long& start, long& stop, long lower, long upper);
+int check_range_index(context_t& con, long long& start, long long& stop, long long lower, long long upper);
 
 struct score_range {
     int lower = 0, upper = 0;
@@ -32,7 +32,7 @@ int parse_range_score(context_t& con, unsigned& cmdops, score_range& r,
                       const std::string& min_str, const std::string& max_str);
 
 int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
-                             long& offset, long& limit);
+                             long long& offset, long long& limit);
 
 unsigned get_last_cmd(const std::string& lc);
 

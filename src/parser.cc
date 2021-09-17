@@ -48,7 +48,7 @@ timeout_err:
 // 检查索引范围访问
 // 类似于lrange key start stop
 // 我们还会将负索引访问映射到正常的范围访问
-int check_range_index(context_t& con, long& start, long& stop, long lower, long upper)
+int check_range_index(context_t& con, long long& start, long long& stop, long long lower, long long upper)
 {
     if (start > upper || stop < lower) {
         con.append(shared.nil);
@@ -119,7 +119,7 @@ thread_local std::unordered_map<std::string, int> zrbsops = {
 };
 
 int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
-                             long& offset, long& limit)
+                             long long& offset, long long& limit)
 {
     size_t len = con.argv.size();
     for (size_t i = 4; i < len; i++) {
@@ -131,9 +131,9 @@ int parse_zrangebyscore_args(context_t& con, unsigned& cmdops,
         case WITHSCORES: break;
         case LIMIT: {
             if (i + 2 >= len) goto syntax_err;
-            offset = str2l(con.argv[++i]);
+            offset = str2ll(con.argv[++i]);
             if (str2numerr()) goto integer_err;
-            limit = str2l(con.argv[++i]);
+            limit = str2ll(con.argv[++i]);
             if (str2numerr()) goto integer_err;
             if (offset < 0 || limit <= 0) {
                 con.append(shared.multi_empty);
