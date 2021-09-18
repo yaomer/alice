@@ -12,3 +12,6 @@ configure.h
 .testdb
 master.conf
 slave.conf
+.*-ldb/
+ssdb-dump.tar
+a.out

@@ -7,6 +7,7 @@
 #include <leveldb/cache.h>
 
 #include <assert.h>
+#include <sys/stat.h>
 
 #include <vector>
 #include <string>
@@ -83,6 +84,7 @@ private:
     std::unordered_map<std::string, command_t> cmdtable;
     std::unique_ptr<DB> db;
     std::list<size_t> blocked_clients;
+    pid_t child_pid = -1;
 };
 
 struct keycomp : public leveldb::Comparator {
@@ -139,8 +141,9 @@ public:
     using key_t = std::string;
     DB(engine *e) : engine(e)
     {
+        set_db_dir();
         leveldb::Options ops = config_leveldb_options();
-        auto s = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
+        auto s = leveldb::DB::Open(ops, get_db_dir(), &db);
         if (!s.ok()) log_fatal("leveldb: %s", s.ToString().c_str());
         set_builtin_keys();
     }
@@ -152,14 +155,14 @@ public:
     {
         delete db;
         leveldb::Options ops = config_leveldb_options();
-        auto s = leveldb::DB::Open(ops, server_conf.ssdb_leveldb_dbname, &db);
+        auto s = leveldb::DB::Open(ops, get_db_dir(), &db);
         if (!s.ok()) log_fatal("leveldb: %s", s.ToString().c_str());
         set_builtin_keys();
     }
     leveldb::Options config_leveldb_options()
     {
         leveldb::Options ops;
-        ops.create_if_missing = server_conf.ssdb_leveldb_create_if_missing;
+        ops.create_if_missing = true;
         ops.max_open_files = server_conf.ssdb_leveldb_max_open_files;
         ops.max_file_size = server_conf.ssdb_leveldb_max_file_size;
         ops.write_buffer_size = server_conf.ssdb_leveldb_write_buffer_size;
@@ -167,6 +170,11 @@ public:
         return ops;
     }
     void clear();
+
+    std::string get_db_dir()
+    {
+        return db_dir;
+    }
 
     void add_expire_key(const key_t& key, int64_t expire)
     {
@@ -296,6 +304,15 @@ public:
     void zremrangebyrank(context_t& con);
     void zremrangebyscore(context_t& con);
 private:
+    void set_db_dir()
+    {
+        db_dir.append(".")
+              .append(server_conf.ip)
+              .append(":")
+              .append(i2s(server_conf.port))
+              .append("-ldb/");
+        mkdir(db_dir.c_str(), 0777);
+    }
     void set_builtin_keys();
     // return err-str if error else return null
     errstr_t del_list_key(const key_t& key);
@@ -354,6 +371,7 @@ private:
                     long long dis, long long offset, long long limit, bool is_reverse);
 
     leveldb::DB *db;
+    std::string db_dir;
     std::unordered_map<key_t, int64_t> expire_keys;
     std::unordered_map<key_t, std::vector<size_t>> watch_keys;
     std::unordered_map<key_t, std::vector<size_t>> blocking_keys;

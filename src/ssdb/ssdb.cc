@@ -2,6 +2,8 @@
 
 #include "../server.h"
 
+#include <dirent.h>
+
 using namespace alice;
 using namespace alice::ssdb;
 
@@ -21,28 +23,63 @@ void engine::server_cron()
 
 void engine::creat_snapshot()
 {
+    child_pid = fork();
+    if (child_pid == 0) {
+        execl("/usr/bin/tar",
+              "tar",
+              "-czf", // compress with gzip
+              server_conf.ssdb_snapshot_name.c_str(),
+              db->get_db_dir().c_str(),
+              (char*)0);
+        abort();
+    }
+}
 
+void engine::load_snapshot()
+{
+    struct dirent *d;
+    DIR *dir = opendir(db->get_db_dir().c_str());
+    while ((d = readdir(dir))) {
+        if (strcmp(d->d_name, ".") && strcmp(d->d_name, "..")) {
+            auto rfile = db->get_db_dir() + d->d_name;
+            unlink(rfile.c_str());
+        }
+    }
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/usr/bin/tar",
+              "tar",
+              "-xzf",
+              server_conf.ssdb_snapshot_name.c_str(),
+              "--strip-components=1", // strip db_dir
+              "-C",
+              db->get_db_dir().c_str(),
+              (char*)0);
+        abort();
+    }
+    waitpid(pid, nullptr, 0);
+    db->reload();
 }
 
 bool engine::is_creating_snapshot()
 {
-    return false;
+    return child_pid != -1;
 }
 
 bool engine::is_created_snapshot()
 {
-    return true;
+    if (child_pid != -1) {
+        if (waitpid(child_pid, nullptr, WNOHANG) > 0) {
+            child_pid = -1;
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string engine::get_snapshot_name()
 {
     return server_conf.ssdb_snapshot_name;
-}
-
-void engine::load_snapshot()
-{
-    // TODO:
-    db->reload();
 }
 
 void engine::watch(context_t& con)

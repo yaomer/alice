@@ -66,10 +66,8 @@ struct server_conf_t {
     // aof文件的存储位置
     std::string mmdb_appendonly_file = "appendonly.aof";
     // ssdb-options
-    std::string ssdb_leveldb_dbname = ".testdb";
     std::string ssdb_snapshot_name = "ssdb-dump.tar";
     int ssdb_expire_check_keys = 20;
-    bool ssdb_leveldb_create_if_missing = true;
     int ssdb_leveldb_write_buffer_size = 4 * 1024 * 1024;
     int ssdb_leveldb_max_open_files = 65535;
     int ssdb_leveldb_max_file_size = 2 * 1024 * 1024;
