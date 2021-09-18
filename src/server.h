@@ -141,15 +141,19 @@ public:
     // master-slave replication
     void connect_master_server();
     void reset_connection_with_master();
-    void send_ping_to_master(const angel::connection_ptr& conn);
     void recv_sync_from_master(const angel::connection_ptr& conn, angel::buffer& buf);
+    void slave_sync_ping(const angel::connection_ptr& conn, angel::buffer& buf);
+    void slave_sync_conf(const angel::connection_ptr& conn, angel::buffer& buf);
+    void slave_sync_wait(const angel::connection_ptr& conn, angel::buffer& buf);
     void slave_close_handler(const angel::connection_ptr& conn);
-    void send_addr_to_master(const angel::connection_ptr& conn);
+    void send_ping_to_master(const angel::connection_ptr& conn);
+    void send_info_to_master(const angel::connection_ptr& conn);
     void send_sync_command_to_master(const angel::connection_ptr& conn);
     void set_heartbeat_timer(const angel::connection_ptr& conn);
     void send_ack_to_master(const angel::connection_ptr& conn);
     void recv_snapshot_from_master(const angel::connection_ptr& conn, angel::buffer& buf);
     void send_snapshot_to_slaves();
+    void reset_slave_message_handler();
     void update_heartbeat_time();
     // replication command
     void slaveof(context_t& con);

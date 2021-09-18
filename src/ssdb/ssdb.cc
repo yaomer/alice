@@ -45,13 +45,14 @@ void engine::load_snapshot()
             unlink(rfile.c_str());
         }
     }
+    chmod(server_conf.ssdb_snapshot_name.c_str(), 0644);
     pid_t pid = fork();
     if (pid == 0) {
         execl("/usr/bin/tar",
               "tar",
               "-xzf",
               server_conf.ssdb_snapshot_name.c_str(),
-              "--strip-components=1", // strip db_dir
+              "--strip-components=1", // strip master db_dir
               "-C",
               db->get_db_dir().c_str(),
               (char*)0);

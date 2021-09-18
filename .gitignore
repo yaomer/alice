@@ -3,6 +3,7 @@ build/
 serv
 cli
 dump.rdb
+dump-*.rdb
 appendonly.aof
 alice-server
 alice-cli
@@ -14,4 +15,5 @@ master.conf
 slave.conf
 .*-ldb/
 ssdb-dump.tar
+ssdb-dump-*.tar
 a.out

@@ -134,8 +134,7 @@ void dbserver::sync_command_to_slaves(const char *query, size_t len)
         auto conn = server.get_connection(it.first);
         if (!conn) continue;
         auto& con = get_context(conn);
-        if (con.flags & context_t::SYNC_COMMAND) {
-            std::string s(query, len);
+        if (con.repl_state == context_t::SYNC_COMMAND) {
             conn->send(query, len);
         }
     }
@@ -232,14 +231,17 @@ void dbserver::send_ping_to_master(const angel::connection_ptr& conn)
 {
     db->slave_connection_handler(conn);
     auto& con = get_context(conn);
-    con.flags |= context_t::SYNC_PING;
+    con.repl_state = context_t::SYNC_PING;
     conn->send("*1\r\n$4\r\nPING\r\n");
+    log_info("Send the PING");
     // 从服务器向主服务器发送完PING之后，如果repl_timeout时间后没有收到
     // 有效回复，就会认为此次复制失败，然后会重连主服务器
     repl_timeout_timer_id = loop->run_after(server_conf.repl_timeout,
             [this, &con]{
-            if (con.flags & context_t::SYNC_PING)
+            if (con.repl_state == context_t::SYNC_PING) {
+                log_info("PONG was not received in %d (s), try to replicate again");
                 this->connect_master_server();
+            }
             });
 }
 
@@ -247,61 +249,80 @@ void dbserver::send_ping_to_master(const angel::connection_ptr& conn)
 // +CONTINUE\r\n
 // <snapshot-file-size>\r\n\r\n<snapshot>
 // <sync command>
-// SYNC_PING -> SYNC_WAIT -> SYNC_FULL -> SYNC_COMMAND
-//                             -> SYNC_COMMAND
+// SYNC_PING -> SYNC_CONF -> SYNC_WAIT -> SYNC_FULL -> SYNC_COMMAND
+//                                          -> SYNC_COMMAND
 void dbserver::recv_sync_from_master(const angel::connection_ptr& conn, angel::buffer& buf)
 {
     auto& con = get_context(conn);
-    while (true) {
-        if (con.flags & context_t::SYNC_PING) {
-            // 等待接收PING的有效回复PONG，如果长时间没有收到就会
-            // 触发repl_timeout_timer超时
-            if (!buf.starts_with("+PONG\r\n"))
-                return;
-            log_info("recvd +PONG");
-            con.flags &= ~context_t::SYNC_PING;
-            con.flags |= context_t::SYNC_WAIT;
-            send_addr_to_master(conn);
-            send_sync_command_to_master(conn);
-            buf.retrieve(7);
-        } else if (con.flags & context_t::SYNC_WAIT) {
-            if (buf.starts_with("+FULLRESYNC\r\n")) {
-                log_info("recvd +FULLRESYNC");
-                // 进行完全重同步
-                char *s = buf.peek();
-                const char *ps = s;
-                s += 13;
-                int crlf = buf.find(s, "\r\n");
-                if (crlf < 0) return;
-                master_run_id = generate_run_id();
-                s += crlf + 2;
-                crlf = buf.find(s, "\r\n");
-                if (crlf < 0) return;
-                slave_offset = atoll(s);
-                s += crlf + 2;
-                buf.retrieve(s - ps);
-                con.flags &= ~context_t::SYNC_WAIT;
-                con.flags |= context_t::SYNC_FULL;
-            } else if (buf.starts_with("+CONTINUE\r\n")) {
-                log_info("recvd +CONTINUE");
-                // 进行部分重同步
-                buf.retrieve(11);
-                con.flags &= ~context_t::SYNC_WAIT;
-                con.flags |= context_t::CONNECT_WITH_MASTER | context_t::SYNC_COMMAND;
-                master_cli->conn()->set_message_handler(
-                        [this](const angel::connection_ptr& conn, angel::buffer& buf){
-                        this->slave_message_handler(conn, buf);
-                        });
-                set_heartbeat_timer(conn);
-            } else
-                break;
-        } else if (con.flags & context_t::SYNC_FULL) {
-            recv_snapshot_from_master(conn, buf);
-            break;
-        } else if (con.flags & context_t::SYNC_COMMAND) {
-            slave_message_handler(conn, buf);
-            break;
-        }
+    switch (con.repl_state) {
+    case context_t::SYNC_PING:
+        slave_sync_ping(conn, buf);
+        break;
+    case context_t::SYNC_CONF:
+        slave_sync_conf(conn, buf);
+        break;
+    case context_t::SYNC_WAIT:
+        slave_sync_wait(conn, buf);
+        break;
+    case context_t::SYNC_FULL:
+        recv_snapshot_from_master(conn, buf);
+        break;
+    }
+}
+
+void dbserver::slave_sync_ping(const angel::connection_ptr& conn, angel::buffer& buf)
+{
+    if (!buf.starts_with("+PONG\r\n")) return;
+    log_info("Recvd the +PONG");
+    auto& con = get_context(conn);
+    con.repl_state = context_t::SYNC_CONF;
+    send_info_to_master(conn);
+    buf.retrieve(7);
+}
+
+void dbserver::slave_sync_conf(const angel::connection_ptr& conn, angel::buffer& buf)
+{
+    auto& con = get_context(conn);
+    if (buf.starts_with("+OK\r\n")) {
+        log_info("Recvd the +OK");
+        con.repl_state = context_t::SYNC_WAIT;
+        send_sync_command_to_master(conn);
+        buf.retrieve(5);
+    } else if (buf.starts_with("-ERR\r\n")) {
+        log_info("Recvd the -ERR, failed to replicate");
+        con.repl_state = 0;
+        reset_connection_with_master();
+        buf.retrieve(6);
+    }
+}
+
+void dbserver::slave_sync_wait(const angel::connection_ptr& conn, angel::buffer& buf)
+{
+    auto& con = get_context(conn);
+    if (buf.starts_with("+FULLRESYNC\r\n")) {
+        log_info("Recvd the +FULLRESYNC");
+        // 进行完全重同步
+        char *s = buf.peek();
+        const char *ps = s;
+        s += 13;
+        int crlf = buf.find(s, "\r\n");
+        if (crlf < 0) return;
+        master_run_id = generate_run_id();
+        s += crlf + 2;
+        crlf = buf.find(s, "\r\n");
+        if (crlf < 0) return;
+        slave_offset = atoll(s);
+        s += crlf + 2;
+        buf.retrieve(s - ps);
+        con.repl_state = context_t::SYNC_FULL;
+    } else if (buf.starts_with("+CONTINUE\r\n")) {
+        log_info("Recvd the +CONTINUE");
+        // 进行部分重同步
+        buf.retrieve(11);
+        con.flags |= context_t::CONNECT_WITH_MASTER;
+        con.repl_state = 0;
+        reset_slave_message_handler();
+        set_heartbeat_timer(conn);
     }
 }
 
@@ -310,14 +331,13 @@ void dbserver::slave_close_handler(const angel::connection_ptr& conn)
     db->slave_close_handler(conn);
 }
 
-// 从服务器向主服务器发送自己的ip和port
-void dbserver::send_addr_to_master(const angel::connection_ptr& conn)
+void dbserver::send_info_to_master(const angel::connection_ptr& conn)
 {
     std::string message;
-    std::string ip = server.listen_addr().to_host_ip();
-    std::string port = i2s(server.listen_addr().to_host_port());
-    argv_t argv = { "REPLCONF", "ADDR", ip, port };
+    auto host = server.listen_addr().to_host();
+    argv_t argv = { "REPLCONF", "INFO", host, i2s(server_conf.engine) };
     conv2resp(message, argv);
+    log_info("Send the REPLCONF INFO");
     conn->send(message);
 }
 
@@ -332,10 +352,10 @@ void dbserver::send_sync_command_to_master(const angel::connection_ptr& conn)
         // slave -> master: 第一次复制
         flags &= ~MASTER;
         flags |= SLAVE;
-        // setAllSlavesToReadonly();
         argv = { "PSYNC", "?", "-1" };
     }
     conv2resp(message, argv);
+    log_info("Send the PSYNC");
     conn->send(message);
 }
 
@@ -344,6 +364,14 @@ void dbserver::set_heartbeat_timer(const angel::connection_ptr& conn)
     heartbeat_timer_id = loop->run_every(server_conf.repl_ping_period, [this, conn]{
             this->send_ack_to_master(conn);
             conn->send("*1\r\n$4\r\nPING\r\n");
+            });
+}
+
+void dbserver::reset_slave_message_handler()
+{
+    master_cli->conn()->set_message_handler(
+            [this](const angel::connection_ptr& conn, angel::buffer& buf){
+            this->slave_message_handler(conn, buf);
             });
 }
 
@@ -396,14 +424,11 @@ void dbserver::recv_snapshot_from_master(const angel::connection_ptr& conn, ange
     fsync(sync_fd);
     rename(sync_tmp_file, db->get_snapshot_name().c_str());
     db->load_snapshot();
-    con.flags &= ~context_t::SYNC_FULL;
-    con.flags |= context_t::CONNECT_WITH_MASTER | context_t::SYNC_COMMAND;
-    master_cli->conn()->set_message_handler(
-            [this, conn](const angel::connection_ptr& conn, angel::buffer& buf){
-            this->slave_message_handler(conn, buf);
-            });
+    con.flags |= context_t::CONNECT_WITH_MASTER;
+    con.repl_state = 0;
+    reset_slave_message_handler();
     set_heartbeat_timer(conn);
-    log_info("recvd snapshot from master");
+    log_info("Recvd snapshot, replication is complete");
 }
 
 // 主服务器将生成的rdb快照发送给从服务器
@@ -411,7 +436,7 @@ void dbserver::send_snapshot_to_slaves()
 {
     int fd = open(db->get_snapshot_name().c_str(), O_RDONLY);
     if (fd < 0) {
-        // logError("can't open %s:%s", server_conf.rdb_file.c_str(), angel::strerrno());
+        log_error("open(%s): %s", db->get_snapshot_name().c_str(), angel::util::strerrno());
         return;
     }
     off_t filesize = get_filesize(fd);
@@ -419,7 +444,7 @@ void dbserver::send_snapshot_to_slaves()
         auto conn = server.get_connection(it.first);
         if (!conn) continue;
         auto& con = get_context(conn);
-        if (con.flags & context_t::SYNC_SNAPSHOT) {
+        if (con.repl_state == context_t::SYNC_SNAPSHOT) {
             conn->send(i2s(filesize));
             conn->send("\r\n\r\n");
         }
@@ -430,7 +455,7 @@ void dbserver::send_snapshot_to_slaves()
             auto conn = server.get_connection(it.first);
             if (!conn) continue;
             auto& con = get_context(conn);
-            if (con.flags & context_t::SYNC_SNAPSHOT) {
+            if (con.repl_state == context_t::SYNC_SNAPSHOT) {
                 conn->send(buf.peek(), buf.readable());
             }
         }
@@ -439,9 +464,8 @@ void dbserver::send_snapshot_to_slaves()
         auto conn = server.get_connection(it.first);
         if (!conn) continue;
         auto& con = get_context(conn);
-        if (con.flags & context_t::SYNC_SNAPSHOT) {
-            con.flags &= ~context_t::SYNC_SNAPSHOT;
-            con.flags |= context_t::SYNC_COMMAND;
+        if (con.repl_state == context_t::SYNC_SNAPSHOT) {
+            con.repl_state = context_t::SYNC_COMMAND;
             if (sync_buffer.size() > 0)
                 conn->send(sync_buffer);
         }
@@ -455,20 +479,25 @@ void dbserver::send_snapshot_to_slaves()
 void dbserver::slaveof(context_t& con)
 {
     if (con.isequal(1, "no") && con.isequal(2, "one")) {
+        log_info("Stop replicating the master <%s>", master_addr.to_host());
         reset_connection_with_master();
         flags &= ~SLAVE;
         ret(con, shared.ok);
     }
     int port = str2l(con.argv[2]);
     if (str2numerr()) ret(con, shared.integer_err);
-    con.append(shared.ok);
     if (port == server_conf.port && con.argv[1].compare(server_conf.ip) == 0) {
-        log_warn("try connect to self");
+        con.append_error("Try to replicate self");
         return;
     }
-    log_info("connect to %s:%d", con.argv[1].c_str(), port);
-    master_addr = angel::inet_addr(con.argv[1].c_str(), port);
+    if (con.repl_state) {
+        con.append_error("Replicating...");
+        return;
+    }
+    master_addr = angel::inet_addr(con.argv[1], port);
+    log_info("Ready to replicate the master <%s>", master_addr.to_host());
     connect_master_server();
+    con.append(shared.ok);
 }
 
 // PSYNC ? -1
@@ -482,14 +511,14 @@ void dbserver::psync(context_t& con)
         size_t off = master_offset - slave_off;
         if (off > copy_backlog_buffer.size()) goto sync;
         // 执行部分重同步
-        con.flags |= context_t::SYNC_COMMAND;
+        con.repl_state = context_t::SYNC_COMMAND;
         con.append("+CONTINUE\r\n");
         append_partial_resync_data(con, off);
         return;
     }
 sync:
     // 执行完整重同步
-    con.flags |= context_t::CONNECT_WITH_SLAVE | context_t::SYNC_SNAPSHOT;
+    con.repl_state = context_t::SYNC_SNAPSHOT;
     con.append("+FULLRESYNC\r\n");
     con.append(run_id);
     con.append("\r\n");
@@ -505,17 +534,24 @@ sync:
     db->creat_snapshot();
 }
 
-// REPLCONF addr <ip> <port>
+// REPLCONF info <host> <engine>
 // REPLCONF ack repl_off
 void dbserver::replconf(context_t& con)
 {
-    if (con.isequal(1, "addr")) {
+    if (con.isequal(1, "info")) {
+        auto& host = con.argv[2];
+        if (server_conf.engine != atoi(con.argv[3].c_str())) {
+            log_error("The engine of the slave <%s> is inconsistent", host.c_str());
+            con.append("-ERR\r\n");
+            return;
+        }
         auto it = slaves.find(con.conn->id());
         if (it == slaves.end()) {
-            log_info("found a new slave %s:%s", con.argv[2].c_str(), con.argv[3].c_str());
+            log_info("Found a new slave <%s>", host.c_str());
             slaves.emplace(con.conn->id(), master_offset);
         }
-        con.slave_addr = angel::inet_addr(con.argv[2].c_str(), atoi(con.argv[3].c_str()));
+        con.slave_addr = angel::inet_addr(host);
+        con.append("+OK\r\n");
     } else if (con.isequal(1, "ack")) {
         size_t slave_off = atoll(con.argv[2].c_str());
         auto it = slaves.find(con.conn->id());
@@ -763,15 +799,15 @@ int main(int argc, char *argv[])
         alice::read_sentinel_conf(sentinel_conf_file);
         angel::inet_addr listen_addr(sentinel_conf.ip, sentinel_conf.port);
         Sentinel sentinel(&loop, listen_addr);
-        log_info("sentinel %s runid is %s", listen_addr.to_host(), sentinel.get_run_id());
+        log_info("Sentinel %s runid is %s", listen_addr.to_host(), sentinel.get_run_id());
         sentinel.start();
         loop.run();
         return 0;
     }
-    angel::set_log_name("server");
     angel::inet_addr listen_addr(server_conf.ip, server_conf.port);
+    angel::set_log_name(listen_addr.to_host());
     dbserver server(&loop, listen_addr);
-    log_info("server %s runid is %s", listen_addr.to_host(), server.get_run_id());
+    log_info("Server %s runid is %s", listen_addr.to_host(), server.get_run_id());
     server.start();
     loop.run();
 }

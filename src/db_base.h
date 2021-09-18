@@ -24,52 +24,34 @@ enum ReturnCode {
 };
 
 struct context_t {
-    enum Flag {
-        // 主服务器中设置该标志的连接表示与从服务器相连
-        CONNECT_WITH_SLAVE = 0x001, // for master
+    enum Flags {
         // 从服务器中设置该标志的连接表示与主服务器相连
-        CONNECT_WITH_MASTER = 0x002, // for slave
-        // 从服务器向主服务器发送了PING，正在等待接收PONG
-        SYNC_PING = 0x004, // for slave
-        // 主服务器向设置SYNC_SNAPSHOT标志的连接发送快照
-        // 从服务器设置该标志表示该连接处于接收快照的状态
-        SYNC_SNAPSHOT = 0x008, // for master and slave
-        // 主服务器向设置SYNC_COMMAND标志的连接传播同步命令
-        // 从服务器设置该标志表示该连接处于接收同步命令的状态
-        SYNC_COMMAND = 0x010, // for master and slave
-        // 从服务器处于等待接收主服务器的同步信息的状态
-        SYNC_WAIT = 0x020, // for slave
-        // 将要进行完全重同步
-        SYNC_FULL = 0x040, // for slave
+        CONNECT_WITH_MASTER = 0x02, // for slave
         // 客户端正在执行事务
-        EXEC_MULTI = 0x080,
+        EXEC_MULTI = 0x04,
         // 事务的安全性被破坏
-        EXEC_MULTI_ERR = 0x100,
+        EXEC_MULTI_ERR = 0x08,
         // 事务中有写操作
-        EXEC_MULTI_WRITE = 0x200,
+        EXEC_MULTI_WRITE = 0x10,
         // 客户端处于阻塞状态
-        CON_BLOCK = 0x400,
+        CON_BLOCK = 0x20,
     };
-    context_t()
-        : flags(0),
-        perms(IS_READ | IS_WRITE),
-        conn(nullptr),
-        block_start_time(0),
-        blocked_time(0),
-        block_db_num(0),
-        priv(nullptr)
-    {
-    }
-    context_t(angel::connection *conn, void *priv)
-        : flags(0),
-        perms(IS_READ | IS_WRITE),
-        conn(conn),
-        block_start_time(0),
-        blocked_time(0),
-        block_db_num(0),
-        priv(priv)
-    {
-    }
+    enum ReplState {
+        // 从服务器向主服务器发送了PING，正在等待接收PONG
+        SYNC_PING = 1, // for slave
+        // 从服务器向主服务器发送了一些配置信息，等待主服务器确认
+        SYNC_CONF = 2, // for slave
+        // 从服务器处于等待接收主服务器的同步信息的状态
+        SYNC_WAIT = 3, // for slave
+        // 将要进行完全重同步
+        SYNC_FULL = 4, // for slave
+        // 主服务器向设置SYNC_SNAPSHOT标志的连接发送快照
+        SYNC_SNAPSHOT = 5, // for master
+        // 主服务器向设置SYNC_COMMAND标志的连接传播同步命令
+        SYNC_COMMAND = 6, // for master
+    };
+    context_t() {  }
+    context_t(angel::connection *conn, void *priv) : conn(conn), priv(priv) {  }
     bool iscmd(const std::string& name)
     {
         return isequal(0, name);
@@ -150,9 +132,10 @@ struct context_t {
         std::copy(head.begin(), head.end(), buf.data()+buf_resize);
     }
 
-    int flags;
-    int perms;
-    angel::connection *conn;
+    int flags = 0;
+    int perms = IS_READ | IS_WRITE;
+    int repl_state = 0;
+    angel::connection *conn = nullptr;
     argv_t argv; // 请求参数表 argv[0]为命令名
     std::string buf; // 回复缓冲区
     size_t buf_resize = 0;
@@ -160,12 +143,12 @@ struct context_t {
     argv_t watch_keys; // 客户监视的键
     angel::inet_addr slave_addr; // 从服务器的地址
     argv_t blocking_keys;
-    time_t block_start_time;
-    time_t blocked_time;
-    int block_db_num;
+    time_t block_start_time = 0;
+    time_t blocked_time = 0;
+    int block_db_num = 0;
     std::string des; // for brpoplpush
     std::string last_cmd;
-    void *priv;
+    void *priv = nullptr;
 };
 
 struct command_t {
