@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::ssdb;
+namespace alice {
+
+namespace ssdb {
 
 // We need a map<key, score> and a skiplist<score, key>
 
@@ -697,4 +698,7 @@ int keycomp::zset_compare(const leveldb::Slice& l, const leveldb::Slice& r) cons
     leveldb::Slice member1(s1, begin1 - 1 + l.size() - 1 - s1);
     leveldb::Slice member2(s2, begin2 - 1 + r.size() - 1 - s2);
     return member1.compare(member2);
+}
+
+}
 }

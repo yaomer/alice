@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::ssdb;
+namespace alice {
+
+namespace ssdb {
 
 #define SET_VAL ""
 #define SET_ANCHOR_VAL ""
@@ -560,4 +561,7 @@ void DB::rename_set_key(leveldb::WriteBatch *batch, const key_t& key,
     batch->Put(get_set_anchor(newseq), SET_ANCHOR_VAL);
     batch->Delete(encode_meta_key(key));
     batch->Delete(anchor);
+}
+
+}
 }

@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 // SADD key member [member ...]
 void DB::sadd(context_t& con)
@@ -325,4 +326,7 @@ void DB::sdiff(context_t& con)
 void DB::sdiffstore(context_t& con)
 {
     // TODO:
+}
+
+}
 }

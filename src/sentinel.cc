@@ -42,14 +42,12 @@
 #include "sentinel.h"
 #include "config.h"
 
-using namespace alice;
+namespace alice {
 
 #define BIND(f) std::bind(&Sentinel::f, this, std::placeholders::_1)
 
 // 选举领头和投票时设置的超时定时器的基值
 #define ELECT_TIMEOUT 1000
-
-using namespace alice;
 
 Sentinel::Sentinel(angel::evloop *loop, angel::inet_addr listen_addr)
     : loop(loop),
@@ -729,4 +727,6 @@ void SentinelInstance::convert_slave_to_master(SentinelInstance *slave)
     // there, we choose 2), so we do nothing
     sentinel->masters.emplace(master->name, master);
     slaves.erase(slave->name);
+}
+
 }

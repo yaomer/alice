@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 // ZADD key score member [score member ...]
 void DB::zadd(context_t& con)
@@ -388,4 +389,7 @@ zsk_range DB::zset_range(Zset& zset, unsigned cmdops, score_range& r)
             ++last;
     }
     return { it, last };
+}
+
+}
 }

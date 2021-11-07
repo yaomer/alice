@@ -4,8 +4,9 @@
 
 #include "../server.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 void engine::free_memory_if_needed()
 {
@@ -143,4 +144,7 @@ void engine::evict_key(const std::string& key)
     argv_t cl = { "DEL", key };
     db()->del_key_with_expire(key);
     __server->append_write_command(cl, nullptr, 0);
+}
+
+}
 }

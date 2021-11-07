@@ -9,7 +9,7 @@
 #include "client.h"
 #include "util.h"
 
-using namespace alice;
+namespace alice {
 
 void client::send_request()
 {
@@ -142,6 +142,10 @@ next:
     if (flags == PROTOCOLERR) return;
     if (buf.readable() > 0) goto next;
 }
+
+}
+
+using namespace alice;
 
 void completion(const char *buf, linenoiseCompletions *lc);
 char *hints(const char *buf, int *color, int *bold);

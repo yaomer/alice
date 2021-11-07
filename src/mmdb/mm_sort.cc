@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 // sort目前只支持list和set
 // SORT key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern ...]]
@@ -25,20 +26,18 @@ using namespace alice::mmdb;
 #define SORT_GET_VAL    0x200
 #define SORT_NOT        0x400
 
-namespace alice {
-    thread_local std::unordered_map<std::string, int> sortops = {
-        { "BY",     SORT_BY },
-        { "LIMIT",  SORT_LIMIT },
-        { "GET",    SORT_GET },
-        { "ASC",    SORT_ASC },
-        { "DESC",   SORT_DESC },
-        { "ALPHA",  SORT_ALPHA },
-        { "STORE",  SORT_STORE },
-    };
+thread_local std::unordered_map<std::string, int> sortops = {
+    { "BY",     SORT_BY },
+    { "LIMIT",  SORT_LIMIT },
+    { "GET",    SORT_GET },
+    { "ASC",    SORT_ASC },
+    { "DESC",   SORT_DESC },
+    { "ALPHA",  SORT_ALPHA },
+    { "STORE",  SORT_STORE },
+};
 
 template <typename T>
-class less {
-public:
+struct less {
     bool operator()(const sortobj& lhs, const sortobj& rhs) const
     {
         if (typeid(T) == typeid(std::string))
@@ -49,8 +48,7 @@ public:
 };
 
 template <typename T>
-class greater {
-public:
+struct greater {
     bool operator()(const sortobj& lhs, const sortobj& rhs) const
     {
         if (typeid(T) == typeid(std::string))
@@ -59,7 +57,6 @@ public:
             return lhs.u.score > rhs.u.score;
     }
 };
-}
 
 static int parse_sort_args(context_t& con, unsigned& cmdops, std::string& key,
                            std::string& by, std::string& des, std::vector<std::string>& getset,
@@ -173,9 +170,9 @@ static int sort_result(context_t& con, DB::sobj_list& result, unsigned cmdops)
 {
     if (cmdops & SORT_ALPHA) {
         if (cmdops & SORT_DESC)
-            std::sort(result.begin(), result.end(), alice::greater<std::string>());
+            std::sort(result.begin(), result.end(), greater<std::string>());
         else
-            std::sort(result.begin(), result.end(), alice::less<std::string>());
+            std::sort(result.begin(), result.end(), less<std::string>());
     } else {
         for (auto& it : result) {
             double v = str2f(*it.u.cmpval);
@@ -186,9 +183,9 @@ static int sort_result(context_t& con, DB::sobj_list& result, unsigned cmdops)
             it.u.score = v;
         }
         if (cmdops & SORT_DESC)
-            std::sort(result.begin(), result.end(), alice::greater<double>());
+            std::sort(result.begin(), result.end(), greater<double>());
         else
-            std::sort(result.begin(), result.end(), alice::less<double>());
+            std::sort(result.begin(), result.end(), less<double>());
     }
     return C_OK;
 }
@@ -284,4 +281,7 @@ end:
         else
             con.append(shared.nil);
     }
+}
+
+}
 }

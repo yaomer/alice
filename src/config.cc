@@ -2,13 +2,10 @@
 
 #include <stdio.h>
 
-using namespace alice;
-
 namespace alice {
 
-    server_conf_t server_conf;
-    sentinel_conf_t sentinel_conf;
-}
+server_conf_t server_conf;
+sentinel_conf_t sentinel_conf;
 
 static void error(const char *s)
 {
@@ -45,7 +42,7 @@ static bool parse_yes_or_no(const std::string& s, bool& option)
     return true;
 }
 
-void alice::read_server_conf(const std::string& filename)
+void read_server_conf(const std::string& filename)
 {
     auto paramlist = parse_conf(filename.c_str());
     for (auto& it : paramlist) {
@@ -154,7 +151,7 @@ void alice::read_server_conf(const std::string& filename)
     }
 }
 
-void alice::read_sentinel_conf(const std::string& filename)
+void read_sentinel_conf(const std::string& filename)
 {
     auto paramlist = parse_conf(filename.c_str());
     for(auto& it : paramlist) {
@@ -247,4 +244,6 @@ void dbserver::config(context_t& con)
         set_config(con);
     } else
         con.append(shared.subcommand_err);
+}
+
 }

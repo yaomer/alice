@@ -2,8 +2,9 @@
 
 #include "../server.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 // L(R)PUSH key value [value ...]
 void DB::_lpush(context_t& con, bool is_lpush)
@@ -438,4 +439,7 @@ void DB::set_context_to_block(context_t& con, int timeout)
     con.block_start_time = angel::util::get_cur_time_ms();
     con.blocked_time = timeout * 1000;
     engine->add_block_client(con.conn->id());
+}
+
+}
 }

@@ -4,16 +4,13 @@
 
 #include <dirent.h>
 
-using namespace alice;
-using namespace alice::ssdb;
+namespace alice {
+
+namespace ssdb {
 
 #define BIND(f) std::bind(&DB::f, db.get(), std::placeholders::_1)
 
-namespace alice {
-    namespace ssdb {
-        builtin_keys_t builtin_keys;
-    }
-}
+builtin_keys_t builtin_keys;
 
 void engine::server_cron()
 {
@@ -572,4 +569,7 @@ uint64_t DB::get_next_seq()
     s = db->Put(leveldb::WriteOptions(), builtin_keys.seq, i2s(seq + 1));
     assert(s.ok());
     return seq;
+}
+
+}
 }

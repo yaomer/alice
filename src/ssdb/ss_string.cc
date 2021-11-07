@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::ssdb;
+namespace alice {
+
+namespace ssdb {
 
 static inline std::string
 encode_string_meta_value()
@@ -360,4 +361,7 @@ void DB::rename_string_key(leveldb::WriteBatch *batch, const key_t& key,
     batch->Put(encode_string_key(newkey), value);
     batch->Delete(encode_meta_key(key));
     batch->Delete(encode_string_key(key));
+}
+
+}
 }

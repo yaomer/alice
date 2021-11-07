@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 // HSET key field value
 void DB::hset(context_t& con)
@@ -261,4 +262,7 @@ void DB::hvals(context_t& con)
 void DB::hgetall(context_t& con)
 {
     _hget(con, HGETALL);
+}
+
+}
 }

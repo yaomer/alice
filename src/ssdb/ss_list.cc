@@ -2,8 +2,9 @@
 
 #include "../server.h"
 
-using namespace alice;
-using namespace alice::ssdb;
+namespace alice {
+
+namespace ssdb {
 
 // list-meta-value: [type][lindex][:][rindex][:][size]
 // range: [lindex, rindex]
@@ -732,4 +733,7 @@ int keycomp::list_compare(const leveldb::Slice& l, const leveldb::Slice& r) cons
     if (res) return res;
     auto i1 = atoll(s1 + 1), i2 = atoll(s2 + 1);
     return i1 - i2;
+}
+
+}
 }

@@ -17,23 +17,21 @@
 #include "internal.h"
 #include "rdb.h"
 
-using namespace alice;
-using namespace alice::mmdb;
-
 namespace alice {
 
-    static unsigned char magic[5] = { 0x41, 0x4c, 0x49, 0x43, 0x45 };
-    static unsigned char select_db = 0xfe;
-    static unsigned char eof = 0xff;
-    static unsigned char string_type = 0;
-    static unsigned char list_type = 1;
-    static unsigned char set_type = 2;
-    static unsigned char hash_type = 3;
-    static unsigned char zset_type = 4;
-    static unsigned char expire_key = 5;
-    static unsigned char compress_value = 0;
-    static unsigned char uncompress_value = 1;
-}
+namespace mmdb {
+
+static unsigned char magic[5] = { 0x41, 0x4c, 0x49, 0x43, 0x45 };
+static unsigned char select_db = 0xfe;
+static unsigned char eof = 0xff;
+static unsigned char string_type = 0;
+static unsigned char list_type = 1;
+static unsigned char set_type = 2;
+static unsigned char hash_type = 3;
+static unsigned char zset_type = 4;
+static unsigned char expire_key = 5;
+static unsigned char compress_value = 0;
+static unsigned char uncompress_value = 1;
 
 // <key>: <key-len><key>
 // <value>: <uncompress><origin-len><origin-value>
@@ -392,4 +390,7 @@ void Rdb::uncompress(const char *compressed, size_t compressed_len,
                      std::string *origin)
 {
     snappy::Uncompress(compressed, compressed_len, origin);
+}
+
+}
 }

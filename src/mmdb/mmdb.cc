@@ -8,8 +8,9 @@
 
 #include <fcntl.h>
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 using std::placeholders::_1;
 
@@ -615,4 +616,7 @@ void DB::check_expire(const key_t& key)
     del_key_with_expire(key);
     argv_t argv = { "DEL", key };
     __server->append_write_command(argv, nullptr, 0);
+}
+
+}
 }

@@ -1,7 +1,8 @@
 #include "internal.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 // SET key value [EX seconds|PX milliseconds] [NX|XX]
 void DB::set(context_t& con)
@@ -231,4 +232,7 @@ void DB::getrange(context_t& con)
         return;
     auto result = value.substr(start, stop - start + 1);
     con.append_reply_string(result);
+}
+
+}
 }

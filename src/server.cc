@@ -4,14 +4,11 @@
 #include "sentinel.h"
 #include "util.h"
 
-using namespace alice;
-
 namespace alice {
 
-    shared_obj shared;
-    int64_t lru_clock = angel::util::get_cur_time_ms();
-    dbserver *__server;
-}
+shared_obj shared;
+int64_t lru_clock = angel::util::get_cur_time_ms();
+dbserver *__server;
 
 void dbserver::executor(context_t& con, const char *query, size_t len)
 {
@@ -758,6 +755,8 @@ void dbserver::start()
     server.start();
 }
 
+}
+
 ///////////////////////main function/////////////////////////////
 
 #include <getopt.h>
@@ -774,6 +773,8 @@ static void help()
                     "   --sentinel    \t/path/to/sentinel.conf\n");
     exit(1);
 }
+
+using namespace alice;
 
 int main(int argc, char *argv[])
 {

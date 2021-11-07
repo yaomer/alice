@@ -9,8 +9,9 @@
 #include "internal.h"
 #include "aof.h"
 
-using namespace alice;
-using namespace alice::mmdb;
+namespace alice {
+
+namespace mmdb {
 
 Aof::Aof(mmdb::engine *engine)
     : engine(engine),
@@ -307,4 +308,7 @@ bool Aof::can_rewrite()
 {
     return cur_file_size >= rewrite_min_filesize &&
            cur_file_size >= last_rewrite_file_size * rewrite_rate;
+}
+
+}
 }
