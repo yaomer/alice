@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <string>
+#include <numeric>
 
 #include "db_base.h"
 #include "util.h"
@@ -313,7 +314,7 @@ int save_len(std::string& s, uint64_t len)
         buf[1] = len & 0xff;
         APPEND(buf, 2);
         write_bytes = 2;
-    } else if (len <= UINT32_MAX) {
+    } else if (len <= std::numeric_limits<uint32_t>().max()) {
         buf[0] = __32bit_len;
         APPEND(buf, 1);
         uint32_t len32 = htonl(len);
@@ -322,7 +323,8 @@ int save_len(std::string& s, uint64_t len)
     } else {
         buf[0] = __64bit_len;
         APPEND(buf, 1);
-        APPEND(&len, 8);
+        uint64_t len64 = angel::sockops::hton64(len);
+        APPEND(&len64, 8);
         write_bytes = 1 + 8;
     }
     return write_bytes;
@@ -349,7 +351,8 @@ int load_len(char *ptr, uint64_t *lenptr)
         *lenptr = ntohl(len32);
         read_bytes = 5;
     } else {
-        *lenptr = *reinterpret_cast<uint64_t*>(&ptr[1]);
+        uint64_t len64 = *reinterpret_cast<uint64_t*>(&ptr[1]);
+        *lenptr = angel::sockops::ntoh64(len64);
         read_bytes = 8;
     }
     return read_bytes;
