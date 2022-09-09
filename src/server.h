@@ -46,7 +46,7 @@ public:
         server.set_close_handler([this](const angel::connection_ptr& conn){
                 this->close_handler(conn);
                 });
-        server.set_task_thread_nums(1);
+        server.start_task_threads(1);
         run_id = generate_run_id();
     }
     void connection_handler(const angel::connection_ptr& conn)
