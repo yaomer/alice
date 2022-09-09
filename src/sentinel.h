@@ -3,6 +3,7 @@
 
 #include <angel/server.h>
 #include <angel/client.h>
+#include <angel/util.h>
 
 #include <string>
 #include <memory>

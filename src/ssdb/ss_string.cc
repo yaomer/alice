@@ -1,3 +1,5 @@
+#include <angel/util.h>
+
 #include "internal.h"
 
 namespace alice {

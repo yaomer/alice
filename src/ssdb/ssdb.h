@@ -6,6 +6,8 @@
 #include <leveldb/comparator.h>
 #include <leveldb/cache.h>
 
+#include <angel/logger.h>
+
 #include <assert.h>
 #include <sys/stat.h>
 
