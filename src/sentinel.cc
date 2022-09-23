@@ -114,9 +114,7 @@ void Sentinel::start()
 // 向(master slave or sentinel)创建一条命令连接
 void SentinelInstance::creat_cmd_connection()
 {
-    angel::client_options ops;
-    ops.is_quit_loop = false;
-    client[0].reset(new angel::client(sentinel->loop, inet_addr, ops));
+    client[0].reset(new angel::client(sentinel->loop, inet_addr));
     client[0]->set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
             this->recv_reply_from_server(conn, buf);
             });
@@ -129,9 +127,7 @@ void SentinelInstance::creat_cmd_connection()
 // 向(master slave or sentinel)创建一条订阅连接
 void SentinelInstance::creat_sub_connection()
 {
-    angel::client_options ops;
-    ops.is_quit_loop = false;
-    client[1].reset(new angel::client(sentinel->loop, inet_addr, ops));
+    client[1].reset(new angel::client(sentinel->loop, inet_addr));
     client[1]->set_connection_handler([this](const angel::connection_ptr& conn){
             this->sentinel->sub_server(conn);
             });

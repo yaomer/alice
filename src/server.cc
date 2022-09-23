@@ -202,9 +202,7 @@ void dbserver::conv2resp_with_expire(std::string& buffer, const argv_t& argv,
 void dbserver::connect_master_server()
 {
     reset_connection_with_master();
-    angel::client_options ops;
-    ops.is_quit_loop = false;
-    master_cli.reset(new angel::client(loop, master_addr, ops));
+    master_cli.reset(new angel::client(loop, master_addr));
     master_cli->set_connection_handler([this](const angel::connection_ptr& conn){
             this->send_ping_to_master(conn);
             });

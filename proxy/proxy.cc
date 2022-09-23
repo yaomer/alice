@@ -15,9 +15,7 @@ Node::Node(Proxy *proxy, angel::inet_addr conn_addr)
         is_vnode = true;
         return;
     }
-    angel::client_options ops;
-    ops.is_quit_loop = false;
-    client.reset(new angel::client(proxy->loop, conn_addr, ops));
+    client.reset(new angel::client(proxy->loop, conn_addr));
     client->set_message_handler([this](const angel::connection_ptr& conn, angel::buffer& buf){
             this->forward_response_to_client(conn, buf);
             });
