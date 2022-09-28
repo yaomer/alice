@@ -216,34 +216,6 @@ int fwrite(int fd, const char *buf, size_t nbytes)
     return 0;
 }
 
-conf_param_list parse_conf(const char *filename)
-{
-    char buf[1024];
-    FILE *fp = fopen(filename, "r");
-    if (!fp) {
-        fprintf(stderr, "open %s error: %s", filename, angel::util::strerrno());
-        abort();
-    }
-    conf_param_list paramlist;
-    while (fgets(buf, sizeof(buf), fp)) {
-        const char *s = buf;
-        const char *es = buf + strlen(buf);
-        argv_t param;
-        do {
-            s = std::find_if_not(s, es, isspace);
-            if (s == es || s[0] == '#') break;
-            const char *p = std::find_if(s, es, isspace);
-            assert(p != es);
-            param.emplace_back(s, p);
-            s = p + 1;
-        } while (true);
-        if (!param.empty())
-            paramlist.emplace_back(param);
-    }
-    fclose(fp);
-    return paramlist;
-}
-
 off_t get_filesize(int fd)
 {
     struct stat st;

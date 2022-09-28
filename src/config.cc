@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 
+#include <angel/util.h>
+
 namespace alice {
 
 server_conf_t server_conf;
@@ -44,7 +46,7 @@ static bool parse_yes_or_no(const std::string& s, bool& option)
 
 void read_server_conf(const std::string& filename)
 {
-    auto paramlist = parse_conf(filename.c_str());
+    auto paramlist = angel::util::parse_conf(filename.c_str());
     for (auto& it : paramlist) {
         if (strcasecmp(it[0].c_str(), "port") == 0) {
             server_conf.port = atoi(it[1].c_str());
@@ -153,7 +155,7 @@ void read_server_conf(const std::string& filename)
 
 void read_sentinel_conf(const std::string& filename)
 {
-    auto paramlist = parse_conf(filename.c_str());
+    auto paramlist = angel::util::parse_conf(filename.c_str());
     for(auto& it : paramlist) {
         if (strcasecmp(it[1].c_str(), "ip") == 0) {
             sentinel_conf.ip = it[2];
